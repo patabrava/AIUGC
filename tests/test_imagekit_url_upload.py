@@ -3,6 +3,8 @@
 from types import SimpleNamespace
 from hashlib import sha256
 
+import pytest
+
 from app.adapters import storage_client as storage_client_module
 
 
@@ -12,6 +14,9 @@ class FakeS3Client:
 
     def put_object(self, **kwargs):
         self.calls.append(kwargs)
+
+    def generate_presigned_url(self, *_args, **_kwargs):
+        return "https://r2-upload.example.invalid/signed"
 
     def head_object(self, *, Bucket, Key):
         uploaded = next(
@@ -161,3 +166,87 @@ def test_upload_image_to_cloudflare_r2(monkeypatch):
     assert result["storage_provider"] == "cloudflare_r2"
     assert result["storage_key"].startswith("Lippe Lift Studio/images/")
     assert result["url"].startswith("https://cdn.example.com/Lippe%20Lift%20Studio/images/")
+
+
+def test_prepare_image_upload_keeps_a_retry_on_one_deterministic_object(monkeypatch):
+    fake_s3 = FakeS3Client()
+    client = _build_client(monkeypatch, fake_s3)
+    relative_key = "semantic-scene-images/post-1/run-1/candidate-1.png"
+
+    first = client.prepare_image_upload(
+        file_name="candidate.png",
+        object_key=relative_key,
+    )
+    second = client.prepare_image_upload(
+        file_name="candidate.png",
+        object_key=relative_key,
+    )
+    uploaded = client.upload_image(
+        image_bytes=b"same-rendered-image",
+        file_name="candidate.png",
+        object_key=relative_key,
+    )
+
+    assert first == second
+    assert uploaded["storage_key"] == first["storage_key"]
+    assert uploaded["url"] == first["url"]
+    assert fake_s3.calls[0]["Key"] == first["storage_key"]
+
+
+def test_deadline_bounded_image_upload_uses_cancellable_presigned_put(
+    monkeypatch,
+):
+    fake_s3 = FakeS3Client()
+    deadline_calls = []
+
+    monkeypatch.setattr(storage_client_module, "get_settings", _make_fake_settings)
+    monkeypatch.setattr(
+        storage_client_module.boto3, "client", lambda *_args, **_kwargs: fake_s3
+    )
+    monkeypatch.setattr(
+        storage_client_module,
+        "_put_presigned_image_with_deadline",
+        lambda **kwargs: deadline_calls.append(kwargs),
+    )
+    storage_client_module.StorageClient._instance = None
+    client = storage_client_module.get_storage_client()
+
+    client.upload_image(
+        image_bytes=b"image-bytes",
+        file_name="bounded.png",
+        timeout_seconds=20.0,
+    )
+
+    assert deadline_calls[0]["timeout_seconds"] == 20.0
+    assert deadline_calls[0]["image_bytes"] == b"image-bytes"
+    assert fake_s3.calls == []
+
+
+def test_deadline_image_put_cancels_by_absolute_wall_clock(monkeypatch):
+    import asyncio
+    import time
+
+    class SlowClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def put(self, *_args, **_kwargs):
+            await asyncio.sleep(1)
+
+    monkeypatch.setattr(
+        storage_client_module.httpx,
+        "AsyncClient",
+        lambda **_kwargs: SlowClient(),
+    )
+    started = time.monotonic()
+    with pytest.raises(TimeoutError, match="absolute deadline"):
+        storage_client_module._put_presigned_image_with_deadline(
+            url="https://r2.invalid/signed",
+            image_bytes=b"image",
+            content_type="image/png",
+            timeout_seconds=0.02,
+        )
+    assert time.monotonic() - started < 0.5

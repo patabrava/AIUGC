@@ -34,6 +34,83 @@ jobs:
           test -n "$PROD_MAGNIFIC_API_KEY" || { echo "Missing PROD_MAGNIFIC_API_KEY GitHub secret."; exit 1; }
           test -n "$PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64" || { echo "Missing PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64 GitHub secret."; exit 1; }
 
+      - name: Require scene-image database contract before cutover
+        run: |
+          python3 - <<'PY'
+          import base64
+          import json
+          import os
+          import urllib.request
+
+          def parse_env(text: str) -> dict[str, str]:
+              values: dict[str, str] = {}
+              for raw_line in text.splitlines():
+                  line = raw_line.strip()
+                  if not line or line.startswith("#") or "=" not in line:
+                      continue
+                  key, value = line.split("=", 1)
+                  key = key.strip()
+                  value = value.strip()
+                  if value[:1] == value[-1:] == '"':
+                      try:
+                          value = json.loads(value)
+                      except json.JSONDecodeError:
+                          value = value[1:-1]
+                  elif value[:1] == value[-1:] == "'":
+                      value = value[1:-1]
+                  values[key] = value
+              return values
+
+          values = parse_env(
+              base64.b64decode(os.environ["PROD_ENV_FILE_B64"]).decode()
+          )
+          base_url = values.get("SUPABASE_URL", "").rstrip("/")
+          service_key = (
+              values.get("SUPABASE_SERVICE_KEY")
+              or values.get("SUPABASE_SERVICE_ROLE_KEY")
+              or values.get("SUPABASE_KEY")
+              or ""
+          )
+          if not base_url or not service_key:
+              raise SystemExit(
+                  "Production Supabase URL/service key is required for the migration preflight."
+              )
+          headers = {
+              "Authorization": f"Bearer {service_key}",
+              "apikey": service_key,
+          }
+
+          table_request = urllib.request.Request(
+              f"{base_url}/rest/v1/semantic_scene_image_jobs"
+              "?select=batch_id,expected_run_id,max_attempts,provider_attempt_count,deadline_at,heartbeat_at&limit=1",
+              headers=headers,
+          )
+          with urllib.request.urlopen(table_request, timeout=20) as response:
+              response.read()
+
+          openapi_request = urllib.request.Request(
+              f"{base_url}/rest/v1/",
+              headers={**headers, "Accept": "application/openapi+json"},
+          )
+          with urllib.request.urlopen(openapi_request, timeout=20) as response:
+              paths = json.loads(response.read().decode()).get("paths", {})
+          required_rpcs = {
+              "/rpc/renew_semantic_scene_image",
+              "/rpc/authorize_semantic_scene_image_provider_attempt",
+              "/rpc/reserve_semantic_scene_image_candidates",
+              "/rpc/finalize_semantic_scene_image_job",
+              "/rpc/heartbeat_semantic_scene_image_worker",
+              "/rpc/probe_semantic_scene_image_queue",
+          }
+          missing = sorted(required_rpcs.difference(paths))
+          if missing:
+              raise SystemExit(
+                  "Production scene-image migration is missing required RPC contracts: "
+                  + ", ".join(missing)
+              )
+          print("Production scene-image database contract is ready for code cutover.")
+          PY
+
       - name: Resolve immutable image reference
         id: image
         run: |
@@ -364,9 +441,25 @@ jobs:
           import urllib.request
 
           with urllib.request.urlopen("https://lippelift.xyz/livez", timeout=20) as response:
-              payload = json.loads(response.read().decode("utf-8"))
-          routes = payload.get("video_routes") or {}
+              live_payload = json.loads(response.read().decode("utf-8"))
+          if live_payload.get("environment") != "production":
+              raise SystemExit(f"Production liveness returned the wrong environment: {live_payload}")
+          routes = live_payload.get("video_routes") or {}
           if routes.get("segmented_route_enabled") is not True or routes.get("tier_32_route") != "veo_segmented":
               raise SystemExit(f"Production video routing is not segmented: {routes}")
           print(f"Production video routing verified: {routes}")
+
+          with urllib.request.urlopen("https://lippelift.xyz/health", timeout=20) as response:
+              health_payload = json.loads(response.read().decode("utf-8"))
+          checks = health_payload.get("checks") or {}
+          if (
+              health_payload.get("status") != "healthy"
+              or health_payload.get("environment") != "production"
+              or checks.get("database") != "ok"
+              or checks.get("semantic_scene_image_worker") != "ok"
+          ):
+              raise SystemExit(
+                  f"Production readiness contract is incomplete: {health_payload}"
+              )
+          print("Production database and semantic scene-image worker readiness verified.")
           PY

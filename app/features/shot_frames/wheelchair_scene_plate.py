@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from io import BytesIO
 import math
 import os
@@ -55,6 +56,20 @@ _PERCEPTUAL_HASH_HEIGHT = 16
 _NEAR_DUPLICATE_HASH_DISTANCE = 8
 _NEAR_DUPLICATE_MEAN_RGB_DELTA = 3.0
 _PROVIDER_MAX_ATTEMPTS = 3
+_SINGLE_IMAGE_PROVIDER_MAX_ATTEMPTS = max(
+    1,
+    min(
+        _PROVIDER_MAX_ATTEMPTS,
+        int(os.environ.get("SEMANTIC_SCENE_IMAGE_PROVIDER_MAX_ATTEMPTS", "2")),
+    ),
+)
+_SCENE_PLATE_PROVIDER_TIMEOUT_SECONDS = max(
+    30.0,
+    min(
+        240.0,
+        float(os.environ.get("SEMANTIC_SCENE_IMAGE_PROVIDER_TIMEOUT_SECONDS", "120")),
+    ),
+)
 _TRANSIENT_PROVIDER_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 _SCENE_PLATE_IMAGE_MAX_CONCURRENCY = max(
     1, int(os.environ.get("SEMANTIC_SCENE_PLATE_MAX_CONCURRENCY", "1"))
@@ -74,6 +89,25 @@ _SCENE_PLATE_TRANSIENT_COOLDOWN_SECONDS = max(
 _SCENE_PLATE_BUNDLE_ENABLED = os.environ.get(
     "SEMANTIC_SCENE_PLATE_BUNDLE_ENABLED", "false"
 ).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _deadline_timeout(
+    *, deadline_at: Optional[datetime], cap_seconds: float, reserve_seconds: float
+) -> float:
+    if deadline_at is None:
+        return cap_seconds
+    normalized_deadline = deadline_at
+    if normalized_deadline.tzinfo is None:
+        normalized_deadline = normalized_deadline.replace(tzinfo=timezone.utc)
+    available = (
+        normalized_deadline - datetime.now(timezone.utc)
+    ).total_seconds() - reserve_seconds
+    if available < 5.0:
+        raise ThirdPartyError(
+            "Scene-image generation reached its durable deadline.",
+            {"status_code": 408, "reason_code": "scene_image_deadline"},
+        )
+    return max(5.0, min(float(cap_seconds), available))
 
 
 class _ScenePlateImageTrafficGate:
@@ -107,31 +141,64 @@ class _ScenePlateImageTrafficGate:
             waiter for waiter, key in self._pending if key == target_key
         )
 
-    def acquire(self, traffic_key: str) -> None:
+    def acquire(
+        self,
+        traffic_key: str,
+        *,
+        deadline_at: Optional[datetime] = None,
+        execution_guard: Optional[Callable[[], None]] = None,
+    ) -> None:
         waiter = object()
         normalized_key = str(traffic_key or "semantic-scene-plate")
         with self._condition:
             self._pending.append((waiter, normalized_key))
-            while True:
-                now = time.monotonic()
-                ready_at = max(self._next_start_at, self._cooldown_until)
-                if (
-                    self._next_waiter_locked() is waiter
-                    and self._active < self._current_limit
-                    and now >= ready_at
-                ):
+            try:
+                while True:
+                    if execution_guard is not None:
+                        execution_guard()
+                    now = time.monotonic()
+                    ready_at = max(self._next_start_at, self._cooldown_until)
+                    if (
+                        self._next_waiter_locked() is waiter
+                        and self._active < self._current_limit
+                        and now >= ready_at
+                    ):
+                        self._pending = [
+                            item for item in self._pending if item[0] is not waiter
+                        ]
+                        self._active += 1
+                        self._last_started_key = normalized_key
+                        self._next_start_at = (
+                            now + self._adaptive_start_interval_seconds
+                        )
+                        self._condition.notify_all()
+                        return
+                    timeout = max(0.05, min(1.0, ready_at - now))
+                    if deadline_at is not None:
+                        normalized_deadline = deadline_at
+                        if normalized_deadline.tzinfo is None:
+                            normalized_deadline = normalized_deadline.replace(
+                                tzinfo=timezone.utc
+                            )
+                        available = (
+                            normalized_deadline - datetime.now(timezone.utc)
+                        ).total_seconds() - 50.0
+                        if available < 5.0:
+                            raise ThirdPartyError(
+                                "Scene-image traffic wait reached the durable deadline.",
+                                {
+                                    "status_code": 408,
+                                    "reason_code": "scene_image_deadline",
+                                },
+                            )
+                        timeout = min(timeout, available)
+                    self._condition.wait(timeout=timeout)
+            finally:
+                if any(item[0] is waiter for item in self._pending):
                     self._pending = [
                         item for item in self._pending if item[0] is not waiter
                     ]
-                    self._active += 1
-                    self._last_started_key = normalized_key
-                    self._next_start_at = (
-                        now + self._adaptive_start_interval_seconds
-                    )
                     self._condition.notify_all()
-                    return
-                timeout = max(0.05, min(1.0, ready_at - now))
-                self._condition.wait(timeout=timeout)
 
     def release(self, *, succeeded: bool, status_code: Optional[int]) -> None:
         with self._condition:
@@ -421,6 +488,10 @@ def generate_scene_plate(
     image_model: str = "gemini-3.1-flash-image",
     image_size: str = "2K",
     traffic_key: Optional[str] = None,
+    provider_timeout_seconds: Optional[float] = None,
+    deadline_at: Optional[datetime] = None,
+    execution_guard: Optional[Callable[[], None]] = None,
+    provider_attempt_callback: Optional[Callable[[], None]] = None,
 ) -> dict[str, Any]:
     if len(references) != 3 or tuple(item.role for item in references) != _REFERENCE_ROLES:
         raise ValidationError(
@@ -440,9 +511,40 @@ def generate_scene_plate(
     if not normalized_prompt:
         raise ValidationError("Scene-plate generation requires a prompt.")
 
+    if execution_guard is not None:
+        execution_guard()
     client = llm_client or get_llm_client()
-    renderer_prompt = write_raw_camera_image_prompt(client=client, brief=normalized_prompt)
+    renderer_prompt = write_raw_camera_image_prompt(
+        client=client,
+        brief=normalized_prompt,
+        timeout_seconds=(
+            _deadline_timeout(
+                deadline_at=deadline_at,
+                cap_seconds=45.0,
+                reserve_seconds=80.0,
+            )
+            if deadline_at is not None
+            else None
+        ),
+    )
+    provider_timeout_cap = min(
+        _SCENE_PLATE_PROVIDER_TIMEOUT_SECONDS,
+        max(30.0, float(provider_timeout_seconds))
+        if provider_timeout_seconds is not None
+        else _SCENE_PLATE_PROVIDER_TIMEOUT_SECONDS,
+    )
     def render() -> dict[str, Any]:
+        if provider_attempt_callback is not None:
+            provider_attempt_callback()
+        # Authorization may itself block. Recheck the lease and recompute the
+        # deadline immediately before starting the paid provider request.
+        if execution_guard is not None:
+            execution_guard()
+        effective_provider_timeout = _deadline_timeout(
+            deadline_at=deadline_at,
+            cap_seconds=provider_timeout_cap,
+            reserve_seconds=50.0,
+        )
         return client.generate_gemini_image(
             prompt=renderer_prompt,
             model=image_model,
@@ -453,10 +555,15 @@ def generate_scene_plate(
             # Scene-plate retries are coordinated by the adaptive traffic gate.
             # Disabling the adapter's nested retry prevents retry storms.
             provider_max_attempts=1,
+            provider_timeout_seconds=effective_provider_timeout,
         )
     if not traffic_key:
         return render()
-    _SCENE_PLATE_IMAGE_TRAFFIC_GATE.acquire(traffic_key)
+    _SCENE_PLATE_IMAGE_TRAFFIC_GATE.acquire(
+        traffic_key,
+        deadline_at=deadline_at,
+        execution_guard=execution_guard,
+    )
     try:
         result = render()
     except ThirdPartyError as exc:
@@ -601,6 +708,10 @@ def generate_scene_plate_candidates(
     progress_callback: Optional[
         Callable[[str, Mapping[str, Any]], None]
     ] = None,
+    provider_timeout_seconds: Optional[float] = None,
+    deadline_at: Optional[datetime] = None,
+    execution_guard: Optional[Callable[[], None]] = None,
+    provider_attempt_callback: Optional[Callable[[], None]] = None,
 ) -> ScenePlateGenerationResult:
     """Generate one identity-locked plate, optionally derived from an approved anchor."""
     if len(actor_references) != 2:
@@ -676,6 +787,10 @@ def generate_scene_plate_candidates(
             image_model=image_model,
             image_size=image_size,
             traffic_key=traffic_key,
+            provider_timeout_seconds=provider_timeout_seconds,
+            deadline_at=deadline_at,
+            execution_guard=execution_guard,
+            provider_attempt_callback=provider_attempt_callback,
         )
         if scene_plate_has_composite_layout(generated["image_bytes"]):
             raise ThirdPartyError(
@@ -715,12 +830,19 @@ def generate_scene_plate_candidates(
         specification: tuple[int, int],
     ) -> ScenePlateCandidate:
         candidate_index, diversity_attempt = specification
-        for provider_attempt in range(1, _PROVIDER_MAX_ATTEMPTS + 1):
+        provider_attempt_limit = (
+            _SINGLE_IMAGE_PROVIDER_MAX_ATTEMPTS
+            if candidate_count == 1
+            else _PROVIDER_MAX_ATTEMPTS
+        )
+        for provider_attempt in range(1, provider_attempt_limit + 1):
+            if execution_guard is not None:
+                execution_guard()
             try:
                 candidate = generate_candidate_once(specification)
             except ThirdPartyError as exc:
                 if (
-                    provider_attempt >= _PROVIDER_MAX_ATTEMPTS
+                    provider_attempt >= provider_attempt_limit
                     or not _is_retryable_provider_error(exc)
                 ):
                     raise
@@ -734,6 +856,8 @@ def generate_scene_plate_candidates(
                 )
                 continue
             if candidate_ready_callback is not None and not defer_complete_set_callback:
+                if execution_guard is not None:
+                    execution_guard()
                 # Persistence is deliberately outside the provider retry loop:
                 # a storage/checkpoint failure must not purchase another image.
                 candidate_ready_callback(candidate)

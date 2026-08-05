@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
+from contextlib import contextmanager
 import json
 import math
 import os
@@ -34,6 +36,113 @@ _VERTEX_GENERATE_CONTENT_MAX_ATTEMPTS = 4
 _VERTEX_RETRY_BASE_SECONDS = 0.5
 _VERTEX_RETRY_MAX_SECONDS = 8.0
 _VERTEX_TRANSIENT_HTTP_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+_VERTEX_CAPACITY_WAIT_SECONDS = 15.0
+
+
+class _DeadlineBoundAuthRequest:
+    """Clamp every Google-auth transport call to one absolute deadline."""
+
+    def __init__(self, deadline_at: float):
+        self._deadline_at = float(deadline_at)
+        self._request = Request()
+
+    def __call__(self, *args, timeout=120, **kwargs):
+        remaining = self._deadline_at - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Google credential refresh exceeded its absolute deadline")
+        try:
+            requested_timeout = float(timeout)
+        except (TypeError, ValueError):
+            requested_timeout = remaining
+        return self._request(
+            *args,
+            timeout=max(0.05, min(requested_timeout, remaining)),
+            **kwargs,
+        )
+
+
+def _vertex_capacity_budget_seconds(timeout_seconds: float) -> float:
+    return min(5.0, max(0.25, float(timeout_seconds) * 0.08))
+
+
+def _vertex_http_timeout(total_seconds: float) -> httpx.Timeout:
+    """Allocate a total call budget across independent httpx phase limits."""
+    total = max(1.0, float(total_seconds))
+    capacity = _vertex_capacity_budget_seconds(total)
+    pool = min(1.0, max(0.1, total * 0.02))
+    network = max(0.3, total - capacity - pool)
+    connect = min(10.0, max(0.1, network * 0.12))
+    write = min(15.0, max(0.1, network * 0.18))
+    read = max(0.1, network - connect - write)
+    return httpx.Timeout(connect=connect, read=read, write=write, pool=pool)
+
+
+async def _async_vertex_post_with_deadline(
+    *,
+    url: str,
+    headers: Dict[str, str],
+    payload: Dict[str, Any],
+    timeout_seconds: float,
+) -> httpx.Response:
+    async with httpx.AsyncClient(
+        http2=False,
+        follow_redirects=True,
+        limits=httpx.Limits(max_connections=1, max_keepalive_connections=0),
+        timeout=_vertex_http_timeout(timeout_seconds),
+    ) as client:
+        return await asyncio.wait_for(
+            client.post(url, headers=headers, json=payload),
+            timeout=max(0.1, float(timeout_seconds)),
+        )
+
+
+def _vertex_post_with_deadline(
+    *,
+    url: str,
+    headers: Dict[str, str],
+    payload: Dict[str, Any],
+    timeout_seconds: float,
+) -> httpx.Response:
+    """Run one request under a cancellable absolute wall-clock deadline."""
+    try:
+        return asyncio.run(
+            _async_vertex_post_with_deadline(
+                url=url,
+                headers=headers,
+                payload=payload,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+    except TimeoutError as exc:
+        raise httpx.TimeoutException(
+            "Vertex Gemini request exceeded its absolute deadline"
+        ) from exc
+
+
+@contextmanager
+def _vertex_request_slot(*, timeout_seconds: Optional[float] = None):
+    """Bound queue wait for deadline-aware requests before network I/O starts."""
+    if timeout_seconds is None:
+        acquired = _VERTEX_REQUEST_SEMAPHORE.acquire()
+    else:
+        acquired = _VERTEX_REQUEST_SEMAPHORE.acquire(
+            timeout=min(
+                _VERTEX_CAPACITY_WAIT_SECONDS,
+                _vertex_capacity_budget_seconds(float(timeout_seconds)),
+            )
+        )
+    if not acquired:
+        raise ThirdPartyError(
+            message="Vertex Gemini request capacity wait timed out",
+            details={
+                "reason_code": "provider_capacity_timeout",
+                "status_code": 503,
+            },
+        )
+    try:
+        yield
+    finally:
+        _VERTEX_REQUEST_SEMAPHORE.release()
 
 
 def _vertex_retry_delay_seconds(*, attempt: int, response: Optional[Any] = None) -> float:
@@ -133,6 +242,8 @@ class VertexGeminiClient:
         input_images: Optional[List[Dict[str, Any]]] = None,
         input_media: Optional[List[Dict[str, Any]]] = None,
         location: Optional[str] = None,
+        timeout_seconds: Optional[float] = None,
+        provider_max_attempts: Optional[int] = None,
     ) -> str:
         target_model = model or self._settings.vertex_gemini_model
         payload = self._build_generate_content_payload(
@@ -149,6 +260,8 @@ class VertexGeminiClient:
             location=location or self._settings.vertex_ai_location,
             payload=payload,
             log_event="vertex_gemini_generate_text",
+            timeout_seconds=timeout_seconds,
+            max_attempts=provider_max_attempts,
         )
         return restore_german_umlauts(self._extract_candidate_text(data))
 
@@ -201,6 +314,7 @@ class VertexGeminiClient:
         image_size: str = "1K",
         input_images: Optional[List[Dict[str, Any]]] = None,
         provider_max_attempts: Optional[int] = None,
+        provider_timeout_seconds: Optional[float] = None,
     ) -> Dict[str, Any]:
         target_model = model or self._settings.vertex_gemini_image_model
         payload = self._build_generate_content_payload(
@@ -222,6 +336,7 @@ class VertexGeminiClient:
             payload=payload,
             log_event="vertex_gemini_generate_image",
             max_attempts=provider_max_attempts,
+            timeout_seconds=provider_timeout_seconds,
         )
         image_payload = self._extract_image_bytes(data)
         return {
@@ -360,6 +475,7 @@ class VertexGeminiClient:
         payload: Dict[str, Any],
         log_event: str,
         max_attempts: Optional[int] = None,
+        timeout_seconds: Optional[float] = None,
     ) -> Dict[str, Any]:
         self._ensure_configured()
         url = self._build_generate_content_url(model=model, location=location)
@@ -371,15 +487,37 @@ class VertexGeminiClient:
         )
         for attempt in range(attempt_limit):
             response = None
-            with _VERTEX_REQUEST_SEMAPHORE:
+            absolute_deadline = (
+                time.monotonic() + float(timeout_seconds)
+                if timeout_seconds is not None
+                else None
+            )
+            with _vertex_request_slot(timeout_seconds=timeout_seconds):
                 client = self._http_client
                 client_generation = self._http_client_generation
                 try:
-                    response = client.post(
-                        url,
-                        headers=self._build_headers(include_json=True),
-                        json=payload,
+                    headers = self._build_headers(
+                        include_json=True,
+                        deadline_at=absolute_deadline,
                     )
+                    if absolute_deadline is not None:
+                        remaining = absolute_deadline - time.monotonic()
+                        if remaining <= 0.1:
+                            raise httpx.TimeoutException(
+                                "Vertex Gemini capacity wait exhausted the request deadline"
+                            )
+                        response = _vertex_post_with_deadline(
+                            url=url,
+                            headers=headers,
+                            payload=payload,
+                            timeout_seconds=remaining,
+                        )
+                    else:
+                        response = client.post(
+                            url,
+                            headers=headers,
+                            json=payload,
+                        )
                 # Catch every transport-layer error (HTTP/2 stream errors,
                 # connection drops, socket-level ReadError, h2's KeyError on
                 # its stream tracker) and trigger a recycle + retry.
@@ -396,7 +534,8 @@ class VertexGeminiClient:
             if response is None:
                 # Outside the semaphore: rebuild the client (one thread wins;
                 # others piggy-back on the rebuilt instance), then back off.
-                self._recycle_http_client(client_generation)
+                if timeout_seconds is None:
+                    self._recycle_http_client(client_generation)
                 if attempt < attempt_limit - 1:
                     time.sleep(_vertex_retry_delay_seconds(attempt=attempt))
                     continue
@@ -557,37 +696,91 @@ class VertexGeminiClient:
                 {"vertex_ai_project_id": self._settings.vertex_ai_project_id},
             )
 
-    def _get_credentials(self):
-        with self._credentials_lock:
-            if self._credentials is None:
-                adc_path = resolve_google_application_credentials_path(self._settings)
-                if adc_path and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
-                    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = adc_path
-                project_id = self._settings.vertex_ai_project_id.strip()
-                if project_id:
-                    if not os.getenv("GOOGLE_CLOUD_PROJECT"):
-                        os.environ["GOOGLE_CLOUD_PROJECT"] = project_id
-                    if not os.getenv("GOOGLE_CLOUD_QUOTA_PROJECT"):
-                        os.environ["GOOGLE_CLOUD_QUOTA_PROJECT"] = project_id
-                try:
-                    self._credentials, _ = google.auth.default(
-                        scopes=["https://www.googleapis.com/auth/cloud-platform"],
-                        quota_project_id=project_id or None,
-                    )
-                except google.auth.exceptions.DefaultCredentialsError as exc:
-                    raise ValidationError(
-                        "No Google Cloud Application Default Credentials found. "
-                        "Run `gcloud auth application-default login` or set GOOGLE_APPLICATION_CREDENTIALS.",
-                        {"error": str(exc)},
-                    ) from exc
-                if project_id and hasattr(self._credentials, "with_quota_project"):
-                    self._credentials = self._credentials.with_quota_project(project_id)
-            if self._credentials.expired or not self._credentials.token:
-                self._credentials.refresh(Request())
-            return self._credentials
+    def _load_or_refresh_credentials(self, *, deadline_at: Optional[float] = None):
+        auth_request = (
+            _DeadlineBoundAuthRequest(deadline_at)
+            if deadline_at is not None
+            else Request()
+        )
+        if self._credentials is None:
+            adc_path = resolve_google_application_credentials_path(self._settings)
+            if adc_path and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = adc_path
+            project_id = self._settings.vertex_ai_project_id.strip()
+            if project_id:
+                if not os.getenv("GOOGLE_CLOUD_PROJECT"):
+                    os.environ["GOOGLE_CLOUD_PROJECT"] = project_id
+                if not os.getenv("GOOGLE_CLOUD_QUOTA_PROJECT"):
+                    os.environ["GOOGLE_CLOUD_QUOTA_PROJECT"] = project_id
+            try:
+                self._credentials, _ = google.auth.default(
+                    scopes=["https://www.googleapis.com/auth/cloud-platform"],
+                    request=auth_request,
+                    quota_project_id=project_id or None,
+                )
+            except google.auth.exceptions.DefaultCredentialsError as exc:
+                raise ValidationError(
+                    "No Google Cloud Application Default Credentials found. "
+                    "Run `gcloud auth application-default login` or set GOOGLE_APPLICATION_CREDENTIALS.",
+                    {"error": str(exc)},
+                ) from exc
+            if project_id and hasattr(self._credentials, "with_quota_project"):
+                self._credentials = self._credentials.with_quota_project(project_id)
+        if self._credentials.expired or not self._credentials.token:
+            self._credentials.refresh(auth_request)
+        return self._credentials
 
-    def _build_headers(self, include_json: bool = False) -> Dict[str, str]:
-        creds = self._get_credentials()
+    def _get_credentials(self, *, deadline_at: Optional[float] = None):
+        if deadline_at is None:
+            with self._credentials_lock:
+                return self._load_or_refresh_credentials()
+
+        remaining = float(deadline_at) - time.monotonic()
+        if remaining <= 0 or not self._credentials_lock.acquire(timeout=remaining):
+            raise httpx.TimeoutException(
+                "Vertex credential lock exceeded its absolute deadline"
+            )
+
+        result: Dict[str, Any] = {}
+        completed = threading.Event()
+
+        def load_credentials() -> None:
+            try:
+                result["credentials"] = self._load_or_refresh_credentials(
+                    deadline_at=deadline_at
+                )
+            except BaseException as exc:  # Propagate worker failures to the request thread.
+                result["error"] = exc
+            finally:
+                self._credentials_lock.release()
+                completed.set()
+
+        remaining = float(deadline_at) - time.monotonic()
+        if remaining <= 0:
+            self._credentials_lock.release()
+            raise httpx.TimeoutException(
+                "Vertex credential refresh exceeded its absolute deadline"
+            )
+        threading.Thread(
+            target=load_credentials,
+            name="vertex-credential-refresh",
+            daemon=True,
+        ).start()
+        if not completed.wait(timeout=remaining):
+            raise httpx.TimeoutException(
+                "Vertex credential refresh exceeded its absolute deadline"
+            )
+        if "error" in result:
+            raise result["error"]
+        return result["credentials"]
+
+    def _build_headers(
+        self,
+        include_json: bool = False,
+        *,
+        deadline_at: Optional[float] = None,
+    ) -> Dict[str, str]:
+        creds = self._get_credentials(deadline_at=deadline_at)
         headers = {"Authorization": f"Bearer {creds.token}"}
         quota_project_id = getattr(creds, "quota_project_id", None) or self._settings.vertex_ai_project_id
         if quota_project_id:

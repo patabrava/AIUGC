@@ -1,5 +1,18 @@
 (() => {
     const activePolls = new WeakMap();
+    const candidateProgressRequests = new WeakMap();
+    const sceneImageButtonDomainDisabled = new WeakMap();
+    const SCENE_IMAGE_POST_TIMEOUT_MS = 15000;
+    const RUN_PROGRESS_STAGES = [
+        'generating',
+        'transcript_qa',
+        'identity_qa',
+        'voice_qa',
+        'acoustic_qa',
+        'composing',
+        'captioning',
+        'uploading',
+    ];
 
     const field = (root, name) => root.querySelector(`[data-field="${name}"]`);
     const action = (root, name) => root.querySelector(`[data-action="${name}"]`);
@@ -21,20 +34,109 @@
         window.location.reload();
     }
 
-    function settleCandidateAction(root) {
-        root.dataset.waitingForCandidates = 'false';
-        root.dataset.candidateGenerationStatus = 'ready';
-        stopPolling(root);
-        const siblingBusy = Array.from(
-            document.querySelectorAll('[data-semantic-video-controller]'),
-        ).some((candidateRoot) => (
-            candidateRoot !== root
-            && (
-                candidateRoot.dataset.waitingForCandidates === 'true'
-                || candidateRoot.dataset.candidateGenerationStatus === 'generating'
-            )
+    function sceneImageWorkflow(root) {
+        return root.closest('[data-semantic-video-workflow]') || document;
+    }
+
+    function rememberSceneImageButton(button) {
+        if (button && !sceneImageButtonDomainDisabled.has(button)) {
+            const declaredDomainState = button.dataset.sceneImageDomainDisabled;
+            sceneImageButtonDomainDisabled.set(
+                button,
+                declaredDomainState === undefined
+                    ? button.disabled
+                    : declaredDomainState === 'true',
+            );
+        }
+    }
+
+    function syncSceneImageWorkflowGate(root) {
+        const workflow = sceneImageWorkflow(root);
+        const roots = Array.from(workflow.querySelectorAll('[data-semantic-video-controller]'));
+        const workflowBusy = roots.some((candidateRoot) => (
+            candidateRoot.dataset.waitingForCandidates === 'true'
+            || candidateRoot.dataset.candidateGenerationStatus === 'generating'
         ));
-        if (!siblingBusy) reloadAtWorkflow(root);
+        if (workflow?.dataset) {
+            workflow.dataset.sceneImageBusy = String(workflowBusy);
+        }
+        roots.forEach((candidateRoot) => {
+            const button = action(candidateRoot, 'generate-candidates');
+            if (!button) return;
+            rememberSceneImageButton(button);
+            const domainDisabled = sceneImageButtonDomainDisabled.get(button) === true;
+            button.disabled = domainDisabled || workflowBusy;
+            button.dataset.sceneImageWorkflowBlocked = String(workflowBusy && !domainDisabled);
+        });
+        return workflowBusy;
+    }
+
+    function showCandidateTerminal(root, status, message, isError) {
+        const candidatePanel = field(root, 'candidate-progress');
+        const candidateLabel = field(root, 'candidate-status-label');
+        const candidateDetail = field(root, 'candidate-status-detail');
+        const candidateSpinner = field(root, 'candidate-spinner');
+        const candidatePercent = field(root, 'candidate-percent');
+        const candidateProgressBar = field(root, 'candidate-progress-bar');
+        const progressSpinner = field(root, 'progress-spinner');
+        const progressMessage = field(root, 'progress-message');
+        const productionBusy = RUN_PROGRESS_STAGES.includes(root.dataset.stage);
+        const needsAttention = status === 'idle' || status === 'stalled';
+
+        root.setAttribute('aria-busy', String(productionBusy));
+        if (candidatePanel) {
+            candidatePanel.classList.remove('hidden');
+            candidatePanel.classList.toggle('border-amber-300', needsAttention);
+            candidatePanel.classList.toggle('bg-amber-50', needsAttention);
+        }
+        if (candidateLabel) {
+            candidateLabel.textContent = needsAttention
+                ? 'Generation needs attention'
+                : 'Ready for identity review';
+        }
+        if (candidateDetail && message) candidateDetail.textContent = message;
+        if (candidateSpinner) candidateSpinner.classList.add('hidden');
+        if (!productionBusy && progressSpinner) progressSpinner.classList.add('hidden');
+        if (!productionBusy && progressMessage && message) progressMessage.textContent = message;
+        if (status === 'idle') {
+            if (candidatePercent) candidatePercent.textContent = '0%';
+            if (candidateProgressBar) {
+                candidateProgressBar.style.width = '0%';
+                candidateProgressBar.setAttribute('aria-valuenow', '0');
+            }
+        } else if (status === 'ready') {
+            if (candidatePercent) candidatePercent.textContent = '100%';
+            if (candidateProgressBar) {
+                candidateProgressBar.style.width = '100%';
+                candidateProgressBar.setAttribute('aria-valuenow', '100');
+            }
+        }
+        if (message) setStatus(root, message, isError);
+    }
+
+    function finishCandidateAction(root, status, message = '', isError = false) {
+        root.dataset.candidateStartPending = 'false';
+        root.dataset.waitingForCandidates = 'false';
+        root.dataset.candidateGenerationStatus = status;
+        if (!RUN_PROGRESS_STAGES.includes(root.dataset.stage)) stopPolling(root);
+        showCandidateTerminal(root, status, message, isError);
+        const button = action(root, 'generate-candidates');
+        if (button) window.endActionFeedback(button);
+        const workflowBusy = syncSceneImageWorkflowGate(root);
+        return workflowBusy;
+    }
+
+    function settleCandidateAction(root, shouldReload = true, message = '') {
+        const workflowBusy = finishCandidateAction(root, 'ready', message);
+        if (shouldReload && !workflowBusy) reloadAtWorkflow(root);
+    }
+
+    function expectedSceneImageRevision(root) {
+        const hasActiveRun = (
+            Boolean(root.dataset.runId)
+            && !['completed', 'failed'].includes(root.dataset.stage)
+        );
+        return hasActiveRun ? Number(root.dataset.revision || 0) : null;
     }
 
     window.handleSemanticDeliveryDecision = function (event, postId) {
@@ -80,6 +182,26 @@
             throw error;
         }
         return payload.data || payload;
+    }
+
+    async function requestSceneImageStart(url, options) {
+        const controller = new AbortController();
+        const timeout = window.setTimeout(
+            () => controller.abort(),
+            SCENE_IMAGE_POST_TIMEOUT_MS,
+        );
+        try {
+            return await requestJson(url, {...options, signal: controller.signal});
+        } catch (error) {
+            if (error.name !== 'AbortError') throw error;
+            const timeoutError = new Error(
+                'The script-image queue request timed out before the server confirmed it.',
+            );
+            timeoutError.code = 'scene_image_start_timeout';
+            throw timeoutError;
+        } finally {
+            window.clearTimeout(timeout);
+        }
     }
 
     function exactCostConfirmation(button, kind) {
@@ -176,7 +298,21 @@
 
     function updateProgress(root, progress) {
         const stage = field(root, 'stage');
-        if (stage) stage.textContent = String(progress.stage || '').replaceAll('_', ' ');
+        const candidateStatus = String(progress.candidate_generation_status || 'idle');
+        const candidatePhase = String(progress.candidate_generation_phase || '');
+        const sceneImageStageLabels = {
+            scene_image_queued: 'image queued',
+            scene_image_generating: 'generating image',
+            scene_image_failed: 'image generation failed',
+        };
+        const displayStage = sceneImageStageLabels[progress.stage]
+            || (
+                progress.stage === 'not_started'
+                && candidateStatus === 'generating'
+                ? (candidatePhase === 'preparing_references' ? 'image queued' : 'generating image')
+                : String(progress.stage || '').replaceAll('_', ' ')
+            );
+        if (stage) stage.textContent = displayStage;
         const generated = field(root, 'generated-takes');
         const verified = field(root, 'verified-takes');
         const total = field(root, 'total-takes');
@@ -192,7 +328,7 @@
         const progressMessage = field(root, 'progress-message');
         const progressSpinner = field(root, 'progress-spinner');
         const isBusy = progress.candidate_generation_status === 'generating'
-            || ['generating', 'transcript_qa', 'identity_qa', 'voice_qa', 'acoustic_qa', 'composing', 'captioning', 'uploading'].includes(progress.stage);
+            || RUN_PROGRESS_STAGES.includes(progress.stage);
         updateCandidateStatus(root, progress);
         updateStatStatus(root, progress);
         if (progressBar) {
@@ -211,12 +347,13 @@
         if (progressMessage) progressMessage.textContent = progress.status_message;
         if (progressSpinner) progressSpinner.classList.toggle('hidden', !isBusy);
         root.setAttribute('aria-busy', String(isBusy));
-        root.dataset.revision = progress.revision;
-        root.dataset.stage = progress.stage;
-        root.dataset.runId = progress.run_id || '';
+        root.dataset.revision = String(progress.revision ?? '');
+        root.dataset.stage = String(progress.stage || '');
+        root.dataset.runId = String(progress.run_id || '');
+        root.dataset.sceneImageJobId = String(progress.scene_image_job_id || '');
         if (progress.plan_hash) root.dataset.planHash = progress.plan_hash;
-        root.dataset.candidateGenerationStatus = progress.candidate_generation_status || 'idle';
-        root.dataset.candidateGenerationPhase = progress.candidate_generation_phase || '';
+        root.dataset.candidateGenerationStatus = candidateStatus;
+        root.dataset.candidateGenerationPhase = candidatePhase;
     }
 
     function updateCandidateStatus(root, progress) {
@@ -267,7 +404,7 @@
         const stage = String(progress.stage || '');
         const blocked = ['failed', 'retry_approval_required'].includes(stage);
         const generationBusy = stage === 'generating';
-        const verificationBusy = ['transcript_qa', 'identity_qa', 'voice_qa', 'acoustic_qa', 'composing', 'captioning', 'uploading'].includes(stage);
+        const verificationBusy = RUN_PROGRESS_STAGES.includes(stage) && stage !== 'generating';
 
         const generatedStatus = field(root, 'generated-status');
         const generatedSpinner = field(root, 'generated-spinner');
@@ -394,44 +531,154 @@
         return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
     }
 
-    async function pollProgress(root) {
+    function candidateRequestAdvanced(root, progress) {
+        return (
+            String(progress.run_id || '') !== String(root.dataset.candidateBaselineRunId || '')
+            || String(progress.revision ?? '') !== String(root.dataset.candidateBaselineRevision || '')
+            || String(progress.scene_image_job_id || '') !== String(root.dataset.candidateBaselineJobId || '')
+        );
+    }
+
+    function hasSceneImageSurface(root) {
+        return Boolean(field(root, 'candidate-progress') || action(root, 'generate-candidates'));
+    }
+
+    function advanceCandidateActionEpoch(root) {
+        const nextEpoch = Number(root.dataset.candidateActionEpoch || 0) + 1;
+        root.dataset.candidateActionEpoch = String(nextEpoch);
+        return String(nextEpoch);
+    }
+
+    async function fetchCurrentProgress(root) {
+        const epoch = String(root.dataset.candidateActionEpoch || '0');
+        const activeRequest = candidateProgressRequests.get(root);
+        if (activeRequest?.epoch === epoch) return activeRequest.promise;
+
+        const request = requestJson(
+            `/semantic-videos/posts/${encodeURIComponent(root.dataset.postId)}/progress`,
+            {method: 'GET'},
+        ).then((progress) => (
+            String(root.dataset.candidateActionEpoch || '0') === epoch ? progress : null
+        ));
+        const tracked = {epoch, promise: request};
+        candidateProgressRequests.set(root, tracked);
+        try {
+            return await request;
+        } finally {
+            if (candidateProgressRequests.get(root) === tracked) {
+                candidateProgressRequests.delete(root);
+            }
+        }
+    }
+
+    function applyCandidateProgress(
+        root,
+        progress,
+        {settleTerminals = true, reloadReady = false} = {},
+    ) {
+        const status = String(progress.candidate_generation_status || 'idle');
+        const wasWaiting = root.dataset.waitingForCandidates === 'true';
+        const startPending = root.dataset.candidateStartPending === 'true';
+        const requestAdvanced = candidateRequestAdvanced(root, progress);
+        if (status === 'generating') {
+            root.dataset.candidateStartPending = 'false';
+            root.dataset.waitingForCandidates = 'true';
+            syncSceneImageWorkflowGate(root);
+            return status;
+        }
+        if (!settleTerminals) return status;
+        if (status === 'ready') {
+            const isCurrentReady = (
+                progress.stage === 'awaiting_reference_approval'
+                && requestAdvanced
+            );
+            if (startPending && !isCurrentReady) {
+                syncSceneImageWorkflowGate(root);
+                return status;
+            }
+            const shouldReload = (
+                reloadReady
+                && isCurrentReady
+                && (wasWaiting || !root.querySelector('[data-identity-passed]'))
+            );
+            settleCandidateAction(root, shouldReload, progress.status_message || 'The script image is ready for identity review.');
+            return status;
+        }
+        if (status === 'stalled') {
+            if (startPending && !requestAdvanced) {
+                syncSceneImageWorkflowGate(root);
+                return status;
+            }
+            finishCandidateAction(
+                root,
+                status,
+                progress.status_message || 'Script-image generation stopped. Retry generation safely.',
+                true,
+            );
+            return status;
+        }
+        if (status === 'idle' && wasWaiting && !startPending) {
+            finishCandidateAction(
+                root,
+                status,
+                'Script-image generation did not start. Retry generation safely.',
+                true,
+            );
+            return status;
+        }
+        syncSceneImageWorkflowGate(root);
+        return status;
+    }
+
+    async function pollProgress(root, {settleCandidateTerminals = true} = {}) {
         const terminalWithoutImageRecovery = (
             ['completed', 'failed'].includes(root.dataset.stage)
             && root.dataset.waitingForCandidates !== 'true'
         );
-        if (!root.isConnected || terminalWithoutImageRecovery) return;
+        if (!root.isConnected) {
+            stopPolling(root);
+            return null;
+        }
+        if (terminalWithoutImageRecovery) return null;
         try {
-            const postId = root.dataset.postId;
-            const progress = await requestJson(`/semantic-videos/posts/${encodeURIComponent(postId)}/progress`, {method: 'GET'});
-            updateProgress(root, progress);
-            const requestAdvanced = (
-                String(progress.run_id || '') !== String(root.dataset.candidateBaselineRunId || '')
-                || String(progress.revision ?? '') !== String(root.dataset.candidateBaselineRevision || '')
-            );
-            if (
-                root.dataset.waitingForCandidates === 'true'
-                && progress.candidate_generation_status === 'ready'
-                && progress.stage === 'awaiting_reference_approval'
-                && requestAdvanced
-            ) {
-                settleCandidateAction(root);
-                return;
+            const progress = await fetchCurrentProgress(root);
+            if (!root.isConnected) {
+                stopPolling(root);
+                return null;
             }
+            if (!progress) return null;
+            updateProgress(root, progress);
+            const managesSceneImage = hasSceneImageSurface(root);
+            const candidateStatus = managesSceneImage
+                ? applyCandidateProgress(root, progress, {
+                    settleTerminals: settleCandidateTerminals,
+                    reloadReady: true,
+                })
+                : String(progress.candidate_generation_status || 'idle');
             if (progress.stage === 'retry_approval_required' || progress.stage === 'completed') {
                 window.location.reload();
+                return progress;
             }
+            if (managesSceneImage && ['ready', 'stalled'].includes(candidateStatus)) {
+                return progress;
+            }
+            return progress;
         } catch (error) {
             if (root.dataset.stage !== 'not_started') setStatus(root, error.message, true);
+            return null;
         }
     }
 
     async function recoverCandidateProgress(root) {
         if (!field(root, 'candidate-progress')) return;
         try {
-            const progress = await requestJson(`/semantic-videos/posts/${encodeURIComponent(root.dataset.postId)}/progress`, {method: 'GET'});
+            const progress = await fetchCurrentProgress(root);
+            if (!root.isConnected || !progress) return;
             updateProgress(root, progress);
-            if (progress.candidate_generation_status === 'generating') {
-                root.dataset.waitingForCandidates = 'true';
+            const status = applyCandidateProgress(root, progress, {
+                reloadReady: !root.querySelector('[data-identity-passed]'),
+            });
+            if (status === 'generating') {
                 startPolling(root, true, false);
             }
         } catch (_error) {
@@ -447,7 +694,11 @@
     }
 
     function startPolling(root, force = false, immediate = true) {
-        if (activePolls.has(root) || (!force && ['not_started', 'awaiting_reference_approval', 'awaiting_paid_approval', 'retry_approval_required', 'completed', 'failed'].includes(root.dataset.stage))) return;
+        if (activePolls.has(root)) {
+            if (!force) return;
+            stopPolling(root);
+        }
+        if (!force && ['not_started', 'awaiting_reference_approval', 'awaiting_paid_approval', 'retry_approval_required', 'completed', 'failed'].includes(root.dataset.stage)) return;
         const timer = window.setInterval(() => pollProgress(root), force ? 2000 : 8000);
         activePolls.set(root, timer);
         if (immediate) pollProgress(root);
@@ -508,6 +759,8 @@
     }
 
     async function runAction(root, button, path, body, pendingMessage) {
+        const isSceneImageAction = path === 'scene-image';
+        if (isSceneImageAction) root.dataset.candidateStartPending = 'true';
         const pendingLabels = {
             candidates: 'Generating scene plates…',
             'scene-image': 'Generating script image…',
@@ -522,39 +775,65 @@
         button.disabled = true;
         if (!['candidates', 'scene-image', 'plan'].includes(path)) setStatus(root, pendingMessage);
         try {
-            const isSceneImageAction = path === 'scene-image';
             if (['approve', 'retry-approve'].includes(path)) {
                 body = await synchronizePaidAction(root, path, body);
                 if (!body) return;
             }
             let result = null;
-            const maxAttempts = 1;
+            const maxAttempts = isSceneImageAction ? 2 : 1;
             for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
                 try {
-                    result = await requestJson(`/semantic-videos/posts/${encodeURIComponent(root.dataset.postId)}/${path}`, {
+                    const request = isSceneImageAction ? requestSceneImageStart : requestJson;
+                    result = await request(`/semantic-videos/posts/${encodeURIComponent(root.dataset.postId)}/${path}`, {
                         method: 'POST',
                         body: JSON.stringify(body),
                     });
                     break;
                 } catch (error) {
                     if (!isSceneImageAction || attempt + 1 >= maxAttempts) throw error;
-                    await pollProgress(root);
-                    if (root.dataset.candidateGenerationStatus === 'generating') {
+                    const progress = await pollProgress(root, {settleCandidateTerminals: false});
+                    const reconciledStatus = String(progress?.candidate_generation_status || '');
+                    if (reconciledStatus === 'generating') {
+                        root.dataset.candidateStartPending = 'false';
+                        window.endActionFeedback(button, feedbackState);
+                        syncSceneImageWorkflowGate(root);
+                        return;
+                    }
+                    const reconciledReady = (
+                        reconciledStatus === 'ready'
+                        && progress.stage === 'awaiting_reference_approval'
+                        && candidateRequestAdvanced(root, progress)
+                    );
+                    if (reconciledReady) {
+                        settleCandidateAction(
+                            root,
+                            true,
+                            progress.status_message || 'The script image is ready for identity review.',
+                        );
                         return;
                     }
                     body = {
                         ...body,
-                        expected_revision: Number(root.dataset.revision || 0),
+                        expected_revision: expectedSceneImageRevision(root),
                     };
+                    root.dataset.waitingForCandidates = 'true';
+                    showCandidateLoading(root);
+                    syncSceneImageWorkflowGate(root);
                     await new Promise((resolve) => window.setTimeout(resolve, 500));
                 }
             }
             if (isSceneImageAction) {
-                root.dataset.runId = result.job_id || root.dataset.runId || '';
-                root.dataset.revision = String(result.revision ?? root.dataset.revision ?? '');
+                root.dataset.sceneImageJobId = result.job_id || root.dataset.sceneImageJobId || '';
+                if (result.run_id) root.dataset.runId = result.run_id;
+                if (result.revision !== undefined && result.revision !== null) {
+                    root.dataset.revision = String(result.revision);
+                }
+                root.dataset.waitingForCandidates = 'true';
                 root.dataset.candidateGenerationStatus = 'generating';
+                syncSceneImageWorkflowGate(root);
                 startPolling(root, true, true);
                 window.endActionFeedback(button, feedbackState);
+                syncSceneImageWorkflowGate(root);
                 return;
             }
             reloadAtWorkflow(root);
@@ -570,12 +849,38 @@
                 return;
             }
             if (isSceneImageAction) {
-                await pollProgress(root);
-                if (root.dataset.candidateGenerationStatus === 'generating') {
+                const progress = await pollProgress(root, {settleCandidateTerminals: false});
+                const reconciledStatus = String(progress?.candidate_generation_status || '');
+                if (reconciledStatus === 'generating') {
+                    root.dataset.candidateStartPending = 'false';
+                    window.endActionFeedback(button, feedbackState);
+                    syncSceneImageWorkflowGate(root);
                     return;
                 }
-                root.dataset.waitingForCandidates = 'false';
-                stopPolling(root);
+                const reconciledReady = (
+                    reconciledStatus === 'ready'
+                    && progress.stage === 'awaiting_reference_approval'
+                    && candidateRequestAdvanced(root, progress)
+                );
+                if (reconciledReady) {
+                    settleCandidateAction(
+                        root,
+                        true,
+                        progress.status_message || 'The script image is ready for identity review.',
+                    );
+                    return;
+                }
+                if (reconciledStatus === 'stalled') {
+                    finishCandidateAction(
+                        root,
+                        'stalled',
+                        progress.status_message || error.message,
+                        true,
+                    );
+                    return;
+                }
+                finishCandidateAction(root, 'idle', error.message, true);
+                return;
             }
             if (path === 'plan') showPlanError(root, error.message);
             window.endActionFeedback(button, feedbackState);
@@ -631,6 +936,8 @@
         if (root.dataset.semanticBound === 'true') return;
         root.dataset.semanticBound = 'true';
         const revision = () => Number(root.dataset.revision || 0);
+        const generateButton = action(root, 'generate-candidates');
+        rememberSceneImageButton(generateButton);
         const approvalButton = action(root, 'approve-master');
         const updateMasterApprovalState = () => {
             if (!approvalButton || root.dataset.stage !== 'awaiting_reference_approval') return;
@@ -642,12 +949,16 @@
         });
         updateMasterApprovalState();
 
-        action(root, 'generate-candidates')?.addEventListener('click', (event) => {
-            const expected = root.dataset.revision === '' ? null : revision();
+        generateButton?.addEventListener('click', (event) => {
+            advanceCandidateActionEpoch(root);
+            const expected = expectedSceneImageRevision(root);
             root.dataset.candidateBaselineRunId = root.dataset.runId || '';
             root.dataset.candidateBaselineRevision = root.dataset.revision || '';
+            root.dataset.candidateBaselineJobId = root.dataset.sceneImageJobId || '';
+            root.dataset.candidateStartPending = 'true';
             root.dataset.waitingForCandidates = 'true';
             showCandidateLoading(root);
+            syncSceneImageWorkflowGate(root);
             startPolling(root, true, false);
             runAction(root, event.currentTarget, 'scene-image', {expected_revision: expected}, 'Queueing script-image generation…');
         });
@@ -690,11 +1001,15 @@
     function init(scope = document) {
         scope.querySelectorAll('[data-semantic-video-controller]').forEach(bind);
         scope.querySelectorAll('[data-semantic-video-workflow]').forEach((workflow) => {
-            if (workflow.dataset.semanticBatchBound === 'true') return;
+            if (workflow.dataset.semanticBatchBound === 'true') {
+                syncSceneImageWorkflowGate(workflow);
+                return;
+            }
             workflow.dataset.semanticBatchBound = 'true';
             bindIdentityComparison(workflow);
             const button = workflow.querySelector('[data-action="approve-batch-plans"]');
             button?.addEventListener('click', () => approveReadyBatchPlans(workflow, button));
+            syncSceneImageWorkflowGate(workflow);
         });
     }
 

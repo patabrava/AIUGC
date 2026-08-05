@@ -5,6 +5,7 @@ Per Constitution § VI: Adapterize Specialists
 """
 
 from typing import Optional, Dict, Any, List, Iterator
+import asyncio
 import base64
 import httpx
 import json
@@ -36,6 +37,59 @@ GEMINI_IMAGE_MODEL_ALIASES = {
 }
 
 _MAX_GEMINI_INLINE_MEDIA_BYTES = 12 * 1024 * 1024
+
+
+def _gemini_total_budget_timeout(total_seconds: float) -> httpx.Timeout:
+    """Keep the sum of Gemini API phase limits inside one wall-clock budget."""
+    total = max(1.0, float(total_seconds))
+    pool = min(1.0, max(0.1, total * 0.02))
+    network = max(0.3, total - pool)
+    connect = min(10.0, max(0.1, network * 0.12))
+    write = min(15.0, max(0.1, network * 0.18))
+    read = max(0.1, network - connect - write)
+    return httpx.Timeout(connect=connect, read=read, write=write, pool=pool)
+
+
+async def _async_gemini_api_post_with_deadline(
+    *,
+    url: str,
+    params: Dict[str, str],
+    payload: Dict[str, Any],
+    timeout_seconds: float,
+) -> httpx.Response:
+    async with httpx.AsyncClient(
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        follow_redirects=True,
+        timeout=_gemini_total_budget_timeout(timeout_seconds),
+    ) as client:
+        return await asyncio.wait_for(
+            client.post(url, params=params, json=payload),
+            timeout=max(0.1, float(timeout_seconds)),
+        )
+
+
+def _gemini_api_post_with_deadline(
+    *,
+    url: str,
+    params: Dict[str, str],
+    payload: Dict[str, Any],
+    timeout_seconds: float,
+) -> httpx.Response:
+    try:
+        return asyncio.run(
+            _async_gemini_api_post_with_deadline(
+                url=url,
+                params=params,
+                payload=payload,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+    except TimeoutError as exc:
+        raise httpx.TimeoutException(
+            "Gemini API request exceeded its absolute deadline"
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise RuntimeError("Gemini API deadline request transport failed") from exc
 
 
 class LLMClient:
@@ -598,6 +652,8 @@ class LLMClient:
         input_images: Optional[List[Dict[str, Any]]] = None,
         input_media: Optional[List[Dict[str, Any]]] = None,
         location: Optional[str] = None,
+        timeout_seconds: Optional[float] = None,
+        provider_max_attempts: Optional[int] = None,
     ) -> str:
         """Generate plain text using Gemini generateContent."""
         if self.gemini_provider == "vertex":
@@ -614,6 +670,10 @@ class LLMClient:
                 vertex_kwargs["location"] = location
             if input_media is not None:
                 vertex_kwargs["input_media"] = input_media
+            if timeout_seconds is not None:
+                vertex_kwargs["timeout_seconds"] = timeout_seconds
+            if provider_max_attempts is not None:
+                vertex_kwargs["provider_max_attempts"] = provider_max_attempts
             return get_vertex_gemini_client().generate_text(
                 **vertex_kwargs,
             )
@@ -650,11 +710,22 @@ class LLMClient:
         )
 
         try:
-            response = self.gemini_http_client.post(
-                f"/models/{target_model}:generateContent",
-                params=self._gemini_params(),
-                json=payload,
-            )
+            if timeout_seconds is not None:
+                response = _gemini_api_post_with_deadline(
+                    url=(
+                        "https://generativelanguage.googleapis.com/v1beta/"
+                        f"models/{target_model}:generateContent"
+                    ),
+                    params=self._gemini_params(),
+                    payload=payload,
+                    timeout_seconds=float(timeout_seconds),
+                )
+            else:
+                response = self.gemini_http_client.post(
+                    f"/models/{target_model}:generateContent",
+                    params=self._gemini_params(),
+                    json=payload,
+                )
             if response.status_code >= 400:
                 logger.error(
                     "gemini_generate_text_http_error",
@@ -786,6 +857,7 @@ class LLMClient:
         image_size: str = "1K",
         input_images: Optional[List[Dict[str, Any]]] = None,
         provider_max_attempts: Optional[int] = None,
+        provider_timeout_seconds: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Generate a single image using Gemini and return image bytes plus mime type."""
         if self.gemini_provider == "vertex":
@@ -800,6 +872,7 @@ class LLMClient:
                 image_size=image_size,
                 input_images=input_images,
                 provider_max_attempts=provider_max_attempts,
+                provider_timeout_seconds=provider_timeout_seconds,
             )
 
         target_model = self._resolve_gemini_image_model(model)
@@ -836,11 +909,22 @@ class LLMClient:
         )
 
         try:
-            response = self.gemini_http_client.post(
-                f"/models/{target_model}:generateContent",
-                params=self._gemini_params(),
-                json=payload,
-            )
+            if provider_timeout_seconds is not None:
+                response = _gemini_api_post_with_deadline(
+                    url=(
+                        "https://generativelanguage.googleapis.com/v1beta/"
+                        f"models/{target_model}:generateContent"
+                    ),
+                    params=self._gemini_params(),
+                    payload=payload,
+                    timeout_seconds=float(provider_timeout_seconds),
+                )
+            else:
+                response = self.gemini_http_client.post(
+                    f"/models/{target_model}:generateContent",
+                    params=self._gemini_params(),
+                    json=payload,
+                )
             if response.status_code >= 400:
                 logger.error(
                     "gemini_generate_image_http_error",

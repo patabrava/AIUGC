@@ -237,12 +237,26 @@ def test_github_action_deploys_on_push_to_main():
     assert "Triggered Hostinger action" in step_text
     assert "wait_for_url https://lippelift.xyz/health" in step_text
     assert "Production video routing verified" in step_text
+    assert 'live_payload.get("environment") != "production"' in step_text
+    assert 'health_payload.get("status") != "healthy"' in step_text
+    assert 'checks.get("semantic_scene_image_worker") != "ok"' in step_text
+    assert "Production database and semantic scene-image worker readiness verified" in step_text
     assert "tier_32_route" in step_text
     assert "veo_segmented" in step_text
     assert "Production readiness is degraded" not in step_text
     assert "appleboy/ssh-action" not in step_text
     assert "scripts/deploy/production.sh" not in step_text
     assert "Validate production deploy config" in step_text
+    assert "Require scene-image database contract before cutover" in step_text
+    assert "semantic_scene_image_jobs" in step_text
+    assert (
+        "?select=batch_id,expected_run_id,max_attempts,provider_attempt_count,deadline_at,heartbeat_at"
+        in step_text
+    )
+    assert "/rpc/authorize_semantic_scene_image_provider_attempt" in step_text
+    assert "/rpc/finalize_semantic_scene_image_job" in step_text
+    assert "/rpc/heartbeat_semantic_scene_image_worker" in step_text
+    assert "/rpc/probe_semantic_scene_image_queue" in step_text
     assert "Missing HOSTINGER_API_TOKEN" in step_text
     assert "PROD_MAGNIFIC_API_KEY" in step_text
     assert "Missing PROD_MAGNIFIC_API_KEY" in step_text

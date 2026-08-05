@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import json
 
@@ -76,6 +77,23 @@ def test_scene_identity_gate_uses_fixed_original_reference_order_and_server_pass
     assert "do not reduce it for an expected change of room" in llm.calls[0]["prompt"]
     assert "one continuous camera frame" in llm.calls[0]["prompt"]
     assert "composite_layout" in llm.calls[0]["prompt"]
+
+
+def test_deadline_bounded_scene_identity_disables_adapter_retries():
+    from app.features.shot_frames.identity_qa import evaluate_scene_plate_identity
+
+    llm = _FakeLLM(_scene_payload())
+    evaluate_scene_plate_identity(
+        _image(b"front"),
+        _image(b"support"),
+        _image(b"candidate"),
+        llm_client=llm,
+        model="gemini-2.5-pro",
+        deadline_at=datetime.now(timezone.utc) + timedelta(minutes=2),
+    )
+
+    assert llm.calls[0]["provider_max_attempts"] == 1
+    assert 0 < llm.calls[0]["timeout_seconds"] <= 45
 
 
 @pytest.mark.parametrize(

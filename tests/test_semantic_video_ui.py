@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 from jinja2 import Environment, FileSystemLoader
@@ -68,7 +69,7 @@ def test_semantic_projection_shares_only_matching_actor_reference_fingerprints(m
     monkeypatch.setattr(
         batch_handlers,
         "_build_semantic_video_post_projection",
-        lambda post: projections[post["id"]],
+        lambda post, **_kwargs: projections[post["id"]],
     )
 
     semantic = batch_handlers._build_semantic_video_projection(batch)
@@ -101,7 +102,7 @@ def test_semantic_projection_keeps_mismatched_actor_references_local(monkeypatch
     monkeypatch.setattr(
         batch_handlers,
         "_build_semantic_video_post_projection",
-        lambda post: projections[post["id"]],
+        lambda post, **_kwargs: projections[post["id"]],
     )
 
     semantic = batch_handlers._build_semantic_video_projection(batch)
@@ -109,6 +110,41 @@ def test_semantic_projection_keeps_mismatched_actor_references_local(monkeypatch
     assert semantic["shared_actor_references"] == []
     assert semantic["actor_reference_mismatch"] is True
     assert not any(post["uses_shared_actor_references"] for post in semantic["posts"])
+
+
+def test_semantic_projection_assigns_active_scene_image_job_only_to_its_post(
+    monkeypatch,
+):
+    batch = _semantic_batch()
+    batch["posts"].append(
+        {
+            "id": "post-2",
+            "topic_title": "Second script",
+            "seed_data": {"script_review_status": "approved"},
+        }
+    )
+    batch["_semantic_scene_image_jobs"] = [
+        {
+            "id": "scene-job-1",
+            "post_id": "post-1",
+            "status": "processing",
+        }
+    ]
+    monkeypatch.setattr(
+        batch_handlers.semantic_video_queries,
+        "get_run_by_post",
+        lambda _post_id: None,
+    )
+
+    semantic = batch_handlers._build_semantic_video_projection(batch)
+    posts = {post["post_id"]: post for post in semantic["posts"]}
+
+    assert posts["post-1"]["scene_image_job_id"] == "scene-job-1"
+    assert posts["post-1"]["scene_image_job_status"] == "processing"
+    assert posts["post-1"]["scene_image_job_is_active"] is True
+    assert posts["post-2"]["scene_image_job_id"] == ""
+    assert posts["post-2"]["scene_image_job_status"] == ""
+    assert posts["post-2"]["scene_image_job_is_active"] is False
 
 
 def test_semantic_projection_exposes_persisted_approval_and_cost_contract(monkeypatch):
@@ -999,9 +1035,56 @@ def test_awaiting_paid_visual_can_be_regenerated_from_live_panel():
     )
 
     button = html.split('data-action="generate-candidates"', 1)[1].split(">", 1)[0]
-    assert "disabled" not in button
+    assert " disabled" not in button
     assert "Regenerate script image" in html
     assert "never discards paid take evidence" in html
+
+
+def test_initial_scene_render_disables_every_sibling_for_one_active_job():
+    env = Environment(loader=FileSystemLoader("templates"))
+    posts = []
+    for index in range(2):
+        posts.append(
+            {
+                "post_id": f"post-{index + 1}",
+                "topic_title": f"Script {index + 1}",
+                "revision": None,
+                "stage": "not_started",
+                "script_review_status": "approved",
+                "plan_hash": "",
+                "candidates": [],
+                "actor_references": [],
+                "has_passed_candidate": False,
+                "requested_duration_seconds": 16,
+                "scene_image_job_id": "job-1" if index == 0 else "",
+                "scene_image_job_status": "processing" if index == 0 else "",
+                "scene_image_job_is_active": index == 0,
+            }
+        )
+
+    html = env.get_template("batches/detail/_semantic_video.html").render(
+        batch={**_semantic_batch(), "state": "S4_SCRIPTED"},
+        batch_view={
+            "semantic_workflow": {"current_step": {"key": "scene"}},
+            "semantic_video": {
+                "requested_duration_seconds": 16,
+                "posts": posts,
+            },
+        },
+    )
+
+    buttons = [
+        fragment.split(">", 1)[0]
+        for fragment in html.split('data-action="generate-candidates"')[1:]
+    ]
+    assert len(buttons) == 2
+    assert all(" disabled" in button for button in buttons)
+    assert all('data-scene-image-domain-disabled="false"' in button for button in buttons)
+    assert 'data-scene-image-busy="true"' in html
+    assert 'data-scene-image-active-post-id="post-1"' in html
+    assert 'data-candidate-generation-status="generating"' in html
+    assert 'data-waiting-for-candidates="true"' in html
+    assert "Generating script image…" in html
 
 
 def test_unapproved_candidate_set_is_labeled_as_regeneration():
@@ -1221,7 +1304,7 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert "updateCandidateStatus(root, progress)" in source
     assert "Generating script image" in source
     assert "'scene-image'" in source
-    assert "const maxAttempts = 1" in source
+    assert "const maxAttempts = isSceneImageAction ? 2 : 1" in source
     assert "Checking image composition" in source
     assert "Verifying actor identity" in source
     assert "showPlanLoading(root)" in source
@@ -1233,17 +1316,17 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert "payload?.message" in source
     assert "startPolling(root, true, false)" in source
     assert "reloadAtWorkflow(root)" in source
-    assert "settleCandidateAction(root)" in source
+    assert "settleCandidateAction(root," in source
     assert "candidateBaselineRunId" in source
     assert "candidateBaselineRevision" in source
-    assert "requestAdvanced" in source
+    assert "candidateRequestAdvanced" in source
     assert "progress.stage === 'awaiting_reference_approval'" in source
     assert "root.dataset.waitingForCandidates !== 'true'" in source
-    assert "const maxAttempts = 1" in source
+    assert "const maxAttempts = isSceneImageAction ? 2 : 1" in source
     assert "attempt + 1 >= maxAttempts" in source
-    assert "await pollProgress(root)" in source
-    assert "root.dataset.candidateGenerationStatus === 'generating'" in source
-    assert "expected_revision: Number(root.dataset.revision || 0)" in source
+    assert "await pollProgress(root, {settleCandidateTerminals: false})" in source
+    assert "reconciledStatus === 'generating'" in source
+    assert "expected_revision: expectedSceneImageRevision(root)" in source
     assert "window.setTimeout(resolve, 500)" in source
     assert "candidateRoot.dataset.waitingForCandidates === 'true'" in source
     assert "candidateRoot.dataset.candidateGenerationStatus === 'generating'" in source
@@ -1282,6 +1365,164 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
         "semantic_step in ['plan', 'production'] and item.stage == "
         "'retry_approval_required'"
     ) in template_source
+
+
+def test_scene_image_action_scope_revision_and_retry_contract_are_ordered():
+    source = Path("static/js/batches/semantic_video.js").read_text(encoding="utf-8")
+    run_action = source.split("async function runAction", 1)[1].split(
+        "\n    function openIdentityComparison", 1
+    )[0]
+    revision_helper = source.split(
+        "function expectedSceneImageRevision", 1
+    )[1].split("\n    }", 1)[0]
+    bind = source.split("function bind(root)", 1)[1].split("\n    function init", 1)[0]
+
+    declaration = run_action.index("const isSceneImageAction = path === 'scene-image';")
+    outer_try = run_action.index("\n        try {")
+    outer_catch_scene_branch = run_action.rindex("if (isSceneImageAction)")
+    assert declaration < outer_try < outer_catch_scene_branch
+
+    assert "Boolean(root.dataset.runId)" in revision_helper
+    assert "!['completed', 'failed'].includes(root.dataset.stage)" in revision_helper
+    assert "return hasActiveRun ? Number(root.dataset.revision || 0) : null;" in revision_helper
+    assert "const expected = expectedSceneImageRevision(root);" in bind
+    assert "const maxAttempts = isSceneImageAction ? 2 : 1;" in run_action
+    reconcile = run_action.index(
+        "await pollProgress(root, {settleCandidateTerminals: false})"
+    )
+    active_guard = run_action.index("reconciledStatus === 'generating'", reconcile)
+    ready_guard = run_action.index("reconciledStatus === 'ready'", active_guard)
+    ready_stage_guard = run_action.index(
+        "progress.stage === 'awaiting_reference_approval'", ready_guard
+    )
+    ready_advance_guard = run_action.index(
+        "candidateRequestAdvanced(root, progress)", ready_stage_guard
+    )
+    retry_revision = run_action.index(
+        "expected_revision: expectedSceneImageRevision(root)", ready_advance_guard
+    )
+    retry_delay = run_action.index("window.setTimeout(resolve, 500)", retry_revision)
+    assert (
+        reconcile
+        < active_guard
+        < ready_guard
+        < ready_stage_guard
+        < ready_advance_guard
+        < retry_revision
+        < retry_delay
+    )
+    assert run_action.count("candidateRequestAdvanced(root, progress)") == 2
+    assert run_action.count(
+        "pollProgress(root, {settleCandidateTerminals: false})"
+    ) == 2
+
+
+def test_scene_image_terminal_cleanup_and_workflow_gate_preserve_ui_contracts():
+    source = Path("static/js/batches/semantic_video.js").read_text(encoding="utf-8")
+    finish = source.split("function finishCandidateAction", 1)[1].split(
+        "\n    function settleCandidateAction", 1
+    )[0]
+    gate = source.split("function syncSceneImageWorkflowGate", 1)[1].split(
+        "\n    function finishCandidateAction", 1
+    )[0]
+    lifecycle = source.split("function applyCandidateProgress", 1)[1].split(
+        "\n    async function pollProgress", 1
+    )[0]
+    recover = source.split("async function recoverCandidateProgress", 1)[1].split(
+        "\n    function stopPolling", 1
+    )[0]
+
+    waiting_clear = finish.index("root.dataset.waitingForCandidates = 'false';")
+    polling_clear = finish.index("stopPolling(root);")
+    visual_clear = finish.index("showCandidateTerminal(root, status, message, isError);")
+    feedback_clear = finish.index("window.endActionFeedback(button);")
+    gate_release = finish.index("syncSceneImageWorkflowGate(root);")
+    assert waiting_clear < polling_clear < visual_clear < feedback_clear < gate_release
+
+    assert "const sceneImageButtonDomainDisabled = new WeakMap();" in source
+    assert "button.disabled = domainDisabled || workflowBusy;" in gate
+    assert "candidateRoot.dataset.waitingForCandidates === 'true'" in gate
+    assert "candidateRoot.dataset.candidateGenerationStatus === 'generating'" in gate
+    assert "if (status === 'ready')" in lifecycle
+    assert "if (status === 'stalled')" in lifecycle
+    assert "if (status === 'idle' && wasWaiting && !startPending)" in lifecycle
+    assert "if (startPending && !isCurrentReady)" in lifecycle
+    assert "if (startPending && !requestAdvanced)" in lifecycle
+    assert "finishCandidateAction(" in lifecycle
+    assert "reloadReady: !root.querySelector('[data-identity-passed]')" in recover
+    assert recover.index("applyCandidateProgress") < recover.index("startPolling")
+    assert "hasSceneImageSurface(root)" in source
+    assert (
+        "if (!RUN_PROGRESS_STAGES.includes(root.dataset.stage)) stopPolling(root);"
+        in finish
+    )
+
+    terminal = source.split("function showCandidateTerminal", 1)[1].split(
+        "\n    function finishCandidateAction", 1
+    )[0]
+    assert "root.setAttribute('aria-busy', String(productionBusy));" in terminal
+    assert "candidatePanel.classList.remove('hidden');" in terminal
+    assert "candidateSpinner.classList.add('hidden');" in terminal
+    assert "progressSpinner.classList.add('hidden')" in terminal
+    assert "Generation needs attention" in terminal
+    assert "candidateProgressBar.setAttribute('aria-valuenow', '0');" in terminal
+
+
+def test_scene_image_progress_requests_are_fenced_and_recovery_reload_is_one_shot():
+    source = Path("static/js/batches/semantic_video.js").read_text(encoding="utf-8")
+    fetch_progress = source.split("async function fetchCurrentProgress", 1)[1].split(
+        "\n    function applyCandidateProgress", 1
+    )[0]
+    lifecycle = source.split("function applyCandidateProgress", 1)[1].split(
+        "\n    async function pollProgress", 1
+    )[0]
+    poll = source.split("async function pollProgress", 1)[1].split(
+        "\n    async function recoverCandidateProgress", 1
+    )[0]
+    bind = source.split("function bind(root)", 1)[1].split("\n    function init", 1)[0]
+
+    assert "const candidateProgressRequests = new WeakMap();" in source
+    assert "advanceCandidateActionEpoch(root);" in bind
+    assert "candidateBaselineJobId" in bind
+    assert "const epoch = String(root.dataset.candidateActionEpoch || '0');" in fetch_progress
+    assert "activeRequest?.epoch === epoch" in fetch_progress
+    assert "candidateProgressRequests.delete(root);" in fetch_progress
+    assert "candidateStartPending = 'true'" in bind
+    assert "root.dataset.candidateStartPending = 'false';" in lifecycle
+    assert "(wasWaiting || !root.querySelector('[data-identity-passed]'))" in lifecycle
+    assert poll.index("progress.stage === 'retry_approval_required'") < poll.index(
+        "['ready', 'stalled'].includes(candidateStatus)"
+    )
+    assert poll.count("if (!root.isConnected)") == 2
+    assert poll.count("stopPolling(root);") >= 2
+
+
+def test_scene_image_start_is_bounded_and_pre_run_progress_is_not_bare_not_started():
+    source = Path("static/js/batches/semantic_video.js").read_text(encoding="utf-8")
+    bounded_request = source.split("async function requestSceneImageStart", 1)[1].split(
+        "\n    function exactCostConfirmation", 1
+    )[0]
+    progress = source.split("function updateProgress", 1)[1].split(
+        "\n    function updateCandidateStatus", 1
+    )[0]
+
+    assert "const SCENE_IMAGE_POST_TIMEOUT_MS = 15000;" in source
+    assert "const controller = new AbortController();" in bounded_request
+    assert "() => controller.abort()" in bounded_request
+    assert "signal: controller.signal" in bounded_request
+    assert "window.clearTimeout(timeout);" in bounded_request
+    assert "progress.stage === 'not_started'" in progress
+    assert "candidateStatus === 'generating'" in progress
+    assert "scene_image_queued: 'image queued'" in progress
+    assert "scene_image_generating: 'generating image'" in progress
+    assert "scene_image_failed: 'image generation failed'" in progress
+    assert "'image queued'" in progress
+    assert "'generating image'" in progress
+    assert "root.dataset.runId = String(progress.run_id || '');" in progress
+    assert (
+        "root.dataset.sceneImageJobId = String(progress.scene_image_job_id || '');"
+        in progress
+    )
 
 
 def test_plan_step_offers_one_combined_approval_for_all_ready_videos():

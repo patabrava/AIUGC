@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 from copy import deepcopy
+from types import SimpleNamespace
 from typing import Any, Mapping, Optional, Sequence
 
+import httpx
 from postgrest.exceptions import APIError
 
 from app.adapters.supabase_client import execute_supabase_read, get_supabase
+from app.core.config import get_settings
 from app.core.errors import NotFoundError, StateTransitionError, ValidationError
 from app.features.characters.scene_reference import get_scene_bible
 from app.features.scenes.queries import (
@@ -52,7 +56,122 @@ def _execute_transition_rpc(query, *, operation: str) -> Any:
     except APIError as exc:
         if str(getattr(exc, "code", "")) == "40001":
             raise StateTransitionError(f"Semantic video {operation} conflict.") from exc
+        if str(getattr(exc, "code", "")) == "P0002":
+            raise NotFoundError(f"Semantic video {operation} target was not found.") from exc
+        if str(getattr(exc, "code", "")) == "22023":
+            raise ValidationError(f"Semantic video {operation} input is invalid.") from exc
         raise
+
+
+async def _async_transition_rpc_with_deadline(
+    *, function_name: str, payload: Mapping[str, Any], timeout_seconds: float
+) -> Any:
+    settings = get_settings()
+    headers = {
+        "apikey": settings.supabase_service_key,
+        "Authorization": f"Bearer {settings.supabase_service_key}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Prefer": "return=representation",
+    }
+    async with httpx.AsyncClient(follow_redirects=False, timeout=None) as client:
+        response = await asyncio.wait_for(
+            client.post(
+                f"{settings.supabase_url}/rest/v1/rpc/{function_name}",
+                headers=headers,
+                json=dict(payload),
+            ),
+            timeout=max(0.1, float(timeout_seconds)),
+        )
+    if response.status_code >= 400:
+        try:
+            error_payload = response.json()
+        except ValueError:
+            error_payload = {}
+        if not isinstance(error_payload, dict):
+            error_payload = {}
+        raise APIError(
+            {
+                "code": str(error_payload.get("code") or response.status_code),
+                "details": error_payload.get("details"),
+                "hint": error_payload.get("hint"),
+                "message": str(
+                    error_payload.get("message")
+                    or "Supabase transition RPC rejected the request"
+                ),
+            }
+        )
+    return SimpleNamespace(data=response.json())
+
+
+async def _async_scene_image_job_read_with_deadline(
+    *, post_id: str, timeout_seconds: float
+) -> Any:
+    settings = get_settings()
+    headers = {
+        "apikey": settings.supabase_service_key,
+        "Authorization": f"Bearer {settings.supabase_service_key}",
+        "Accept": "application/json",
+    }
+    async with httpx.AsyncClient(follow_redirects=False, timeout=None) as client:
+        response = await asyncio.wait_for(
+            client.get(
+                f"{settings.supabase_url}/rest/v1/semantic_scene_image_jobs",
+                headers=headers,
+                params={
+                    "select": "*",
+                    "post_id": f"eq.{post_id}",
+                    "order": "created_at.desc",
+                    "limit": "1",
+                },
+            ),
+            timeout=max(0.1, float(timeout_seconds)),
+        )
+    response.raise_for_status()
+    return SimpleNamespace(data=response.json())
+
+
+class _AbsoluteDeadlineRpc:
+    def __init__(
+        self,
+        *,
+        function_name: str,
+        payload: Mapping[str, Any],
+        timeout_seconds: float,
+    ) -> None:
+        self.function_name = function_name
+        self.payload = dict(payload)
+        self.timeout_seconds = float(timeout_seconds)
+
+    def execute(self) -> Any:
+        try:
+            return asyncio.run(
+                _async_transition_rpc_with_deadline(
+                    function_name=self.function_name,
+                    payload=self.payload,
+                    timeout_seconds=self.timeout_seconds,
+                )
+            )
+        except TimeoutError as exc:
+            raise StateTransitionError(
+                "Semantic scene image database transition exceeded its absolute deadline."
+            ) from exc
+
+
+def _transition_rpc_query(
+    *,
+    function_name: str,
+    payload: Mapping[str, Any],
+    client: Any,
+    timeout_seconds: Optional[float],
+) -> Any:
+    if timeout_seconds is not None:
+        return _AbsoluteDeadlineRpc(
+            function_name=function_name,
+            payload=payload,
+            timeout_seconds=timeout_seconds,
+        )
+    return _client(client).rpc(function_name, dict(payload))
 
 
 def _transition_result(query, *, operation: str) -> dict[str, Any]:
@@ -386,46 +505,211 @@ def enqueue_scene_image_generation(
     requested_by: str,
     correlation_id: str,
     client=None,
+    timeout_seconds: Optional[float] = None,
 ) -> dict[str, Any]:
     """Idempotently enqueue one durable image-generation job for a script."""
     response = _execute_transition_rpc(
-        _client(client).rpc(
-            "enqueue_semantic_scene_image",
-            {
+        _transition_rpc_query(
+            function_name="enqueue_semantic_scene_image",
+            payload={
                 "p_post_id": post_id,
                 "p_expected_revision": expected_revision,
                 "p_requested_by": requested_by,
                 "p_correlation_id": correlation_id,
             },
+            client=client,
+            timeout_seconds=timeout_seconds,
         ),
         operation="scene image enqueue",
     )
     return _one_affected(response, operation="scene image enqueue")
 
 
-def get_scene_image_job(post_id: str, *, client=None) -> Optional[dict[str, Any]]:
-    response = (
-        _client(client)
-        .table("semantic_scene_image_jobs")
-        .select("*")
-        .eq("post_id", post_id)
-        .order("created_at", desc=True)
-        .limit(1)
-        .execute()
+def get_scene_image_job(
+    post_id: str,
+    *,
+    client=None,
+    timeout_seconds: Optional[float] = None,
+) -> Optional[dict[str, Any]]:
+    if timeout_seconds is None:
+        response = execute_supabase_read(
+            "semantic_scene_image_job_by_post",
+            lambda database: (
+                database.table("semantic_scene_image_jobs")
+                .select("*")
+                .eq("post_id", post_id)
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            ),
+            client=client,
+        )
+    else:
+        try:
+            response = asyncio.run(
+                _async_scene_image_job_read_with_deadline(
+                    post_id=post_id,
+                    timeout_seconds=timeout_seconds,
+                )
+            )
+        except (TimeoutError, httpx.HTTPError) as exc:
+            raise StateTransitionError(
+                "Semantic scene image job read exceeded its absolute deadline."
+            ) from exc
+    rows = _rows(response)
+    return rows[0] if rows else None
+
+
+def list_scene_image_jobs_for_posts(
+    post_ids: Sequence[str], *, client=None
+) -> list[dict[str, Any]]:
+    """Return the newest durable scene-image job for each requested post."""
+    normalized = list(
+        dict.fromkeys(
+            str(post_id or "").strip()
+            for post_id in post_ids
+            if str(post_id or "").strip()
+        )
+    )
+    if not normalized:
+        return []
+    response = execute_supabase_read(
+        "semantic_scene_image_jobs_for_posts",
+        lambda database: (
+            database.table("semantic_scene_image_jobs")
+            .select("*")
+            .in_("post_id", normalized)
+            .order("created_at", desc=True)
+            .execute()
+        ),
+        client=client,
+    )
+    latest_by_post: dict[str, dict[str, Any]] = {}
+    for row in _rows(response):
+        latest_by_post.setdefault(str(row.get("post_id") or ""), row)
+    return list(latest_by_post.values())
+
+
+def claim_scene_image_job(
+    *,
+    worker_id: str,
+    lease_seconds: int,
+    client=None,
+    timeout_seconds: Optional[float] = None,
+) -> Optional[dict[str, Any]]:
+    response = _execute_transition_rpc(
+        _transition_rpc_query(
+            function_name="claim_semantic_scene_image",
+            payload={"p_worker_id": worker_id, "p_lease_seconds": lease_seconds},
+            client=client,
+            timeout_seconds=timeout_seconds,
+        ),
+        operation="scene image claim",
     )
     rows = _rows(response)
     return rows[0] if rows else None
 
 
-def claim_scene_image_job(
-    *, worker_id: str, lease_seconds: int, client=None
-) -> Optional[dict[str, Any]]:
+def renew_scene_image_job(
+    *,
+    job_id: str,
+    worker_id: str,
+    lease_token: str,
+    lease_seconds: int,
+    client=None,
+    timeout_seconds: Optional[float] = None,
+) -> dict[str, Any]:
     response = _execute_transition_rpc(
-        _client(client).rpc(
-            "claim_semantic_scene_image",
-            {"p_worker_id": worker_id, "p_lease_seconds": lease_seconds},
+        _transition_rpc_query(
+            function_name="renew_semantic_scene_image",
+            payload={
+                "p_job_id": job_id,
+                "p_worker_id": worker_id,
+                "p_lease_token": lease_token,
+                "p_lease_seconds": lease_seconds,
+            },
+            client=client,
+            timeout_seconds=timeout_seconds,
         ),
-        operation="scene image claim",
+        operation="scene image lease renewal",
+    )
+    return _one_affected(response, operation="scene image lease renewal")
+
+
+def authorize_scene_image_provider_attempt(
+    *,
+    job_id: str,
+    worker_id: str,
+    lease_token: str,
+    client=None,
+    timeout_seconds: Optional[float] = None,
+) -> dict[str, Any]:
+    response = _execute_transition_rpc(
+        _transition_rpc_query(
+            function_name="authorize_semantic_scene_image_provider_attempt",
+            payload={
+                "p_job_id": job_id,
+                "p_worker_id": worker_id,
+                "p_lease_token": lease_token,
+            },
+            client=client,
+            timeout_seconds=timeout_seconds,
+        ),
+        operation="scene image provider attempt",
+    )
+    return _one_affected(response, operation="scene image provider attempt")
+
+
+def heartbeat_scene_image_worker(
+    *,
+    worker_id: str,
+    metadata: Mapping[str, Any],
+    client=None,
+    timeout_seconds: Optional[float] = None,
+) -> dict[str, Any]:
+    response = _execute_transition_rpc(
+        _transition_rpc_query(
+            function_name="heartbeat_semantic_scene_image_worker",
+            payload={"p_worker_id": worker_id, "p_metadata": dict(metadata)},
+            client=client,
+            timeout_seconds=timeout_seconds,
+        ),
+        operation="scene image worker heartbeat",
+    )
+    return _one_affected(response, operation="scene image worker heartbeat")
+
+
+def probe_scene_image_queue(
+    *, client=None, timeout_seconds: Optional[float] = None
+) -> str:
+    response = _execute_transition_rpc(
+        _transition_rpc_query(
+            function_name="probe_semantic_scene_image_queue",
+            payload={},
+            client=client,
+            timeout_seconds=timeout_seconds,
+        ),
+        operation="scene image queue probe",
+    )
+    contract = str(getattr(response, "data", "") or "").strip()
+    if contract != "semantic-scene-image-v2":
+        raise StateTransitionError(
+            "Semantic scene image queue probe returned an obsolete contract."
+        )
+    return contract
+
+
+def get_scene_image_worker_heartbeat(*, client=None) -> Optional[dict[str, Any]]:
+    response = execute_supabase_read(
+        "semantic_scene_image_worker_heartbeat",
+        lambda database: (
+            database.table("semantic_scene_image_worker_heartbeats")
+            .select("worker_id,last_seen_at,metadata")
+            .order("last_seen_at", desc=True)
+            .limit(1)
+            .execute()
+        ),
+        client=client,
     )
     rows = _rows(response)
     return rows[0] if rows else None
@@ -440,11 +724,12 @@ def finish_scene_image_job(
     run_id: Optional[str] = None,
     error: Optional[Mapping[str, Any]] = None,
     client=None,
+    timeout_seconds: Optional[float] = None,
 ) -> dict[str, Any]:
     response = _execute_transition_rpc(
-        _client(client).rpc(
-            "finish_semantic_scene_image",
-            {
+        _transition_rpc_query(
+            function_name="finish_semantic_scene_image",
+            payload={
                 "p_job_id": job_id,
                 "p_worker_id": worker_id,
                 "p_lease_token": lease_token,
@@ -452,10 +737,81 @@ def finish_scene_image_job(
                 "p_run_id": run_id,
                 "p_error": dict(error) if error else None,
             },
+            client=client,
+            timeout_seconds=timeout_seconds,
         ),
         operation="scene image completion",
     )
     return _one_affected(response, operation="scene image completion")
+
+
+def reserve_scene_image_candidate_generation(
+    post_id: str,
+    *,
+    job_id: str,
+    worker_id: str,
+    job_lease_token: str,
+    expected_revision: Optional[int],
+    run_create: Mapping[str, Any],
+    reservation_owner: str,
+    reservation_token: str,
+    reservation_seconds: int,
+    client=None,
+    timeout_seconds: Optional[float] = None,
+) -> dict[str, Any]:
+    response = _execute_transition_rpc(
+        _transition_rpc_query(
+            function_name="reserve_semantic_scene_image_candidates",
+            payload={
+                "p_job_id": job_id,
+                "p_worker_id": worker_id,
+                "p_job_lease_token": job_lease_token,
+                "p_post_id": post_id,
+                "p_expected_revision": expected_revision,
+                "p_run_create": dict(run_create),
+                "p_reservation_owner": reservation_owner,
+                "p_reservation_token": reservation_token,
+                "p_reservation_seconds": reservation_seconds,
+            },
+            client=client,
+            timeout_seconds=timeout_seconds,
+        ),
+        operation="scene image candidate reservation",
+    )
+    return _one_affected(response, operation="scene image candidate reservation")
+
+
+def finalize_scene_image_candidate_generation(
+    run_id: str,
+    *,
+    job_id: str,
+    worker_id: str,
+    job_lease_token: str,
+    reserved_revision: int,
+    reservation_token: str,
+    run_updates: Mapping[str, Any],
+    client=None,
+    timeout_seconds: Optional[float] = None,
+) -> dict[str, Any]:
+    rpc_payload = {
+        "p_job_id": job_id,
+        "p_worker_id": worker_id,
+        "p_job_lease_token": job_lease_token,
+        "p_run_id": run_id,
+        "p_reserved_revision": reserved_revision,
+        "p_reservation_token": reservation_token,
+        "p_run_update": dict(run_updates),
+    }
+    response = _execute_transition_rpc(
+        _transition_rpc_query(
+            function_name="finalize_semantic_scene_image_job",
+            payload=rpc_payload,
+            client=client,
+            timeout_seconds=timeout_seconds,
+        ),
+        operation="scene image atomic finalization",
+    )
+    return _one_affected(response, operation="scene image atomic finalization")
 
 
 def update_candidate_generation_progress(
@@ -465,6 +821,7 @@ def update_candidate_generation_progress(
     reservation_token: str,
     progress: Mapping[str, Any],
     client=None,
+    timeout_seconds: Optional[float] = None,
 ) -> dict[str, Any]:
     if (
         reserved_revision < 0
@@ -473,15 +830,18 @@ def update_candidate_generation_progress(
         or not isinstance(progress, Mapping)
     ):
         raise ValidationError("Semantic video candidate progress contract is invalid.")
+    rpc_payload = {
+        "p_run_id": str(run_id),
+        "p_reserved_revision": int(reserved_revision),
+        "p_reservation_token": str(reservation_token),
+        "p_progress": dict(progress),
+    }
     response = _execute_transition_rpc(
-        _client(client).rpc(
-            "update_semantic_video_candidate_progress",
-            {
-                "p_run_id": str(run_id),
-                "p_reserved_revision": int(reserved_revision),
-                "p_reservation_token": str(reservation_token),
-                "p_progress": dict(progress),
-            },
+        _transition_rpc_query(
+            function_name="update_semantic_video_candidate_progress",
+            payload=rpc_payload,
+            client=client,
+            timeout_seconds=timeout_seconds,
         ),
         operation="candidate progress update",
     )
@@ -493,6 +853,7 @@ def reclaim_candidate_reservation(
     run_id: str,
     expected_revision: int,
     client=None,
+    timeout_seconds: Optional[float] = None,
 ) -> dict[str, Any]:
     if expected_revision < 0 or not str(run_id or "").strip():
         raise ValidationError("Semantic video candidate reclaim contract is invalid.")
@@ -504,6 +865,7 @@ def reclaim_candidate_reservation(
         },
         operation="candidate reservation reclaim",
         client=client,
+        timeout_seconds=timeout_seconds,
     )
 
 
@@ -513,6 +875,7 @@ def release_candidate_reservation(
     expected_revision: int,
     reservation_token: str,
     client=None,
+    timeout_seconds: Optional[float] = None,
 ) -> dict[str, Any]:
     if (
         expected_revision < 0
@@ -529,6 +892,7 @@ def release_candidate_reservation(
         },
         operation="candidate reservation release",
         client=client,
+        timeout_seconds=timeout_seconds,
     )
 
 
@@ -687,17 +1051,20 @@ def cancel_run_transition(
     reason: str,
     correlation_id: str,
     client=None,
+    timeout_seconds: Optional[float] = None,
 ) -> tuple[dict[str, Any], int]:
     result = _transition_result(
-        _client(client).rpc(
-            "cancel_semantic_video_run",
-            {
+        _transition_rpc_query(
+            function_name="cancel_semantic_video_run",
+            payload={
                 "p_run_id": run_id,
                 "p_expected_revision": expected_revision,
                 "p_cancelled_by": cancelled_by,
                 "p_reason": reason,
                 "p_correlation_id": correlation_id,
             },
+            client=client,
+            timeout_seconds=timeout_seconds,
         ),
         operation="cancellation",
     )
@@ -917,9 +1284,15 @@ def _worker_rpc(
     *,
     operation: str,
     client=None,
+    timeout_seconds: Optional[float] = None,
 ) -> dict[str, Any]:
     return _transition_result(
-        _client(client).rpc(function_name, dict(payload)),
+        _transition_rpc_query(
+            function_name=function_name,
+            payload=dict(payload),
+            client=client,
+            timeout_seconds=timeout_seconds,
+        ),
         operation=operation,
     )
 

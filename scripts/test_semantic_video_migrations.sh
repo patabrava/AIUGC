@@ -4,6 +4,12 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONTAINER_NAME="${SEMANTIC_UGC_POSTGRES_CONTAINER:-semantic-ugc-postgres-gate-$$}"
 POSTGRES_IMAGE="${SEMANTIC_UGC_POSTGRES_IMAGE:-postgres:14-alpine@sha256:6765739f422606933bc2aece3a2288e40e491488fd7e7c14e3323dfeefb10e38}"
+PYTHON_BIN="${SEMANTIC_UGC_PYTHON_BIN:-python3}"
+if command -v supabase >/dev/null 2>&1; then
+  SUPABASE_CMD=(supabase)
+else
+  SUPABASE_CMD=(npx --yes supabase@2.72.7)
+fi
 CREATED_CONTAINER=0
 
 cleanup() {
@@ -40,12 +46,13 @@ fi
 
 cd "$ROOT_DIR"
 SEMANTIC_UGC_POSTGRES_CONTAINER="$CONTAINER_NAME" \
-  python3 -m pytest \
+  "$PYTHON_BIN" -m pytest \
     tests/test_semantic_batch_migration_postgres.py \
     tests/test_semantic_actor_scene_plate_anchor_migration_postgres.py \
     tests/test_semantic_video_batch_approval_migration_postgres.py \
     tests/test_semantic_video_plan_migration_postgres.py \
     tests/test_semantic_video_worker_migration_postgres.py \
+    tests/test_semantic_scene_image_queue_migration_postgres.py \
     -q
 
 POSTGRES_PORT="$(docker port "$CONTAINER_NAME" 5432/tcp | awk -F: 'END { print $NF }')"
@@ -72,7 +79,7 @@ CREATE SCHEMA IF NOT EXISTS extensions;
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
 SQL
 
-PGSSLMODE=disable supabase migration up \
+PGSSLMODE=disable "${SUPABASE_CMD[@]}" migration up \
   --db-url "postgres://postgres:postgres@127.0.0.1:${POSTGRES_PORT}/postgres" \
   --include-all \
   --workdir "$ROOT_DIR"
@@ -108,6 +115,10 @@ BEGIN
     SELECT 1
     FROM supabase_migrations.schema_migrations
     WHERE version = '20260804000400'
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM supabase_migrations.schema_migrations
+    WHERE version = '20260805000000'
   ) THEN
     RAISE EXCEPTION 'Supabase CLI did not record all Semantic UGC migrations';
   END IF;
@@ -127,14 +138,53 @@ BEGIN
     RAISE EXCEPTION 'Supabase CLI did not install Semantic actor scene-plate anchors';
   END IF;
   IF to_regclass('public.semantic_scene_image_jobs') IS NULL
+     OR to_regclass('public.semantic_scene_image_worker_heartbeats') IS NULL
      OR to_regprocedure('public.enqueue_semantic_scene_image(uuid,integer,text,text)') IS NULL
      OR to_regprocedure('public.claim_semantic_scene_image(text,integer)') IS NULL
-     OR to_regprocedure('public.finish_semantic_scene_image(uuid,text,uuid,text,uuid,jsonb)') IS NULL THEN
+     OR to_regprocedure('public.renew_semantic_scene_image(uuid,text,uuid,integer)') IS NULL
+     OR to_regprocedure('public.authorize_semantic_scene_image_provider_attempt(uuid,text,uuid)') IS NULL
+     OR to_regprocedure('public.reserve_semantic_video_candidates(uuid,integer,jsonb,text,uuid,integer)') IS NULL
+     OR to_regprocedure('public.reserve_semantic_video_candidates_legacy_queue_impl(uuid,integer,jsonb,text,uuid,integer)') IS NULL
+     OR to_regprocedure('public.reserve_semantic_scene_image_candidates(uuid,text,uuid,uuid,integer,jsonb,text,uuid,integer)') IS NULL
+     OR to_regprocedure('public.finalize_semantic_scene_image_job(uuid,text,uuid,uuid,integer,uuid,jsonb)') IS NULL
+     OR to_regprocedure('public.finish_semantic_scene_image(uuid,text,uuid,text,uuid,jsonb)') IS NULL
+     OR to_regprocedure('public.heartbeat_semantic_scene_image_worker(text,jsonb)') IS NULL
+     OR to_regprocedure('public.probe_semantic_scene_image_queue()') IS NULL THEN
     RAISE EXCEPTION 'Supabase CLI did not install the Semantic scene-image queue';
   END IF;
   IF NOT has_table_privilege('service_role', 'public.semantic_scene_image_jobs', 'SELECT')
+     OR has_table_privilege('service_role', 'public.semantic_scene_image_jobs', 'INSERT')
+     OR has_table_privilege('service_role', 'public.semantic_scene_image_jobs', 'UPDATE')
+     OR has_table_privilege('service_role', 'public.semantic_scene_image_jobs', 'DELETE')
      OR has_table_privilege('authenticated', 'public.semantic_scene_image_jobs', 'SELECT') THEN
     RAISE EXCEPTION 'Semantic scene-image queue privileges are unsafe';
+  END IF;
+  IF NOT has_table_privilege(
+       'service_role', 'public.semantic_scene_image_worker_heartbeats', 'SELECT'
+     ) OR has_table_privilege(
+       'authenticated', 'public.semantic_scene_image_worker_heartbeats', 'SELECT'
+     ) OR has_table_privilege(
+       'service_role', 'public.semantic_scene_image_worker_heartbeats', 'INSERT'
+     ) OR has_table_privilege(
+       'service_role', 'public.semantic_scene_image_worker_heartbeats', 'UPDATE'
+     ) OR has_table_privilege(
+       'service_role', 'public.semantic_scene_image_worker_heartbeats', 'DELETE'
+     ) THEN
+    RAISE EXCEPTION 'Semantic scene-image heartbeat privileges are unsafe';
+  END IF;
+  IF has_function_privilege(
+       'service_role',
+       'public.reserve_semantic_video_candidates_legacy_queue_impl(uuid,integer,jsonb,text,uuid,integer)',
+       'EXECUTE'
+     ) THEN
+    RAISE EXCEPTION 'Legacy candidate reservation bypass remains executable';
+  END IF;
+  IF has_function_privilege(
+       'service_role',
+       'public.finalize_semantic_video_candidates_scene_contract_impl(uuid,integer,uuid,jsonb)',
+       'EXECUTE'
+     ) THEN
+    RAISE EXCEPTION 'Legacy candidate finalization bypass remains executable';
   END IF;
   IF NOT has_table_privilege('service_role', 'public.semantic_actor_scene_plate_anchors', 'SELECT')
      OR has_table_privilege('service_role', 'public.semantic_actor_scene_plate_anchors', 'INSERT')

@@ -5,6 +5,7 @@ Per Constitution § VI: Adapterize specialists.
 
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -19,6 +20,85 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+async def _async_put_presigned_image_with_deadline(
+    *,
+    url: str,
+    image_bytes: bytes,
+    content_type: str,
+    timeout_seconds: float,
+) -> None:
+    async with httpx.AsyncClient(follow_redirects=False, timeout=None) as client:
+        response = await asyncio.wait_for(
+            client.put(
+                url,
+                content=image_bytes,
+                headers={
+                    "Content-Type": content_type,
+                    "Cache-Control": "public, max-age=31536000, immutable",
+                },
+            ),
+            timeout=max(0.1, float(timeout_seconds)),
+        )
+    if response.status_code >= 400:
+        raise RuntimeError(
+            f"R2 deadline upload was rejected with status {response.status_code}"
+        )
+
+
+async def _async_download_with_deadline(
+    *,
+    url: str,
+    timeout_seconds: float,
+) -> bytes:
+    async with httpx.AsyncClient(follow_redirects=True, timeout=None) as client:
+        response = await asyncio.wait_for(
+            client.get(url),
+            timeout=max(0.1, float(timeout_seconds)),
+        )
+    response.raise_for_status()
+    return response.content
+
+
+def _download_with_deadline(*, url: str, timeout_seconds: float) -> bytes:
+    try:
+        return asyncio.run(
+            _async_download_with_deadline(
+                url=url,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+    except TimeoutError as exc:
+        raise TimeoutError("R2 download exceeded its absolute deadline") from exc
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            raise FileNotFoundError("R2 object was not found") from exc
+        raise RuntimeError("R2 deadline download was rejected") from exc
+    except httpx.HTTPError as exc:
+        raise RuntimeError("R2 deadline download transport failed") from exc
+
+
+def _put_presigned_image_with_deadline(
+    *,
+    url: str,
+    image_bytes: bytes,
+    content_type: str,
+    timeout_seconds: float,
+) -> None:
+    try:
+        asyncio.run(
+            _async_put_presigned_image_with_deadline(
+                url=url,
+                image_bytes=image_bytes,
+                content_type=content_type,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+    except TimeoutError as exc:
+        raise TimeoutError("R2 image upload exceeded its absolute deadline") from exc
+    except httpx.HTTPError as exc:
+        raise RuntimeError("R2 deadline image upload transport failed") from exc
 
 
 def _strip_slashes(value: str) -> str:
@@ -50,13 +130,13 @@ class StorageClient:
             f"https://{settings.cloudflare_r2_account_id}.r2.cloudflarestorage.com"
         )
 
-        self.client = boto3.client(
-            "s3",
-            endpoint_url=endpoint_url,
-            region_name=settings.cloudflare_r2_region,
-            aws_access_key_id=settings.cloudflare_r2_access_key_id,
-            aws_secret_access_key=settings.cloudflare_r2_secret_access_key,
-        )
+        self._s3_client_kwargs = {
+            "endpoint_url": endpoint_url,
+            "region_name": settings.cloudflare_r2_region,
+            "aws_access_key_id": settings.cloudflare_r2_access_key_id,
+            "aws_secret_access_key": settings.cloudflare_r2_secret_access_key,
+        }
+        self.client = boto3.client("s3", **self._s3_client_kwargs)
         self._http_client = httpx.Client(timeout=60.0, follow_redirects=True)
         self._initialized = True
 
@@ -233,9 +313,15 @@ class StorageClient:
         file_name: str,
         correlation_id: Optional[str] = None,
         content_type: str = "image/png",
+        timeout_seconds: Optional[float] = None,
+        object_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Upload raw image bytes to Cloudflare R2."""
-        object_key = self._build_object_key(file_name, prefix=self.image_prefix)
+        target = self.prepare_image_upload(
+            file_name=file_name,
+            object_key=object_key,
+        )
+        object_key = target["storage_key"]
 
         try:
             logger.info(
@@ -247,13 +333,32 @@ class StorageClient:
                 size_bytes=len(image_bytes),
             )
 
-            self.client.put_object(
-                Bucket=self.bucket_name,
-                Key=object_key,
-                Body=image_bytes,
-                ContentType=content_type,
-                CacheControl="public, max-age=31536000, immutable",
-            )
+            if timeout_seconds is not None:
+                presigned_url = self.client.generate_presigned_url(
+                    "put_object",
+                    Params={
+                        "Bucket": self.bucket_name,
+                        "Key": object_key,
+                        "ContentType": content_type,
+                        "CacheControl": "public, max-age=31536000, immutable",
+                    },
+                    ExpiresIn=60,
+                    HttpMethod="PUT",
+                )
+                _put_presigned_image_with_deadline(
+                    url=presigned_url,
+                    image_bytes=image_bytes,
+                    content_type=content_type,
+                    timeout_seconds=float(timeout_seconds),
+                )
+            else:
+                self.client.put_object(
+                    Bucket=self.bucket_name,
+                    Key=object_key,
+                    Body=image_bytes,
+                    ContentType=content_type,
+                    CacheControl="public, max-age=31536000, immutable",
+                )
 
             result = {
                 "storage_provider": "cloudflare_r2",
@@ -286,6 +391,28 @@ class StorageClient:
                 error=str(exc),
             )
             raise
+
+    def prepare_image_upload(
+        self,
+        *,
+        file_name: str,
+        object_key: Optional[str] = None,
+    ) -> Dict[str, str]:
+        """Resolve an image destination before the upload side effect."""
+        if object_key:
+            relative_key = _strip_slashes(object_key)
+            prefix = f"{self.image_prefix}/" if self.image_prefix else ""
+            resolved_key = (
+                relative_key
+                if not prefix or relative_key.startswith(prefix)
+                else f"{prefix}{relative_key}"
+            )
+        else:
+            resolved_key = self._build_object_key(file_name, prefix=self.image_prefix)
+        return {
+            "storage_key": resolved_key,
+            "url": self._build_public_url(resolved_key),
+        }
 
     def ensure_image(
         self,
@@ -387,21 +514,34 @@ class StorageClient:
             content_type=content_type or "video/mp4",
         )
 
-    def download_video(self, *, video_url: str, correlation_id: str) -> bytes:
+    def download_video(
+        self,
+        *,
+        video_url: str,
+        correlation_id: str,
+        timeout_seconds: Optional[float] = None,
+    ) -> bytes:
         """Download video bytes from a URL (R2 CDN or presigned)."""
         logger.info(
             "storage_download_start",
             correlation_id=correlation_id,
             url=video_url[:80],
         )
-        response = self._http_client.get(video_url)
-        response.raise_for_status()
+        if timeout_seconds is not None:
+            content = _download_with_deadline(
+                url=video_url,
+                timeout_seconds=float(timeout_seconds),
+            )
+        else:
+            response = self._http_client.get(video_url)
+            response.raise_for_status()
+            content = response.content
         logger.info(
             "storage_download_done",
             correlation_id=correlation_id,
-            size=len(response.content),
+            size=len(content),
         )
-        return response.content
+        return content
 
     def _build_object_key(self, file_name: str, *, prefix: Optional[str] = None) -> str:
         safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", file_name).strip("-") or "video.mp4"

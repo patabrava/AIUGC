@@ -105,6 +105,10 @@ class ProgressResponse(BaseModel):
     run_id: str
     revision: int
     stage: str
+    scene_image_job_id: Optional[str] = None
+    scene_image_job_status: Optional[
+        Literal["queued", "processing", "completed", "failed"]
+    ] = None
     candidate_generation_status: Literal["idle", "generating", "ready", "stalled"]
     candidate_generation_phase: Optional[
         Literal[

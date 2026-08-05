@@ -796,7 +796,11 @@ def _semantic_final_artifact_urls(
     return raw_url, captioned_url
 
 
-def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any]:
+def _build_semantic_video_post_projection(
+    post: Dict[str, Any],
+    *,
+    scene_image_job: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     post_id = str(post.get("id") or "")
     seed_data = post.get("seed_data") if isinstance(post.get("seed_data"), dict) else {}
     script_review_status = str(
@@ -804,6 +808,10 @@ def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any
         or seed_data.get("script_review_status")
         or "pending"
     ).strip().lower()
+    scene_image_job = (
+        scene_image_job if isinstance(scene_image_job, dict) else {}
+    )
+    scene_image_job_status = str(scene_image_job.get("status") or "").strip()
     base = {
         "post_id": post_id,
         "topic_title": str(post.get("topic_title") or "Untitled post"),
@@ -847,6 +855,10 @@ def _build_semantic_video_post_projection(post: Dict[str, Any]) -> Dict[str, Any
         "provider_prompts": [],
         "qa_advisory": None,
         "qa_pass": bool(post.get("qa_pass")),
+        "scene_image_job_id": str(scene_image_job.get("id") or ""),
+        "scene_image_job_status": scene_image_job_status,
+        "scene_image_job_is_active": scene_image_job_status
+        in {"queued", "processing"},
     }
     run = semantic_video_queries.get_run_by_post(post_id)
     if not run:
@@ -1040,9 +1052,17 @@ def _build_semantic_video_projection(batch_detail: Dict[str, Any]) -> Optional[D
     duration_contract = build_semantic_duration_contract(
         requested_duration_seconds
     )
+    source_posts = list(batch_detail.get("posts") or [])
+    scene_image_jobs = list(batch_detail.get("_semantic_scene_image_jobs") or [])
+    scene_image_jobs_by_post = {
+        str(job.get("post_id") or ""): job for job in scene_image_jobs
+    }
     posts = [
-        _build_semantic_video_post_projection(post)
-        for post in (batch_detail.get("posts") or [])
+        _build_semantic_video_post_projection(
+            post,
+            scene_image_job=scene_image_jobs_by_post.get(str(post.get("id") or "")),
+        )
+        for post in source_posts
     ]
     reference_posts = [
         post
@@ -1660,6 +1680,12 @@ async def get_batch_endpoint(request: Request, batch_id: str):
         if _wants_html(request):
             batch_model = BatchDetailResponse(**batch_detail)
             batch_payload = batch_model.model_dump(mode="json")
+            if is_semantic_ugc_mode(batch_payload.get("creation_mode")):
+                batch_payload["_semantic_scene_image_jobs"] = (
+                    semantic_video_queries.list_scene_image_jobs_for_posts(
+                        [str(post.get("id") or "") for post in batch_payload["posts"]]
+                    )
+                )
             context = {
                 "request": request,
                 "batch": batch_payload,

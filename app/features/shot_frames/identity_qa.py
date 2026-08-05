@@ -7,10 +7,10 @@ from datetime import datetime, timezone
 from hashlib import sha256
 import json
 import math
-from typing import Any, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Mapping, Optional, Sequence, Tuple
 
 from app.adapters.llm_client import get_llm_client
-from app.core.errors import ValidationError
+from app.core.errors import ThirdPartyError, ValidationError
 from app.features.semantic_videos.visual_contract import (
     SCENE_IDENTITY_EVALUATOR_CONTRACT_VERSION,
 )
@@ -42,6 +42,7 @@ returned confidence below the required threshold because of excluded non-identit
 same supplied images from scratch. Any confidence below the required threshold must identify the uncertain
 identity component by setting it false and naming the specific identity blocker. Otherwise use a confidence at
 or above the required threshold. Return only the same strict JSON shape."""
+_SCENE_IMAGE_POST_IDENTITY_RESERVE_SECONDS = 40.0
 
 _SCENE_PROMPT = """Images 1 and 2 are immutable original references of the consented actor, in that order.
 Image 3 is a generated Semantic UGC scene-plate candidate.
@@ -288,14 +289,33 @@ def _evaluate_report_with_consistency_retry(
     component_fields: Sequence[str],
     minimum_confidence: float,
     location: Optional[str] = None,
+    deadline_at: Optional[datetime] = None,
+    execution_guard: Optional[Callable[[], None]] = None,
 ) -> dict[str, Any]:
-    raw = llm_client.generate_gemini_text(
-        prompt=prompt,
-        model=model,
-        temperature=0,
-        input_images=images,
-        location=location,
-    )
+    if execution_guard is not None:
+        execution_guard()
+    request: dict[str, Any] = {
+        "prompt": prompt,
+        "model": model,
+        "temperature": 0,
+        "input_images": images,
+        "location": location,
+    }
+    if deadline_at is not None:
+        normalized_deadline = deadline_at
+        if normalized_deadline.tzinfo is None:
+            normalized_deadline = normalized_deadline.replace(tzinfo=timezone.utc)
+        remaining = (
+            normalized_deadline - datetime.now(timezone.utc)
+        ).total_seconds() - _SCENE_IMAGE_POST_IDENTITY_RESERVE_SECONDS
+        if remaining < 5.0:
+            raise ThirdPartyError(
+                "Scene identity evaluation reached the image-job deadline.",
+                {"status_code": 408, "reason_code": "scene_image_deadline"},
+            )
+        request["timeout_seconds"] = min(45.0, remaining)
+        request["provider_max_attempts"] = 1
+    raw = llm_client.generate_gemini_text(**request)
     parsed = _parse_report(
         raw,
         component_fields=component_fields,
@@ -308,13 +328,24 @@ def _evaluate_report_with_consistency_retry(
     )
     if not internally_inconsistent_low_confidence:
         return parsed
-    corrected_raw = llm_client.generate_gemini_text(
-        prompt=prompt + _CONFIDENCE_CONSISTENCY_CORRECTION,
-        model=model,
-        temperature=0,
-        input_images=images,
-        location=location,
-    )
+    request["prompt"] = prompt + _CONFIDENCE_CONSISTENCY_CORRECTION
+    if execution_guard is not None:
+        execution_guard()
+    if deadline_at is not None:
+        normalized_deadline = deadline_at
+        if normalized_deadline.tzinfo is None:
+            normalized_deadline = normalized_deadline.replace(tzinfo=timezone.utc)
+        remaining = (
+            normalized_deadline - datetime.now(timezone.utc)
+        ).total_seconds() - _SCENE_IMAGE_POST_IDENTITY_RESERVE_SECONDS
+        if remaining < 5.0:
+            raise ThirdPartyError(
+                "Scene identity evaluation reached the image-job deadline.",
+                {"status_code": 408, "reason_code": "scene_image_deadline"},
+            )
+        request["timeout_seconds"] = min(45.0, remaining)
+        request["provider_max_attempts"] = 1
+    corrected_raw = llm_client.generate_gemini_text(**request)
     return _parse_report(
         corrected_raw,
         component_fields=component_fields,
@@ -331,6 +362,8 @@ def evaluate_scene_plate_identity(
     model: str,
     minimum_confidence: float = 0.90,
     location: Optional[str] = None,
+    deadline_at: Optional[datetime] = None,
+    execution_guard: Optional[Callable[[], None]] = None,
 ) -> SceneIdentityQAReport:
     images = [
         _validated_image(actor_front, label="actor_front"),
@@ -346,6 +379,8 @@ def evaluate_scene_plate_identity(
             component_fields=_SCENE_COMPONENTS,
             minimum_confidence=minimum_confidence,
             location=location,
+            deadline_at=deadline_at,
+            execution_guard=execution_guard,
         )
     )
 

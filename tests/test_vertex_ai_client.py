@@ -54,7 +54,7 @@ def _gemini_post_client(monkeypatch, responses):
     monkeypatch.setattr(
         client,
         "_build_headers",
-        lambda include_json=False: {
+        lambda include_json=False, deadline_at=None: {
             "Authorization": "Bearer stable-token",
             "Content-Type": "application/json",
         },
@@ -593,6 +593,123 @@ def test_vertex_gemini_generate_content_allows_retry_owner_to_disable_nested_ret
     assert exc_info.value.details["attempts"] == 1
 
 
+def test_deadline_timeouts_allocate_one_total_budget_across_http_phases():
+    from app.adapters.llm_client import _gemini_total_budget_timeout
+    from app.adapters.vertex_gemini_client import (
+        _vertex_capacity_budget_seconds,
+        _vertex_http_timeout,
+    )
+
+    vertex_timeout = _vertex_http_timeout(45.0)
+    assert (
+        _vertex_capacity_budget_seconds(45.0)
+        + vertex_timeout.connect
+        + vertex_timeout.write
+        + vertex_timeout.read
+        + vertex_timeout.pool
+        <= 45.0
+    )
+    api_timeout = _gemini_total_budget_timeout(45.0)
+    assert (
+        api_timeout.connect
+        + api_timeout.write
+        + api_timeout.read
+        + api_timeout.pool
+        <= 45.0
+    )
+
+
+def test_vertex_deadline_cancels_a_trickling_request_by_wall_clock(monkeypatch):
+    import asyncio
+    import time
+
+    import httpx
+    from app.adapters import vertex_gemini_client as module
+
+    class SlowClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            await asyncio.sleep(1)
+
+    monkeypatch.setattr(module.httpx, "AsyncClient", lambda **_kwargs: SlowClient())
+    started = time.monotonic()
+    with pytest.raises(httpx.TimeoutException, match="absolute deadline"):
+        module._vertex_post_with_deadline(
+            url="https://vertex.invalid/generate",
+            headers={},
+            payload={},
+            timeout_seconds=0.02,
+        )
+    assert time.monotonic() - started < 0.5
+
+
+def test_vertex_deadline_bounds_a_slow_credential_refresh():
+    import threading
+    import time
+
+    import httpx
+    from app.adapters import vertex_gemini_client as module
+
+    class SlowCredentials:
+        token = None
+        expired = True
+        quota_project_id = "test-project"
+
+        def refresh(self, _request):
+            time.sleep(0.2)
+            self.token = "late-token"
+            self.expired = False
+
+    client = object.__new__(module.VertexGeminiClient)
+    client._credentials = SlowCredentials()
+    client._credentials_lock = threading.Lock()
+    client._settings = SimpleNamespace(vertex_ai_project_id="test-project")
+
+    started = time.monotonic()
+    with pytest.raises(httpx.TimeoutException, match="credential refresh"):
+        client._build_headers(
+            include_json=True,
+            deadline_at=time.monotonic() + 0.02,
+        )
+    assert time.monotonic() - started < 0.1
+
+
+def test_gemini_api_deadline_cancels_a_trickling_request_by_wall_clock(
+    monkeypatch,
+):
+    import asyncio
+    import time
+
+    import httpx
+    from app.adapters import llm_client as module
+
+    class SlowClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            await asyncio.sleep(1)
+
+    monkeypatch.setattr(module.httpx, "AsyncClient", lambda **_kwargs: SlowClient())
+    started = time.monotonic()
+    with pytest.raises(httpx.TimeoutException, match="absolute deadline"):
+        module._gemini_api_post_with_deadline(
+            url="https://gemini.invalid/generate",
+            params={},
+            payload={},
+            timeout_seconds=0.02,
+        )
+    assert time.monotonic() - started < 0.5
+
+
 def test_vertex_gemini_generate_content_fails_non_transient_4xx_without_retry(
     monkeypatch,
 ):
@@ -700,7 +817,11 @@ def test_generate_grounded_research_returns_text_and_chunks(monkeypatch):
     client._initialized = True
     client._http_client = _FakeHttpClient()
     monkeypatch.setattr(client, "_ensure_configured", lambda: None)
-    monkeypatch.setattr(client, "_build_headers", lambda include_json=False: {})
+    monkeypatch.setattr(
+        client,
+        "_build_headers",
+        lambda include_json=False, deadline_at=None: {},
+    )
 
     result = client.generate_grounded_research(prompt="topic")
 
@@ -737,11 +858,16 @@ def test_vertex_gemini_text_generation_preserves_ordered_input_images(monkeypatc
 
     assert client.generate_text(
         prompt="Compare Image 1 with Image 2.",
+        timeout_seconds=45,
+        provider_max_attempts=1,
         input_images=[
             {"mime_type": "image/png", "image_bytes": b"approved-master"},
             {"mime_type": "image/jpeg", "image_bytes": b"contact-sheet"},
         ],
     ) == "accepted"
+
+    assert captured["timeout_seconds"] == 45
+    assert captured["max_attempts"] == 1
 
     assert captured["payload"]["contents"][0]["parts"] == [
         {"text": "Compare Image 1 with Image 2."},
@@ -1119,6 +1245,7 @@ def test_llm_vertex_image_route_forwards_ordered_input_images(monkeypatch):
         image_size="2K",
         input_images=ordered_inputs,
         provider_max_attempts=None,
+        provider_timeout_seconds=None,
     )
 
     assert result["model"] == "gemini-3.1-flash-image"
@@ -1132,6 +1259,7 @@ def test_llm_vertex_image_route_forwards_ordered_input_images(monkeypatch):
         image_size="2K",
         input_images=ordered_inputs,
         provider_max_attempts=None,
+        provider_timeout_seconds=None,
     )
 
 

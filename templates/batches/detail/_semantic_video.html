@@ -2,6 +2,13 @@
 {% set semantic_locked = batch.state in ['S1_SETUP', 'S2_SEEDED'] %}
 {% set semantic_step = batch_view.semantic_workflow.current_step.key if batch_view.semantic_workflow else 'scene' %}
 {% set batch_plan = namespace(count=0, total_cost=0.0) %}
+{% set scene_image_gate = namespace(busy=false, active_post_id='') %}
+{% for item in semantic.posts %}
+    {% if item.scene_image_job_is_active and not scene_image_gate.busy %}
+        {% set scene_image_gate.busy = true %}
+        {% set scene_image_gate.active_post_id = item.post_id %}
+    {% endif %}
+{% endfor %}
 {% if semantic_step == 'plan' and not semantic_locked %}
     {% for item in semantic.posts %}
         {% if item.stage == 'awaiting_paid_approval' and item.master_hash_is_current and item.plan_hash %}
@@ -16,6 +23,8 @@
     aria-labelledby="semantic-video-heading"
     data-semantic-video-workflow
     data-batch-id="{{ batch.id }}"
+    data-scene-image-busy="{{ 'true' if scene_image_gate.busy else 'false' }}"
+    data-scene-image-active-post-id="{{ scene_image_gate.active_post_id }}"
 >
     <div class="border-b border-[#006AAB]/10 bg-[#F6FAFF] px-5 py-4 sm:px-6">
         <div class="flex flex-wrap items-center justify-between gap-3">
@@ -79,6 +88,7 @@
         {% for item in semantic.posts %}
         {% set actor_front = item.actor_references[0] if item.actor_references | length >= 2 else {} %}
         {% set actor_three_quarter = item.actor_references[1] if item.actor_references | length >= 2 else {} %}
+        {% set scene_image_domain_disabled = semantic_locked or item.script_review_status == 'pending' or item.stage not in ['not_started', 'awaiting_reference_approval', 'awaiting_paid_approval', 'completed', 'failed'] %}
         <article
             id="semantic-video-post-{{ item.post_id }}"
             class="rounded-2xl border border-[#1C2740]/10 p-4 sm:p-5"
@@ -90,6 +100,10 @@
             data-stage="{{ item.stage }}"
             data-actor-front-uri="{{ actor_front.storage_uri or '' }}"
             data-actor-three-quarter-uri="{{ actor_three_quarter.storage_uri or '' }}"
+            data-scene-image-job-id="{{ item.scene_image_job_id }}"
+            data-scene-image-job-status="{{ item.scene_image_job_status }}"
+            data-candidate-generation-status="{{ 'generating' if item.scene_image_job_is_active else '' }}"
+            data-waiting-for-candidates="{{ 'true' if item.scene_image_job_is_active else 'false' }}"
         >
             <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
@@ -311,20 +325,20 @@
 
             {% if semantic_step == 'scene' %}
             <div class="mt-5 flex flex-wrap gap-2">
-                <button type="button" class="brand-button-primary rounded-xl px-4 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40" data-action="generate-candidates" {% if semantic_locked or item.script_review_status == 'pending' or item.stage not in ['not_started', 'awaiting_reference_approval', 'awaiting_paid_approval', 'completed', 'failed'] %}disabled{% endif %}>{% if item.candidates or item.stage in ['awaiting_paid_approval', 'completed', 'failed'] %}Regenerate script image{% else %}Generate script image{% endif %}</button>
+                <button type="button" class="brand-button-primary rounded-xl px-4 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40" data-action="generate-candidates" data-scene-image-domain-disabled="{{ 'true' if scene_image_domain_disabled else 'false' }}" {% if scene_image_domain_disabled or scene_image_gate.busy %}disabled{% endif %}>{% if item.scene_image_job_is_active %}Generating script image…{% elif item.candidates or item.stage in ['awaiting_paid_approval', 'completed', 'failed'] %}Regenerate script image{% else %}Generate script image{% endif %}</button>
                 <button type="button" class="rounded-xl border border-[#006AAB] px-4 py-2 text-sm font-bold text-[#006AAB] disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-master" aria-describedby="identity-approval-help-{{ item.post_id }}" {% if semantic_locked or item.stage != 'awaiting_reference_approval' or not item.has_passed_candidate %}disabled{% endif %}>Approve image and confirm identity</button>
             </div>
             <section
-                class="{% if not item.candidates %}hidden {% endif %}mt-3 rounded-xl border border-[#006AAB]/20 bg-[#F6FAFF] p-3"
+                class="{% if not item.candidates and not item.scene_image_job_is_active %}hidden {% endif %}mt-3 rounded-xl border border-[#006AAB]/20 bg-[#F6FAFF] p-3"
                 data-field="candidate-progress"
                 aria-label="Scene-plate generation status"
                 aria-live="polite"
             >
                 <div class="flex items-center justify-between gap-3">
                     <div class="flex min-w-0 items-center gap-2">
-                        <span class="hidden h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-[#006AAB]/25 border-t-[#006AAB]" data-field="candidate-spinner" aria-hidden="true"></span>
+                        <span class="{% if not item.scene_image_job_is_active %}hidden {% endif %}h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-[#006AAB]/25 border-t-[#006AAB]" data-field="candidate-spinner" aria-hidden="true"></span>
                         <p class="font-bold text-[#1C2740]" data-field="candidate-status-label">
-                            {% if item.candidates %}Ready for identity review{% else %}Preparing references{% endif %}
+                            {% if item.scene_image_job_is_active %}Generating script image{% elif item.candidates %}Ready for identity review{% else %}Preparing references{% endif %}
                         </p>
                     </div>
                     <span class="shrink-0 text-sm font-bold text-[#006AAB]" data-field="candidate-percent">{{ 100 if item.candidates else 5 }}%</span>

@@ -10,7 +10,7 @@ from hashlib import sha256
 import json
 import math
 import re
-from threading import Lock
+from threading import Event, Lock, Thread
 from typing import Any, Mapping, Optional
 from uuid import uuid4
 
@@ -18,7 +18,13 @@ from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 
 from app.adapters.storage_client import get_storage_client
-from app.core.errors import NotFoundError, StateTransitionError, SuccessResponse, ValidationError
+from app.core.errors import (
+    NotFoundError,
+    StateTransitionError,
+    SuccessResponse,
+    ThirdPartyError,
+    ValidationError,
+)
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.video_profiles import script_word_count
@@ -39,12 +45,14 @@ from app.features.shot_production.provenance import (
     build_semantic_script_snapshot,
 )
 from app.features.semantic_videos.queries import (
+    authorize_scene_image_provider_attempt,
     approve_batch_initial_plans_transition,
     approve_initial_plan_transition,
     approve_master_transition,
     approve_retry_transition,
     cancel_run_transition,
     finalize_candidate_generation,
+    finalize_scene_image_candidate_generation,
     get_actor_scene_plate_anchor,
     get_scene_image_job,
     get_run_by_post,
@@ -56,6 +64,7 @@ from app.features.semantic_videos.queries import (
     release_candidate_reservation,
     resume_qa_review,
     reserve_candidate_generation,
+    reserve_scene_image_candidate_generation,
     enqueue_scene_image_generation,
     update_candidate_generation_progress,
 )
@@ -153,8 +162,6 @@ def enqueue_scene_image(
     request: Request,
 ):
     """Queue one durable script image and return without waiting for the provider."""
-    context = load_semantic_video_context(post_id)
-    _approved_script(context["post"])
     job = enqueue_scene_image_generation(
         post_id,
         expected_revision=payload.expected_revision,
@@ -162,6 +169,7 @@ def enqueue_scene_image(
         correlation_id=str(
             getattr(request.state, "correlation_id", "semantic-scene-image")
         ),
+        timeout_seconds=10.0,
     )
     response = CandidateGenerationQueuedResponse(
         job_id=str(job["id"]),
@@ -169,6 +177,83 @@ def enqueue_scene_image(
         status=str(job["status"]),
     )
     return SuccessResponse(data=response.model_dump(mode="json"))
+
+
+def _scene_image_worker_lease(request: Request) -> Optional[dict[str, Any]]:
+    """Return the complete queue lease carried by the dedicated image worker."""
+    values = {
+        "job_id": str(getattr(request.state, "scene_image_job_id", "") or "").strip(),
+        "worker_id": str(
+            getattr(request.state, "scene_image_worker_id", "") or ""
+        ).strip(),
+        "lease_token": str(
+            getattr(request.state, "scene_image_lease_token", "") or ""
+        ).strip(),
+    }
+    present = [bool(value) for value in values.values()]
+    if not any(present):
+        return None
+    if not all(present):
+        raise StateTransitionError(
+            "Semantic scene-image worker lease context is incomplete."
+        )
+    values["expected_run_id"] = str(
+        getattr(request.state, "scene_image_expected_run_id", "") or ""
+    ).strip()
+    return values
+
+
+def _assert_scene_image_execution_active(
+    *, request: Request, deadline_at: Optional[datetime]
+) -> None:
+    guard = getattr(request.state, "scene_image_lease_guard", None)
+    assert_active = getattr(guard, "assert_active", None)
+    if callable(assert_active):
+        assert_active()
+    if deadline_at is not None and datetime.now(timezone.utc) >= deadline_at:
+        raise ThirdPartyError(
+            "Scene-image generation reached its durable deadline.",
+            {"status_code": 408, "reason_code": "scene_image_deadline"},
+        )
+
+
+def _call_scene_image_read_with_deadline(
+    callback,
+    *,
+    timeout_seconds: Optional[float],
+    operation: str,
+):
+    """Bound legacy synchronous repository reads without extending job time."""
+    if timeout_seconds is None:
+        return callback()
+    result: dict[str, Any] = {}
+    completed = Event()
+
+    def run() -> None:
+        try:
+            result["value"] = callback()
+        except BaseException as exc:  # Propagate the original repository failure.
+            result["error"] = exc
+        finally:
+            completed.set()
+
+    Thread(
+        target=run,
+        name=f"scene-image-read-{operation}",
+        daemon=True,
+    ).start()
+    if not completed.wait(timeout=max(0.1, float(timeout_seconds))):
+        raise ThirdPartyError(
+            "Scene-image database read exceeded its absolute deadline.",
+            {
+                "status_code": 408,
+                "reason_code": "scene_image_deadline",
+                "operation": operation,
+            },
+        )
+    if "error" in result:
+        raise result["error"]
+    return result.get("value")
 
 
 def _parse_progress_time(value: Any) -> Optional[datetime]:
@@ -738,11 +823,18 @@ def _assert_candidate_identity_gate(
     )
 
 
-def _download_reference(row: dict[str, Any], *, role: str, request: Request) -> tuple[ShotFrameReference, dict[str, Any]]:
+def _download_reference(
+    row: dict[str, Any],
+    *,
+    role: str,
+    request: Request,
+    timeout_seconds: Optional[float] = None,
+) -> tuple[ShotFrameReference, dict[str, Any]]:
     storage_uri = str(row["storage_uri"])
     image_bytes = get_storage_client().download_video(
         video_url=storage_uri,
         correlation_id=str(getattr(request.state, "correlation_id", "semantic-reference")),
+        timeout_seconds=timeout_seconds,
     )
     actual_hash = sha256(image_bytes).hexdigest()
     expected_hash = str(row.get("sha256") or "").strip().lower()
@@ -770,6 +862,7 @@ def _download_actor_scene_plate_anchor(
     actor_reference_fingerprint: str,
     generation_contract_hash: str,
     request: Request,
+    timeout_seconds: Optional[float] = None,
 ) -> tuple[ShotFrameReference, dict[str, Any]]:
     anchor_id = str(anchor.get("id") or "").strip()
     anchor_actor_id = str(anchor.get("actor_identity_id") or "").strip()
@@ -800,6 +893,7 @@ def _download_actor_scene_plate_anchor(
     image_bytes = get_storage_client().download_video(
         video_url=storage_uri,
         correlation_id=str(getattr(request.state, "correlation_id", "semantic-anchor")),
+        timeout_seconds=timeout_seconds,
     )
     actual_hash = sha256(image_bytes).hexdigest()
     if actual_hash != expected_hash or len(image_bytes) != expected_length:
@@ -1046,15 +1140,143 @@ def _plan_response(run: dict[str, Any], takes: list[dict[str, Any]]) -> PlanResp
     )
 
 
-@router.post("/{post_id}/candidates", response_model=SuccessResponse)
+@router.post("/{post_id}/candidates", response_model=SuccessResponse, deprecated=True)
 def generate_candidates(
     post_id: str,
     payload: CandidateGenerationRequest,
     request: Request,
 ):
-    context = load_semantic_video_context(post_id)
-    existing = get_run_by_post(post_id)
+    scene_image_lease = _scene_image_worker_lease(request)
+    scene_image_deadline_at: Optional[datetime] = None
+    if scene_image_lease is not None:
+        raw_deadline = str(
+            getattr(request.state, "scene_image_deadline_at", "") or ""
+        ).strip()
+        try:
+            scene_image_deadline_at = datetime.fromisoformat(
+                raw_deadline.replace("Z", "+00:00")
+            )
+        except ValueError as exc:
+            raise StateTransitionError(
+                "Semantic scene-image worker deadline is invalid."
+            ) from exc
+        if scene_image_deadline_at.tzinfo is None:
+            scene_image_deadline_at = scene_image_deadline_at.replace(
+                tzinfo=timezone.utc
+            )
+    def assert_scene_execution() -> None:
+        _assert_scene_image_execution_active(
+            request=request,
+            deadline_at=scene_image_deadline_at,
+        )
+
+    def scene_image_stage_timeout_seconds(
+        *, cap_seconds: float, reserve_seconds: float, minimum_seconds: float
+    ) -> Optional[float]:
+        if scene_image_deadline_at is None:
+            return None
+        remaining = (
+            scene_image_deadline_at - datetime.now(timezone.utc)
+        ).total_seconds()
+        stage_budget = min(cap_seconds, remaining - reserve_seconds)
+        if stage_budget < minimum_seconds:
+            raise ThirdPartyError(
+                "Scene image reached its deadline before durable persistence.",
+                {"status_code": 408, "reason_code": "scene_image_deadline"},
+            )
+        return stage_budget
+
+    def scene_image_repository_read(
+        callback,
+        *,
+        operation: str,
+        cap_seconds: float = 10.0,
+        reserve_seconds: float = 180.0,
+    ):
+        return _call_scene_image_read_with_deadline(
+            callback,
+            timeout_seconds=scene_image_stage_timeout_seconds(
+                cap_seconds=cap_seconds,
+                reserve_seconds=reserve_seconds,
+                minimum_seconds=0.5,
+            ),
+            operation=operation,
+        )
+
+    def authorize_provider_attempt() -> None:
+        assert_scene_execution()
+        if scene_image_lease is not None:
+            guard = getattr(request.state, "scene_image_lease_guard", None)
+            assert_provider_window = getattr(
+                guard, "assert_provider_window", None
+            )
+            if callable(assert_provider_window):
+                provider_timeout_seconds = float(
+                    getattr(
+                        request.state,
+                        "scene_image_provider_timeout_seconds",
+                        120.0,
+                    )
+                    or 120.0
+                )
+                assert_provider_window(provider_timeout_seconds + 30.0)
+            authorize_scene_image_provider_attempt(
+                job_id=scene_image_lease["job_id"],
+                worker_id=scene_image_lease["worker_id"],
+                lease_token=scene_image_lease["lease_token"],
+                timeout_seconds=scene_image_stage_timeout_seconds(
+                    cap_seconds=5.0,
+                    reserve_seconds=60.0,
+                    minimum_seconds=0.5,
+                ),
+            )
+
+    assert_scene_execution()
+    settings = get_settings()
+    if (
+        scene_image_lease is None
+        and str(getattr(settings, "environment", "development")) == "production"
+    ):
+        raise StateTransitionError(
+            "Direct scene-plate generation is retired. Queue one script image through the scene-image endpoint."
+        )
+    context = scene_image_repository_read(
+        lambda: load_semantic_video_context(post_id),
+        operation="context",
+        cap_seconds=15.0,
+    )
+    existing = scene_image_repository_read(
+        lambda: get_run_by_post(post_id),
+        operation="current-run",
+    )
     effective_expected_revision = payload.expected_revision
+    if scene_image_lease is not None and existing:
+        expected_run_id = str(scene_image_lease.get("expected_run_id") or "")
+        actual_run_id = str(existing.get("id") or "")
+        actual_revision = int(existing.get("revision") or 0)
+        actual_stage = str(existing.get("stage") or "")
+        expected_run_mismatch = bool(expected_run_id) and (
+            expected_run_id != actual_run_id
+            or payload.expected_revision is None
+            or int(payload.expected_revision) != actual_revision
+        )
+        unexpected_live_run = (
+            not expected_run_id
+            and (
+                actual_stage not in {"completed", "failed"}
+                or payload.expected_revision is not None
+            )
+        )
+        if expected_run_mismatch or unexpected_live_run:
+            raise StateTransitionError(
+                "Queued scene-image generation is stale and cannot replace the current run.",
+                {
+                    "expected_run_id": expected_run_id or None,
+                    "actual_run_id": actual_run_id,
+                    "expected_revision": payload.expected_revision,
+                    "actual_revision": actual_revision,
+                },
+            )
     if existing:
         revision = int(existing.get("revision") or 0)
         stage = str(existing.get("stage") or "")
@@ -1119,7 +1341,12 @@ def generate_candidates(
                     "The operator requested fresh scene plates before paid generation."
                 )
             if stale_reason is not None:
-                _assert_visual_restart_has_no_paid_evidence(str(existing["id"]))
+                scene_image_repository_read(
+                    lambda: _assert_visual_restart_has_no_paid_evidence(
+                        str(existing["id"])
+                    ),
+                    operation="paid-evidence",
+                )
                 cancel_run_transition(
                     str(existing["id"]),
                     expected_revision=revision,
@@ -1132,6 +1359,11 @@ def generate_candidates(
                     ),
                     correlation_id=str(
                         getattr(request.state, "correlation_id", None) or ""
+                    ),
+                    timeout_seconds=scene_image_stage_timeout_seconds(
+                        cap_seconds=10.0,
+                        reserve_seconds=180.0,
+                        minimum_seconds=1.0,
                     ),
                 )
                 existing = None
@@ -1163,6 +1395,11 @@ def generate_candidates(
                 existing = reclaim_candidate_reservation(
                     run_id=str(existing["id"]),
                     expected_revision=revision,
+                    timeout_seconds=scene_image_stage_timeout_seconds(
+                        cap_seconds=10.0,
+                        reserve_seconds=180.0,
+                        minimum_seconds=1.0,
+                    ),
                 )
                 effective_expected_revision = int(existing["revision"])
 
@@ -1174,7 +1411,19 @@ def generate_candidates(
         specification: tuple[dict[str, Any], str],
     ) -> tuple[ShotFrameReference, dict[str, Any]]:
         row, role = specification
-        return _download_reference(row, role=role, request=request)
+        assert_scene_execution()
+        downloaded = _download_reference(
+            row,
+            role=role,
+            request=request,
+            timeout_seconds=scene_image_stage_timeout_seconds(
+                cap_seconds=45.0,
+                reserve_seconds=180.0,
+                minimum_seconds=1.0,
+            ),
+        )
+        assert_scene_execution()
+        return downloaded
 
     # Reference objects are immutable and independently checksummed. Fetch them
     # together so cold object-storage latency is paid once instead of three times.
@@ -1202,15 +1451,17 @@ def generate_candidates(
     actor_identity_id = str(reference.get("actor_identity_id") or "").strip()
     if not actor_identity_id:
         raise ValidationError("Semantic scene-plate generation requires an actor identity.")
-    settings = get_settings()
     generation_contract = build_scene_plate_generation_contract(
         actor_reference_fingerprint=actor_reference_fingerprint,
         settings=settings,
     )
-    anchor = get_actor_scene_plate_anchor(
-        actor_identity_id=actor_identity_id,
-        actor_reference_fingerprint=actor_reference_fingerprint,
-        generation_contract_hash=generation_contract["contract_hash"],
+    anchor = scene_image_repository_read(
+        lambda: get_actor_scene_plate_anchor(
+            actor_identity_id=actor_identity_id,
+            actor_reference_fingerprint=actor_reference_fingerprint,
+            generation_contract_hash=generation_contract["contract_hash"],
+        ),
+        operation="actor-anchor",
     )
     canonical_scene_plate = None
     canonical_anchor_snapshot = None
@@ -1221,6 +1472,11 @@ def generate_candidates(
             actor_reference_fingerprint=actor_reference_fingerprint,
             generation_contract_hash=generation_contract["contract_hash"],
             request=request,
+            timeout_seconds=scene_image_stage_timeout_seconds(
+                cap_seconds=45.0,
+                reserve_seconds=180.0,
+                minimum_seconds=1.0,
+            ),
         )
     persisted_reference = {
         **reference,
@@ -1242,18 +1498,38 @@ def generate_candidates(
         or getattr(request.state, "correlation_id", None)
         or "semantic-candidates"
     )
-    reserved = reserve_candidate_generation(
-        post_id,
-        expected_revision=effective_expected_revision,
-        run_create=_reference_run_payload(
-            context=context,
-            reference_snapshot=persisted_reference,
-            master_snapshot={},
-        ),
-        reservation_owner=reservation_owner,
-        reservation_token=reservation_token,
-        reservation_seconds=_CANDIDATE_RESERVATION_SECONDS,
+    reservation_payload = _reference_run_payload(
+        context=context,
+        reference_snapshot=persisted_reference,
+        master_snapshot={},
     )
+    if scene_image_lease is not None:
+        assert_scene_execution()
+        reserved = reserve_scene_image_candidate_generation(
+            post_id,
+            job_id=scene_image_lease["job_id"],
+            worker_id=scene_image_lease["worker_id"],
+            job_lease_token=scene_image_lease["lease_token"],
+            expected_revision=effective_expected_revision,
+            run_create=reservation_payload,
+            reservation_owner=reservation_owner,
+            reservation_token=reservation_token,
+            reservation_seconds=_CANDIDATE_RESERVATION_SECONDS,
+            timeout_seconds=scene_image_stage_timeout_seconds(
+                cap_seconds=10.0,
+                reserve_seconds=180.0,
+                minimum_seconds=1.0,
+            ),
+        )
+    else:
+        reserved = reserve_candidate_generation(
+            post_id,
+            expected_revision=effective_expected_revision,
+            run_create=reservation_payload,
+            reservation_owner=reservation_owner,
+            reservation_token=reservation_token,
+            reservation_seconds=_CANDIDATE_RESERVATION_SECONDS,
+        )
     reserved_revision = int(reserved.get("revision") or 0)
     correlation_id = str(
         getattr(request.state, "correlation_id", "semantic-scene-plates")
@@ -1267,6 +1543,8 @@ def generate_candidates(
     def persist_candidate_progress(
         phase: str,
         details: Mapping[str, Any] | None = None,
+        *,
+        required: bool = False,
     ) -> None:
         with partial_candidates_lock:
             progress_details = dict(details or {})
@@ -1279,25 +1557,95 @@ def generate_candidates(
                 "details": progress_details,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
-            try:
-                update_candidate_generation_progress(
-                    run_id=str(reserved["id"]),
-                    reserved_revision=reserved_revision,
-                    reservation_token=reservation_token,
-                    progress=progress_payload,
+            def progress_was_committed() -> bool:
+                persisted_run = scene_image_repository_read(
+                    lambda: get_run_by_post(post_id),
+                    operation="candidate-progress-reconcile",
+                    cap_seconds=5.0,
+                    reserve_seconds=15.0,
                 )
-            except Exception as exc:  # progress must never delay or fail generation
-                logger.warning(
-                    "semantic_video_candidate_progress_update_failed",
-                    run_id=str(reserved.get("id") or ""),
-                    phase=phase,
-                    error=str(exc),
+                return bool(
+                    isinstance(persisted_run, Mapping)
+                    and str(persisted_run.get("id") or "")
+                    == str(reserved["id"])
+                    and int(persisted_run.get("revision") or 0)
+                    == reserved_revision
+                    and str(
+                        persisted_run.get("candidate_reservation_token") or ""
+                    )
+                    == reservation_token
+                    and persisted_run.get("candidate_generation_progress")
+                    == progress_payload
                 )
+
+            attempts = 2 if required else 1
+            last_error: Optional[Exception] = None
+            for attempt in range(attempts):
+                try:
+                    progress_timeout = None
+                    if scene_image_deadline_at is not None:
+                        remaining = (
+                            scene_image_deadline_at - datetime.now(timezone.utc)
+                        ).total_seconds()
+                        if remaining <= 16.0:
+                            if required:
+                                raise ThirdPartyError(
+                                    "Scene image reached its deadline before its upload checkpoint.",
+                                    {
+                                        "status_code": 408,
+                                        "reason_code": "scene_image_deadline",
+                                    },
+                                )
+                            logger.warning(
+                                "semantic_video_candidate_progress_skipped_near_deadline",
+                                run_id=str(reserved.get("id") or ""),
+                                phase=phase,
+                            )
+                            return
+                        progress_timeout = min(5.0, remaining - 15.0)
+                    update_candidate_generation_progress(
+                        run_id=str(reserved["id"]),
+                        reserved_revision=reserved_revision,
+                        reservation_token=reservation_token,
+                        progress=progress_payload,
+                        timeout_seconds=progress_timeout,
+                    )
+                    return
+                except Exception as exc:  # noqa: BLE001
+                    last_error = exc
+                    if not required:
+                        logger.warning(
+                            "semantic_video_candidate_progress_update_failed",
+                            run_id=str(reserved.get("id") or ""),
+                            phase=phase,
+                            error=str(exc),
+                        )
+                        return
+                    try:
+                        if progress_was_committed():
+                            logger.warning(
+                                "semantic_video_candidate_progress_ack_reconciled",
+                                run_id=str(reserved.get("id") or ""),
+                                phase=phase,
+                                attempt=attempt + 1,
+                            )
+                            return
+                    except Exception as reconcile_exc:  # noqa: BLE001
+                        logger.warning(
+                            "semantic_video_candidate_progress_reconcile_failed",
+                            run_id=str(reserved.get("id") or ""),
+                            phase=phase,
+                            attempt=attempt + 1,
+                            error=str(reconcile_exc),
+                        )
+            if last_error is not None:
+                raise last_error
 
     def validate_and_store_candidate(
         candidate: ScenePlateCandidate,
         identity_report: Any | None = None,
     ) -> dict[str, Any]:
+        assert_scene_execution()
         candidate_hash = sha256(candidate.image_bytes).hexdigest()
         candidate_mime_type = str(candidate.mime_type).strip().lower()
         if candidate_mime_type not in {"image/png", "image/jpeg"}:
@@ -1337,6 +1685,8 @@ def generate_candidates(
                 model=settings.semantic_scene_identity_gate_model,
                 minimum_confidence=settings.semantic_scene_identity_min_confidence,
                 location=settings.semantic_scene_identity_gate_location,
+                deadline_at=scene_image_deadline_at,
+                execution_guard=assert_scene_execution,
             )
             identity_gate_result = scene_identity_result_metadata(
                 resolved_identity_report,
@@ -1345,6 +1695,11 @@ def generate_candidates(
                 candidate_sha256=candidate_hash,
             )
         except Exception as exc:  # each candidate fails closed without discarding siblings
+            if (
+                isinstance(exc, ThirdPartyError)
+                and exc.details.get("reason_code") == "scene_image_deadline"
+            ):
+                raise
             identity_gate_result = failed_scene_identity_result(
                 evaluator_model=settings.semantic_scene_identity_gate_model,
                 actor_reference_fingerprint=actor_reference_fingerprint,
@@ -1352,19 +1707,25 @@ def generate_candidates(
                 reason_code="identity_evaluator_unavailable_or_invalid",
                 message=str(exc),
             )
-        uploaded = get_storage_client().upload_image(
-            image_bytes=candidate.image_bytes,
-            file_name=(
-                f"semantic-{post_id}-scene-plate-{candidate.index}-"
-                f"{candidate_hash[:12]}.{candidate_extension}"
-            ),
-            correlation_id=correlation_id,
-            content_type=candidate_mime_type,
+        assert_scene_execution()
+        storage = get_storage_client()
+        file_name = (
+            f"semantic-{post_id}-scene-plate-{candidate.index}-"
+            f"{candidate_hash[:12]}.{candidate_extension}"
         )
-        persisted_candidate = {
+        stable_object_key = (
+            f"semantic-scene-images/{post_id}/{reserved['id']}/"
+            f"candidate-{int(candidate.index)}-{candidate_hash}."
+            f"{candidate_extension}"
+        )
+        upload_target = storage.prepare_image_upload(
+            file_name=file_name,
+            object_key=stable_object_key,
+        )
+        candidate_checkpoint = {
             "index": int(candidate.index),
-            "storage_uri": str(uploaded["url"]),
-            "storage_key": uploaded.get("storage_key"),
+            "storage_uri": str(upload_target["url"]),
+            "storage_key": str(upload_target["storage_key"]),
             "mime_type": candidate_mime_type,
             "byte_length": len(candidate.image_bytes),
             "sha256": candidate_hash,
@@ -1390,6 +1751,39 @@ def generate_candidates(
                 if canonical_anchor_snapshot is not None
                 else None
             ),
+            "upload_state": "pending",
+        }
+        with partial_candidates_lock:
+            partial_candidates_by_index[int(candidate.index)] = candidate_checkpoint
+        persist_candidate_progress(
+            "uploading_candidate",
+            {
+                "candidate_count": payload.candidate_count,
+                "checkpointed_candidate_index": int(candidate.index),
+            },
+            required=True,
+        )
+        assert_scene_execution()
+        uploaded = storage.upload_image(
+            image_bytes=candidate.image_bytes,
+            file_name=file_name,
+            correlation_id=correlation_id,
+            content_type=candidate_mime_type,
+            object_key=stable_object_key,
+            timeout_seconds=scene_image_stage_timeout_seconds(
+                cap_seconds=20.0,
+                reserve_seconds=15.0,
+                minimum_seconds=2.0,
+            ),
+        )
+        persisted_candidate = {
+            **{
+                key: value
+                for key, value in candidate_checkpoint.items()
+                if key != "upload_state"
+            },
+            "storage_uri": str(uploaded["url"]),
+            "storage_key": uploaded.get("storage_key"),
         }
         logger.info(
             "semantic_scene_identity_gate_completed",
@@ -1457,6 +1851,11 @@ def generate_candidates(
         image_bytes = get_storage_client().download_video(
             video_url=str(row["storage_uri"]),
             correlation_id=correlation_id,
+            timeout_seconds=scene_image_stage_timeout_seconds(
+                cap_seconds=30.0,
+                reserve_seconds=120.0,
+                minimum_seconds=1.0,
+            ),
         )
         actual_hash = sha256(image_bytes).hexdigest()
         if (
@@ -1475,11 +1874,18 @@ def generate_candidates(
                 provider_model=str(row["provider_model"]),
                 prompt=str(row["prompt"]),
             ),
-            row,
+            {key: value for key, value in row.items() if key != "upload_state"},
         )
 
     initial_candidates: list[ScenePlateCandidate] = []
+    resume_failure: Optional[Exception] = None
     if resumable_metadata:
+        # Keep the durable provider/upload evidence projected while the object
+        # is being verified. A transient GET failure must not erase the only
+        # proof that this candidate was already rendered.
+        with partial_candidates_lock:
+            for row in resumable_metadata:
+                partial_candidates_by_index[int(row["index"])] = dict(row)
         try:
             with ThreadPoolExecutor(
                 max_workers=len(resumable_metadata),
@@ -1495,17 +1901,37 @@ def generate_candidates(
                 run_id=str(reserved.get("id") or ""),
                 candidate_indexes=sorted(partial_candidates_by_index),
             )
-        except Exception as exc:
+        except FileNotFoundError as exc:
             initial_candidates = []
             partial_candidates_by_index.clear()
             logger.warning(
-                "semantic_scene_plate_partial_generation_discarded",
+                "semantic_scene_plate_checkpoint_object_missing",
+                post_id=post_id,
+                run_id=str(reserved.get("id") or ""),
+                error=str(exc),
+            )
+        except Exception as exc:  # A transient GET cannot authorize another render.
+            resume_failure = (
+                exc
+                if isinstance(exc, StateTransitionError)
+                else ThirdPartyError(
+                    "The saved script image is temporarily unavailable. Retry to resume without generating another image.",
+                    {
+                        "status_code": 503,
+                        "reason_code": "scene_image_checkpoint_unavailable",
+                    },
+                )
+            )
+            logger.warning(
+                "semantic_scene_plate_checkpoint_resume_deferred",
                 post_id=post_id,
                 run_id=str(reserved.get("id") or ""),
                 error=str(exc),
             )
 
     try:
+        if resume_failure is not None:
+            raise resume_failure
         generated = generate_scene_plate_candidates(
             actor_references=[actor_front, actor_three_quarter],
             location_reference=location,
@@ -1519,6 +1945,18 @@ def generate_candidates(
             initial_candidates=initial_candidates,
             candidate_ready_callback=persist_ready_candidate,
             progress_callback=persist_candidate_progress,
+            provider_timeout_seconds=(
+                float(request.state.scene_image_provider_timeout_seconds)
+                if getattr(
+                    request.state,
+                    "scene_image_provider_timeout_seconds",
+                    None,
+                ) is not None
+                else None
+            ),
+            deadline_at=scene_image_deadline_at,
+            execution_guard=assert_scene_execution,
+            provider_attempt_callback=authorize_provider_attempt,
         )
         if len(generated.candidates) != payload.candidate_count:
             raise StateTransitionError(
@@ -1631,16 +2069,33 @@ def generate_candidates(
             reference_snapshot=persisted_reference,
             master_snapshot=master_snapshot,
         )
-        run = finalize_candidate_generation(
-            str(reserved["id"]),
-            reserved_revision=reserved_revision,
-            reservation_token=reservation_token,
-            run_updates=run_payload,
-        )
-        persist_candidate_progress(
-            "ready",
-            {"candidate_count": len(candidates)},
-        )
+        if scene_image_lease is not None:
+            assert_scene_execution()
+            run = finalize_scene_image_candidate_generation(
+                str(reserved["id"]),
+                job_id=scene_image_lease["job_id"],
+                worker_id=scene_image_lease["worker_id"],
+                job_lease_token=scene_image_lease["lease_token"],
+                reserved_revision=reserved_revision,
+                reservation_token=reservation_token,
+                run_updates=run_payload,
+                timeout_seconds=scene_image_stage_timeout_seconds(
+                    cap_seconds=10.0,
+                    reserve_seconds=2.0,
+                    minimum_seconds=1.0,
+                ),
+            )
+        else:
+            run = finalize_candidate_generation(
+                str(reserved["id"]),
+                reserved_revision=reserved_revision,
+                reservation_token=reservation_token,
+                run_updates=run_payload,
+            )
+            persist_candidate_progress(
+                "ready",
+                {"candidate_count": len(candidates)},
+            )
     except Exception as exc:
         failure_details = getattr(exc, "details", {})
         failure_details = (
@@ -1671,6 +2126,11 @@ def generate_candidates(
                 run_id=str(reserved["id"]),
                 expected_revision=int(reserved.get("revision") or 0),
                 reservation_token=reservation_token,
+                timeout_seconds=scene_image_stage_timeout_seconds(
+                    cap_seconds=5.0,
+                    reserve_seconds=0.0,
+                    minimum_seconds=0.1,
+                ),
             )
         except Exception as release_exc:  # noqa: BLE001
             logger.exception(
@@ -1856,6 +2316,141 @@ def create_free_plan(post_id: str, payload: PlanCreateRequest, request: Request)
     return SuccessResponse(data=_plan_response(run, takes).model_dump(mode="json"))
 
 
+def _scene_image_job_progress(
+    *, job: Mapping[str, Any], run: Optional[Mapping[str, Any]]
+) -> ProgressResponse:
+    now = datetime.now(timezone.utc)
+    job_status = str(job.get("status") or "")
+    started_at = _parse_progress_time(job.get("started_at") or job.get("created_at"))
+    elapsed = max(0, int((now - started_at).total_seconds())) if started_at else 0
+    deadline_at = _parse_progress_time(job.get("deadline_at"))
+    lease_expires_at = _parse_progress_time(job.get("lease_expires_at"))
+    deadline_expired = bool(deadline_at and deadline_at <= now)
+    lease_expired = bool(
+        job_status == "processing"
+        and lease_expires_at
+        and lease_expires_at <= now
+    )
+    completed_without_run = job_status == "completed" and not run
+    is_stalled = job_status == "failed" or deadline_expired or completed_without_run
+
+    linked_run = run if isinstance(run, Mapping) else None
+    linked_job_run_id = str(job.get("run_id") or "").strip()
+    linked_run_stage = str((linked_run or {}).get("stage") or "")
+    job_expected_revision = job.get("expected_revision")
+    unlinked_active_run_matches = bool(
+        linked_run
+        and not linked_job_run_id
+        and linked_run_stage not in {"completed", "failed"}
+        and job_expected_revision is not None
+        and int(linked_run.get("revision") or 0) == int(job_expected_revision)
+    )
+    job_linked_run = (
+        linked_run
+        if linked_run
+        and linked_job_run_id
+        and str(linked_run.get("id") or "") == linked_job_run_id
+        else None
+    )
+    revision_run = job_linked_run or (
+        linked_run if unlinked_active_run_matches else None
+    )
+    candidate_progress = (
+        job_linked_run.get("candidate_generation_progress")
+        if job_linked_run
+        and isinstance(job_linked_run.get("candidate_generation_progress"), Mapping)
+        else {}
+    )
+    persisted_phase = str(candidate_progress.get("phase") or "").strip()
+    phase = (
+        "failed"
+        if is_stalled
+        else persisted_phase
+        if persisted_phase in _CANDIDATE_PHASE_PROGRESS
+        else "preparing_references"
+        if job_status == "queued"
+        else "generating_images"
+    )
+    error = job.get("error") if isinstance(job.get("error"), Mapping) else {}
+    error_message = str(error.get("message") or "").strip()
+    if is_stalled:
+        message = error_message or (
+            "The image operation exceeded its eight-minute deadline. Retry this script."
+            if deadline_expired
+            else "Image generation failed safely. Retry this script."
+        )
+    elif lease_expired:
+        message = "The image worker is reclaiming this operation safely."
+    elif job_status == "queued":
+        message = "Queued for fast script-image generation."
+    else:
+        message = "Generating one script image and checking actor identity."
+
+    run_id = str(revision_run.get("id") or "") if revision_run else ""
+    revision = (
+        int(revision_run.get("revision") or 0)
+        if revision_run
+        else int(job.get("expected_revision") or 0)
+    )
+    return ProgressResponse(
+        run_id=run_id,
+        revision=revision,
+        stage=(
+            "scene_image_failed"
+            if is_stalled
+            else "scene_image_queued"
+            if job_status == "queued"
+            else "scene_image_generating"
+        ),
+        scene_image_job_id=str(job.get("id") or "") or None,
+        scene_image_job_status=(
+            job_status
+            if job_status in {"queued", "processing", "completed", "failed"}
+            else None
+        ),
+        candidate_generation_status="stalled" if is_stalled else "generating",
+        candidate_generation_phase=phase,
+        candidate_count=0,
+        plan_hash=None,
+        total_takes=0,
+        generated_takes=0,
+        verified_takes=0,
+        progress_percent=20 if job_status == "processing" else (5 if not is_stalled else 20),
+        elapsed_seconds=elapsed,
+        estimated_remaining_seconds=(
+            None if is_stalled else max(0, _TYPICAL_SCENE_PLATE_SECONDS - elapsed)
+        ),
+        status_message=message,
+        failed_take_indexes=[],
+        takes=[],
+    )
+
+
+def _scene_image_job_matches_run(
+    *, job: Mapping[str, Any], run: Optional[Mapping[str, Any]]
+) -> bool:
+    """Fence queue projection to the exact run observed when it was enqueued."""
+    if not isinstance(run, Mapping):
+        return True
+    run_id = str(run.get("id") or "").strip()
+    linked_run_id = str(job.get("run_id") or "").strip()
+    expected_run_id = str(job.get("expected_run_id") or "").strip()
+    if linked_run_id:
+        id_matches = linked_run_id == run_id
+    elif expected_run_id:
+        id_matches = expected_run_id == run_id
+    else:
+        # A new operation may legitimately follow a terminal historical run.
+        # New jobs against live runs always persist expected_run_id in PostgreSQL.
+        return str(run.get("stage") or "") in {"completed", "failed"}
+    expected_revision = job.get("expected_revision")
+    return bool(
+        id_matches
+        and expected_revision is not None
+        and int(expected_revision) == int(run.get("revision") or 0)
+    )
+
+
 @router.get("/{post_id}/progress", response_model=SuccessResponse)
 def get_progress(post_id: str, request: Request):
     if "text/html" in request.headers.get("accept", ""):
@@ -1866,65 +2461,33 @@ def get_progress(post_id: str, request: Request):
             status_code=303,
         )
     run = get_run_by_post(post_id)
+    job = get_scene_image_job(post_id, timeout_seconds=5.0)
+    job_status = str((job or {}).get("status") or "")
+    job_is_current_operation = job_status in {"queued", "processing", "failed"}
+    job_matches_run = bool(
+        job and _scene_image_job_matches_run(job=job, run=run)
+    )
+    if job and job_matches_run and (
+        job_is_current_operation or (job_status == "completed" and not run)
+    ):
+        progress = _scene_image_job_progress(job=job, run=run)
+        return SuccessResponse(data=progress.model_dump(mode="json"))
     if not run:
-        job = get_scene_image_job(post_id)
-        if not job:
-            progress = ProgressResponse(
-                run_id="",
-                revision=0,
-                stage="not_started",
-                candidate_generation_status="idle",
-                candidate_generation_phase=None,
-                candidate_count=0,
-                plan_hash=None,
-                total_takes=0,
-                generated_takes=0,
-                verified_takes=0,
-                progress_percent=0,
-                elapsed_seconds=0,
-                estimated_remaining_seconds=None,
-                status_message="Ready to generate one script image.",
-                failed_take_indexes=[],
-                takes=[],
-            )
-            return SuccessResponse(data=progress.model_dump(mode="json"))
-        job_status = str(job.get("status") or "")
-        started_at = _parse_progress_time(
-            job.get("started_at") or job.get("created_at")
-        )
-        elapsed = (
-            max(0, int((datetime.now(timezone.utc) - started_at).total_seconds()))
-            if started_at
-            else 0
-        )
-        is_failed = job_status == "failed"
         progress = ProgressResponse(
-            run_id=str(job["id"]),
-            revision=int(job.get("expected_revision") or 0),
+            run_id="",
+            revision=0,
             stage="not_started",
-            candidate_generation_status="stalled" if is_failed else "generating",
-            candidate_generation_phase="failed" if is_failed else (
-                "preparing_references" if job_status == "queued" else "generating_images"
-            ),
+            candidate_generation_status="idle",
+            candidate_generation_phase=None,
             candidate_count=0,
             plan_hash=None,
             total_takes=0,
             generated_takes=0,
             verified_takes=0,
-            progress_percent=20 if job_status == "processing" else (5 if not is_failed else 20),
-            elapsed_seconds=elapsed,
-            estimated_remaining_seconds=(
-                None if is_failed else max(0, _TYPICAL_SCENE_PLATE_SECONDS - elapsed)
-            ),
-            status_message=(
-                "Image generation failed safely. Retry to enqueue a fresh job."
-                if is_failed
-                else (
-                    "Generating one script image and checking actor identity."
-                    if job_status == "processing"
-                    else "Queued for fast script-image generation."
-                )
-            ),
+            progress_percent=0,
+            elapsed_seconds=0,
+            estimated_remaining_seconds=None,
+            status_message="Ready to generate one script image.",
             failed_take_indexes=[],
             takes=[],
         )

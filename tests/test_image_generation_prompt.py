@@ -42,6 +42,26 @@ def test_prompt_writer_uses_literal_contract_and_returns_renderer_prompt():
     }
 
 
+def test_deadline_bounded_prompt_writer_disables_adapter_retries():
+    class Client:
+        def __init__(self):
+            self.call = None
+
+        def generate_gemini_text(self, **kwargs):
+            self.call = kwargs
+            return "An ordinary raw-camera portrait in a blue shirt."
+
+    client = Client()
+    write_raw_camera_image_prompt(
+        client=client,
+        brief="Use a blue shirt.",
+        timeout_seconds=12.5,
+    )
+
+    assert client.call["timeout_seconds"] == 12.5
+    assert client.call["provider_max_attempts"] == 1
+
+
 def test_feature_renderers_never_receive_the_prompt_writer_system_instruction():
     repo_root = Path(__file__).resolve().parents[1]
     invalid: list[str] = []

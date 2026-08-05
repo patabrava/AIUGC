@@ -5,6 +5,7 @@ Per Constitution § I: Canon Supremacy
 """
 
 import asyncio
+from datetime import datetime, timezone
 import uuid
 import time
 import os
@@ -61,6 +62,7 @@ logger = get_logger(__name__)
 
 _HEALTH_DB_CACHE_SECONDS = 60
 _HEALTH_DB_TIMEOUT_SECONDS = 5
+_SCENE_IMAGE_WORKER_HEARTBEAT_TTL_SECONDS = 45
 _TRUE_ENV_VALUES = {"1", "true", "yes"}
 _health_db_cache = {
     "checked_at": 0.0,
@@ -206,6 +208,53 @@ async def _run_startup_recovery_checks() -> None:
 def _probe_database_health() -> bool:
     supabase = get_supabase()
     return supabase.health_check()
+
+
+def _probe_scene_image_worker_health() -> tuple[bool, str | None]:
+    from app.features.semantic_videos.queries import (
+        get_scene_image_worker_heartbeat,
+    )
+
+    heartbeat = get_scene_image_worker_heartbeat()
+    if not heartbeat:
+        return False, "no scene-image worker heartbeat exists"
+    worker_id = str(heartbeat.get("worker_id") or "").strip()
+    metadata = heartbeat.get("metadata")
+    if not worker_id.startswith("semantic-scene-image-v2-") or not isinstance(
+        metadata, dict
+    ) or metadata.get("contract") != "semantic-scene-image-v2":
+        return False, "scene-image worker heartbeat contract is obsolete"
+    if metadata.get("queue_probe_status") != "ok":
+        return False, "scene-image worker cannot query its durable queue"
+    raw_probe_at = str(metadata.get("queue_probe_checked_at") or "").strip()
+    if not raw_probe_at:
+        return False, "scene-image worker heartbeat has no queue probe timestamp"
+    try:
+        probe_at = datetime.fromisoformat(raw_probe_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False, "scene-image worker queue probe timestamp is invalid"
+    if probe_at.tzinfo is None:
+        probe_at = probe_at.replace(tzinfo=timezone.utc)
+    probe_age_seconds = max(
+        0, int((datetime.now(timezone.utc) - probe_at).total_seconds())
+    )
+    if probe_age_seconds > _SCENE_IMAGE_WORKER_HEARTBEAT_TTL_SECONDS:
+        return False, f"scene-image worker queue probe is {probe_age_seconds}s old"
+    raw_seen_at = str(heartbeat.get("last_seen_at") or "").strip()
+    if not raw_seen_at:
+        return False, "scene-image worker heartbeat has no timestamp"
+    try:
+        seen_at = datetime.fromisoformat(raw_seen_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False, "scene-image worker heartbeat timestamp is invalid"
+    if seen_at.tzinfo is None:
+        seen_at = seen_at.replace(tzinfo=timezone.utc)
+    age_seconds = max(
+        0, int((datetime.now(timezone.utc) - seen_at).total_seconds())
+    )
+    if age_seconds > _SCENE_IMAGE_WORKER_HEARTBEAT_TTL_SECONDS:
+        return False, f"scene-image worker heartbeat is {age_seconds}s old"
+    return True, None
 
 
 def _env_flag_enabled(name: str) -> bool:
@@ -465,20 +514,43 @@ async def health_check():
             }
         )
     
+    worker_healthy = True
+    worker_error = None
+    if settings.environment == "production" and db_healthy:
+        try:
+            worker_healthy, worker_error = await asyncio.wait_for(
+                asyncio.to_thread(_probe_scene_image_worker_health),
+                timeout=_HEALTH_DB_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            worker_healthy = False
+            worker_error = "scene-image worker readiness probe timed out"
+        except Exception as exc:
+            worker_healthy = False
+            worker_error = str(exc)
+
+    all_healthy = db_healthy and worker_healthy
     health_status = {
-        "status": "healthy" if db_healthy else "unhealthy",
+        "status": "healthy" if all_healthy else "unhealthy",
         "version": "1.0.0",
         "environment": settings.environment,
         "checks": {
-            "database": "ok" if db_healthy else "fail"
+            "database": "ok" if db_healthy else "fail",
+            "semantic_scene_image_worker": (
+                "ok"
+                if worker_healthy
+                else "fail"
+            ) if settings.environment == "production" else "not_required",
         }
     }
     if db_error:
         health_status["checks"]["database_error"] = db_error
+    if worker_error:
+        health_status["checks"]["semantic_scene_image_worker_error"] = worker_error
     
     logger.info("health_check", **health_status)
     
-    if not db_healthy:
+    if not all_healthy:
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content=health_status

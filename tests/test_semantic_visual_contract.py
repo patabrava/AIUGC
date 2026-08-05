@@ -727,6 +727,29 @@ def test_scene_plate_traffic_gate_round_robins_every_waiting_run():
     assert gate._next_waiter_locked() is waiter_a
 
 
+def test_scene_plate_traffic_gate_removes_a_waiter_at_job_deadline():
+    from datetime import datetime, timedelta, timezone
+
+    from app.core.errors import ThirdPartyError
+    from app.features.shot_frames.wheelchair_scene_plate import (
+        _ScenePlateImageTrafficGate,
+    )
+
+    gate = _ScenePlateImageTrafficGate()
+    gate._active = 1
+
+    with pytest.raises(ThirdPartyError, match="traffic wait") as exc_info:
+        gate.acquire(
+            "blocked-run",
+            deadline_at=datetime.now(timezone.utc) + timedelta(seconds=54),
+            execution_guard=lambda: None,
+        )
+
+    assert exc_info.value.details["reason_code"] == "scene_image_deadline"
+    assert gate._pending == []
+    assert gate._active == 1
+
+
 def test_scene_plate_production_default_keeps_one_provider_render_in_flight():
     from app.features.shot_frames import wheelchair_scene_plate
 
@@ -1049,6 +1072,109 @@ def test_scene_plate_candidates_keep_valid_images_when_diversity_recovery_is_exh
         "DIVERSITY RECOVERY ATTEMPT 3" in prompt
         for prompt in result.prompts[1:]
     )
+
+
+def test_scene_plate_authorizes_then_rechecks_lease_and_deadline_after_gate(
+    monkeypatch,
+):
+    from datetime import datetime, timedelta, timezone
+
+    from app.features.shot_frames import wheelchair_scene_plate as module
+
+    events: list[str] = []
+
+    class Client:
+        def generate_gemini_text(self, **_kwargs):
+            events.append("prompt_writer")
+            return "A complete raw camera scene prompt."
+
+        def generate_gemini_image(self, **kwargs):
+            events.append("paid_provider")
+            assert kwargs["provider_timeout_seconds"] == 17.0
+            return {
+                "image_bytes": _png(),
+                "mime_type": "image/png",
+                "model": kwargs["model"],
+            }
+
+    monkeypatch.setattr(
+        module._SCENE_PLATE_IMAGE_TRAFFIC_GATE,
+        "acquire",
+        lambda _key, **_kwargs: events.append("traffic_gate_acquired"),
+    )
+    monkeypatch.setattr(
+        module._SCENE_PLATE_IMAGE_TRAFFIC_GATE,
+        "release",
+        lambda **_kwargs: events.append("traffic_gate_released"),
+    )
+
+    def deadline_timeout(**kwargs):
+        if kwargs["cap_seconds"] == 45.0:
+            events.append("prompt_deadline")
+            return 20.0
+        events.append("provider_deadline")
+        return 17.0
+
+    monkeypatch.setattr(module, "_deadline_timeout", deadline_timeout)
+
+    module.generate_scene_plate(
+        references=(
+            _reference("identity_primary", b"front"),
+            _reference("identity_support", b"support"),
+            _reference("location", b"location"),
+        ),
+        prompt="Create one scene.",
+        llm_client=Client(),
+        traffic_key="run-1",
+        deadline_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+        execution_guard=lambda: events.append("lease_checked"),
+        provider_attempt_callback=lambda: events.append("paid_authorized"),
+    )
+
+    assert events.index("traffic_gate_acquired") < events.index("paid_authorized")
+    assert events.index("paid_authorized") < events.index(
+        "lease_checked", events.index("paid_authorized")
+    )
+    assert events.index("paid_authorized") < events.index("provider_deadline")
+    assert events.index("provider_deadline") < events.index("paid_provider")
+
+
+def test_scene_plate_does_not_call_provider_when_lease_is_lost_during_authorization():
+    from app.core.errors import ValidationError
+    from app.features.shot_frames.wheelchair_scene_plate import generate_scene_plate
+
+    active = {"value": True}
+    provider_calls: list[str] = []
+
+    class Client:
+        def generate_gemini_text(self, **_kwargs):
+            return "A complete raw camera scene prompt."
+
+        def generate_gemini_image(self, **_kwargs):
+            provider_calls.append("started")
+            return {"image_bytes": _png(), "mime_type": "image/png", "model": "x"}
+
+    def guard():
+        if not active["value"]:
+            raise ValidationError("lease lost")
+
+    def authorize():
+        active["value"] = False
+
+    with pytest.raises(ValidationError, match="lease lost"):
+        generate_scene_plate(
+            references=(
+                _reference("identity_primary", b"front"),
+                _reference("identity_support", b"support"),
+                _reference("location", b"location"),
+            ),
+            prompt="Create one scene.",
+            llm_client=Client(),
+            execution_guard=guard,
+            provider_attempt_callback=authorize,
+        )
+
+    assert provider_calls == []
 
 
 def test_scene_plate_candidates_derive_every_option_from_established_actor_anchor():

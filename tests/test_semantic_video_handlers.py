@@ -15,7 +15,12 @@ from PIL import Image
 from postgrest.exceptions import APIError
 import pytest
 
-from app.core.errors import StateTransitionError
+from app.core.errors import (
+    NotFoundError,
+    StateTransitionError,
+    ThirdPartyError,
+    ValidationError,
+)
 
 
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
@@ -28,6 +33,161 @@ os.environ.setdefault("CLOUDFLARE_R2_SECRET_ACCESS_KEY", "test-secret")
 os.environ.setdefault("CLOUDFLARE_R2_BUCKET_NAME", "test-bucket")
 os.environ.setdefault("CLOUDFLARE_R2_PUBLIC_BASE_URL", "https://example.r2.dev")
 os.environ.setdefault("CRON_SECRET", "test-cron-secret")
+
+
+@pytest.mark.parametrize(
+    ("sqlstate", "expected_error"),
+    [
+        ("40001", StateTransitionError),
+        ("P0002", NotFoundError),
+        ("22023", ValidationError),
+    ],
+)
+def test_transition_rpc_maps_queue_contract_sqlstates(sqlstate, expected_error):
+    from app.features.semantic_videos.queries import _execute_transition_rpc
+
+    error = APIError(
+        {
+            "code": sqlstate,
+            "details": None,
+            "hint": None,
+            "message": "queue boundary rejected the request",
+        }
+    )
+
+    class Query:
+        def execute(self):
+            raise error
+
+    with pytest.raises(expected_error):
+        _execute_transition_rpc(Query(), operation="scene image enqueue")
+
+
+def test_scene_image_progress_rpc_cancels_by_absolute_wall_clock(monkeypatch):
+    import asyncio
+    import time
+
+    from app.features.semantic_videos import queries
+
+    class SlowClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            await asyncio.sleep(1)
+
+    monkeypatch.setattr(queries.httpx, "AsyncClient", lambda **_kwargs: SlowClient())
+    started = time.monotonic()
+    with pytest.raises(StateTransitionError, match="absolute deadline"):
+        queries._AbsoluteDeadlineRpc(
+            function_name="update_semantic_video_candidate_progress",
+            payload={},
+            timeout_seconds=0.02,
+        ).execute()
+    assert time.monotonic() - started < 0.5
+
+
+def test_scene_image_control_rpcs_share_the_absolute_wall_clock_boundary(
+    monkeypatch,
+):
+    import asyncio
+    import time
+
+    from app.features.semantic_videos import queries
+
+    class SlowClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            await asyncio.sleep(1)
+
+    monkeypatch.setattr(queries.httpx, "AsyncClient", lambda **_kwargs: SlowClient())
+    calls = (
+        lambda: queries.authorize_scene_image_provider_attempt(
+            job_id="job-1",
+            worker_id="worker-1",
+            lease_token="lease-1",
+            timeout_seconds=0.02,
+        ),
+        lambda: queries.reserve_scene_image_candidate_generation(
+            "post-1",
+            job_id="job-1",
+            worker_id="worker-1",
+            job_lease_token="lease-1",
+            expected_revision=None,
+            run_create={},
+            reservation_owner="worker-1",
+            reservation_token="reservation-1",
+            reservation_seconds=60,
+            timeout_seconds=0.02,
+        ),
+        lambda: queries.finish_scene_image_job(
+            job_id="job-1",
+            worker_id="worker-1",
+            lease_token="lease-1",
+            status="failed",
+            timeout_seconds=0.02,
+        ),
+        lambda: queries.release_candidate_reservation(
+            run_id="run-1",
+            expected_revision=1,
+            reservation_token="reservation-1",
+            timeout_seconds=0.02,
+        ),
+    )
+
+    started = time.monotonic()
+    for call in calls:
+        with pytest.raises(StateTransitionError, match="absolute deadline"):
+            call()
+    assert time.monotonic() - started < 0.5
+
+
+def test_scene_image_reconciliation_read_has_an_absolute_wall_clock_boundary(
+    monkeypatch,
+):
+    import asyncio
+    import time
+
+    from app.features.semantic_videos import queries
+
+    class SlowClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, *_args, **_kwargs):
+            await asyncio.sleep(1)
+
+    monkeypatch.setattr(queries.httpx, "AsyncClient", lambda **_kwargs: SlowClient())
+    started = time.monotonic()
+    with pytest.raises(StateTransitionError, match="job read"):
+        queries.get_scene_image_job("post-1", timeout_seconds=0.02)
+    assert time.monotonic() - started < 0.5
+
+
+def test_scene_image_core_read_has_an_absolute_wall_clock_boundary():
+    import time
+
+    from app.features.semantic_videos import handlers
+
+    started = time.monotonic()
+    with pytest.raises(ThirdPartyError, match="database read"):
+        handlers._call_scene_image_read_with_deadline(
+            lambda: time.sleep(1),
+            timeout_seconds=0.02,
+            operation="context",
+        )
+    assert time.monotonic() - started < 0.5
 
 
 SCRIPT = " ".join(
@@ -297,26 +457,53 @@ class _FakeStorage:
         self.download_calls = []
         self.upload_calls = []
 
-    def download_video(self, *, video_url: str, correlation_id: str):
+    def download_video(
+        self,
+        *,
+        video_url: str,
+        correlation_id: str,
+        timeout_seconds: float | None = None,
+    ):
         self.download_calls.append((video_url, correlation_id))
         return self.objects[video_url]
 
-    def upload_image(self, *, image_bytes: bytes, file_name: str, correlation_id: str, content_type: str):
+    def upload_image(
+        self,
+        *,
+        image_bytes: bytes,
+        file_name: str,
+        correlation_id: str,
+        content_type: str,
+        timeout_seconds: float | None = None,
+        object_key: str | None = None,
+    ):
         self.upload_calls.append(
             {
                 "image_bytes": image_bytes,
                 "file_name": file_name,
                 "correlation_id": correlation_id,
                 "content_type": content_type,
+                "timeout_seconds": timeout_seconds,
+                "object_key": object_key,
             }
         )
-        url = f"https://storage/generated/{file_name}"
+        storage_key = object_key or f"generated/{file_name}"
+        url = f"https://storage/{storage_key}"
         self.objects[url] = image_bytes
         return {
             "url": url,
-            "storage_key": f"generated/{file_name}",
+            "storage_key": storage_key,
             "size": len(image_bytes),
             "file_type": content_type,
+        }
+
+    def prepare_image_upload(
+        self, *, file_name: str, object_key: str | None = None
+    ):
+        storage_key = object_key or f"generated/{file_name}"
+        return {
+            "url": f"https://storage/{storage_key}",
+            "storage_key": storage_key,
         }
 
 
@@ -512,6 +699,7 @@ def _install_repository(monkeypatch):
         reserved_revision,
         reservation_token,
         progress,
+        timeout_seconds=None,
     ):
         assert run_id == state["run"]["id"]
         with state["reservation_lock"]:
@@ -525,6 +713,7 @@ def _install_repository(monkeypatch):
         run_id,
         expected_revision,
         reservation_token,
+        timeout_seconds=None,
     ):
         assert run_id == state["run"]["id"]
         with state["reservation_lock"]:
@@ -712,6 +901,7 @@ def _install_repository(monkeypatch):
         cancelled_by,
         reason,
         correlation_id,
+        timeout_seconds=None,
     ):
         if state["run"]["revision"] != expected_revision:
             raise StateTransitionError("Semantic video cancellation revision conflict.")
@@ -749,6 +939,9 @@ def _install_repository(monkeypatch):
 
     monkeypatch.setattr(handlers, "load_semantic_video_context", lambda post_id: deepcopy(state["context"]))
     monkeypatch.setattr(handlers, "get_run_by_post", get_run_by_post)
+    monkeypatch.setattr(
+        handlers, "get_scene_image_job", lambda _post_id, **_kwargs: None
+    )
     monkeypatch.setattr(
         handlers,
         "get_actor_scene_plate_anchor",
@@ -1207,6 +1400,435 @@ def test_candidate_endpoint_allows_a_new_run_after_terminal_history(monkeypatch,
     assert state["takes"] == []
 
 
+def test_production_candidate_endpoint_cannot_bypass_the_scene_image_queue(
+    monkeypatch,
+):
+    handlers, state, storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    provider_calls = []
+    monkeypatch.setattr(
+        handlers,
+        "get_settings",
+        lambda: SimpleNamespace(environment="production"),
+    )
+    monkeypatch.setattr(
+        handlers,
+        "generate_scene_plate_candidates",
+        lambda **kwargs: provider_calls.append(kwargs) or _scene_plate_result(),
+    )
+
+    response = TestClient(app, base_url="http://localhost").post(
+        "/semantic-videos/posts/post-1/candidates",
+        json={"candidate_count": 3},
+    )
+
+    assert response.status_code == 409, response.text
+    assert "Direct scene-plate generation is retired" in response.text
+    assert provider_calls == []
+    assert storage.download_calls == []
+    assert storage.upload_calls == []
+    assert state["run"] is None
+
+
+def test_worker_lease_uses_queue_fenced_reserve_and_atomic_finalize(monkeypatch):
+    handlers, state, _storage = _install_repository(monkeypatch)
+
+    legacy_reserve = handlers.reserve_candidate_generation
+    legacy_finalize = handlers.finalize_candidate_generation
+    queue_calls = []
+
+    def queue_reserve(post_id, **kwargs):
+        queue_calls.append(("reserve", deepcopy(kwargs)))
+        return legacy_reserve(
+            post_id,
+            expected_revision=kwargs["expected_revision"],
+            run_create=kwargs["run_create"],
+            reservation_owner=kwargs["reservation_owner"],
+            reservation_token=kwargs["reservation_token"],
+            reservation_seconds=kwargs["reservation_seconds"],
+        )
+
+    def queue_finalize(run_id, **kwargs):
+        queue_calls.append(("finalize", deepcopy(kwargs)))
+        return legacy_finalize(
+            run_id,
+            reserved_revision=kwargs["reserved_revision"],
+            reservation_token=kwargs["reservation_token"],
+            run_updates=kwargs["run_updates"],
+        )
+
+    monkeypatch.setattr(
+        handlers, "reserve_scene_image_candidate_generation", queue_reserve
+    )
+    monkeypatch.setattr(
+        handlers, "finalize_scene_image_candidate_generation", queue_finalize
+    )
+    monkeypatch.setattr(
+        handlers,
+        "reserve_candidate_generation",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("retired direct reserve used")
+        ),
+    )
+    monkeypatch.setattr(
+        handlers,
+        "finalize_candidate_generation",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("retired direct finalize used")
+        ),
+    )
+    generated = _scene_plate_result(marker="queue-fenced")
+    generated.candidates = generated.candidates[:1]
+    generated.prompts = generated.prompts[:1]
+    provider_arguments = []
+    provider_attempts = []
+    provider_windows = []
+    monkeypatch.setattr(
+        handlers,
+        "authorize_scene_image_provider_attempt",
+        lambda **kwargs: provider_attempts.append(deepcopy(kwargs)) or kwargs,
+    )
+
+    def generate_one(**kwargs):
+        provider_arguments.append(kwargs)
+        kwargs["execution_guard"]()
+        kwargs["provider_attempt_callback"]()
+        return generated
+
+    monkeypatch.setattr(
+        handlers,
+        "generate_scene_plate_candidates",
+        generate_one,
+    )
+    request = SimpleNamespace(
+        state=SimpleNamespace(
+            user_email="worker@example.com",
+            correlation_id="queue-fenced-test",
+            scene_image_job_id="job-1",
+            scene_image_worker_id="semantic-scene-image-v2-test",
+            scene_image_lease_token="lease-1",
+            scene_image_expected_run_id="",
+            scene_image_provider_timeout_seconds=80.0,
+            scene_image_deadline_at=(
+                datetime.now(timezone.utc) + timedelta(minutes=8)
+            ).isoformat(),
+            scene_image_lease_guard=SimpleNamespace(
+                assert_active=lambda: None,
+                assert_provider_window=lambda seconds: provider_windows.append(seconds),
+            ),
+        )
+    )
+
+    result = handlers.generate_candidates(
+        "post-1",
+        SimpleNamespace(candidate_count=1, expected_revision=None),
+        request,
+    )
+
+    assert result.data["run_id"] == "run-1"
+    assert [name for name, _kwargs in queue_calls] == ["reserve", "finalize"]
+    assert queue_calls[0][1]["job_id"] == "job-1"
+    assert queue_calls[1][1]["job_lease_token"] == "lease-1"
+    assert 0 < queue_calls[1][1]["timeout_seconds"] <= 10
+    assert provider_arguments[0]["candidate_count"] == 1
+    assert provider_arguments[0]["provider_timeout_seconds"] == 80.0
+    assert callable(provider_arguments[0]["execution_guard"])
+    assert provider_attempts == [
+        {
+                "job_id": "job-1",
+                "worker_id": "semantic-scene-image-v2-test",
+                "lease_token": "lease-1",
+                "timeout_seconds": 5.0,
+        }
+    ]
+    assert provider_windows == [110.0]
+    assert 0 < _storage.upload_calls[0]["timeout_seconds"] <= 20
+    assert len(state["run"]["master_snapshot"]["candidates"]) == 1
+
+
+def test_lost_upload_ack_resumes_checkpoint_without_a_second_provider_render(
+    monkeypatch,
+):
+    handlers, state, storage = _install_repository(monkeypatch)
+    legacy_reserve = handlers.reserve_candidate_generation
+    legacy_finalize = handlers.finalize_candidate_generation
+
+    def queue_reserve(post_id, **kwargs):
+        return legacy_reserve(
+            post_id,
+            expected_revision=kwargs["expected_revision"],
+            run_create=kwargs["run_create"],
+            reservation_owner=kwargs["reservation_owner"],
+            reservation_token=kwargs["reservation_token"],
+            reservation_seconds=kwargs["reservation_seconds"],
+        )
+
+    def queue_finalize(run_id, **kwargs):
+        return legacy_finalize(
+            run_id,
+            reserved_revision=kwargs["reserved_revision"],
+            reservation_token=kwargs["reservation_token"],
+            run_updates=kwargs["run_updates"],
+        )
+
+    monkeypatch.setattr(
+        handlers, "reserve_scene_image_candidate_generation", queue_reserve
+    )
+    monkeypatch.setattr(
+        handlers, "finalize_scene_image_candidate_generation", queue_finalize
+    )
+    monkeypatch.setattr(
+        handlers,
+        "authorize_scene_image_provider_attempt",
+        lambda **kwargs: kwargs,
+    )
+
+    generated = _scene_plate_result(marker="upload-ack-loss")
+    generated.candidates = generated.candidates[:1]
+    generated.prompts = generated.prompts[:1]
+    provider_renders = []
+
+    def generate_one(**kwargs):
+        initial = list(kwargs.get("initial_candidates") or [])
+        if initial:
+            resumed = _scene_plate_result(marker="upload-ack-loss-resumed")
+            resumed.candidates = initial
+            resumed.prompts = [initial[0].prompt]
+            resumed.derivation_mode = "bootstrap"
+            return resumed
+        provider_renders.append("rendered")
+        kwargs["provider_attempt_callback"]()
+        kwargs["candidate_ready_callback"](generated.candidates[0])
+        return generated
+
+    monkeypatch.setattr(handlers, "generate_scene_plate_candidates", generate_one)
+    original_upload = storage.upload_image
+    lost_ack = {"pending": True}
+
+    def upload_then_lose_ack(**kwargs):
+        result = original_upload(**kwargs)
+        if lost_ack["pending"]:
+            lost_ack["pending"] = False
+            raise TimeoutError("PUT committed but its response was lost")
+        return result
+
+    monkeypatch.setattr(storage, "upload_image", upload_then_lose_ack)
+
+    first_request = SimpleNamespace(
+        state=SimpleNamespace(
+            user_email="worker@example.com",
+            correlation_id="upload-ack-loss-1",
+            scene_image_job_id="job-1",
+            scene_image_worker_id="semantic-scene-image-v2-test",
+            scene_image_lease_token="lease-1",
+            scene_image_expected_run_id="",
+            scene_image_provider_timeout_seconds=80.0,
+            scene_image_deadline_at=(
+                datetime.now(timezone.utc) + timedelta(minutes=8)
+            ).isoformat(),
+            scene_image_lease_guard=SimpleNamespace(assert_active=lambda: None),
+        )
+    )
+    with pytest.raises(TimeoutError, match="response was lost"):
+        handlers.generate_candidates(
+            "post-1",
+            SimpleNamespace(candidate_count=1, expected_revision=None),
+            first_request,
+        )
+
+    checkpoint = state["run"]["candidate_generation_progress"]["details"][
+        "partial_candidates"
+    ][0]
+    assert checkpoint["upload_state"] == "pending"
+    assert checkpoint["storage_uri"] in storage.objects
+    assert len(provider_renders) == 1
+
+    checkpoint_uri = str(checkpoint["storage_uri"])
+    original_download = storage.download_video
+
+    def timeout_checkpoint_download(**kwargs):
+        if str(kwargs.get("video_url") or "") == checkpoint_uri:
+            raise TimeoutError("temporary checkpoint GET timeout")
+        return original_download(**kwargs)
+
+    monkeypatch.setattr(storage, "download_video", timeout_checkpoint_download)
+    second_request = SimpleNamespace(
+        state=SimpleNamespace(
+            user_email="worker@example.com",
+            correlation_id="upload-ack-loss-2",
+            scene_image_job_id="job-2",
+            scene_image_worker_id="semantic-scene-image-v2-test",
+            scene_image_lease_token="lease-2",
+            scene_image_expected_run_id="run-1",
+            scene_image_provider_timeout_seconds=80.0,
+            scene_image_deadline_at=(
+                datetime.now(timezone.utc) + timedelta(minutes=8)
+            ).isoformat(),
+            scene_image_lease_guard=SimpleNamespace(assert_active=lambda: None),
+        )
+    )
+    with pytest.raises(ThirdPartyError, match="temporarily unavailable"):
+        handlers.generate_candidates(
+            "post-1",
+            SimpleNamespace(
+                candidate_count=1,
+                expected_revision=int(state["run"]["revision"]),
+            ),
+            second_request,
+        )
+
+    assert len(provider_renders) == 1
+    assert len(storage.upload_calls) == 1
+    assert state["run"]["candidate_generation_progress"]["details"][
+        "partial_candidates"
+    ][0]["storage_uri"] == checkpoint_uri
+
+    monkeypatch.setattr(storage, "download_video", original_download)
+    third_request = SimpleNamespace(
+        state=SimpleNamespace(
+            user_email="worker@example.com",
+            correlation_id="upload-ack-loss-3",
+            scene_image_job_id="job-3",
+            scene_image_worker_id="semantic-scene-image-v2-test",
+            scene_image_lease_token="lease-3",
+            scene_image_expected_run_id="run-1",
+            scene_image_provider_timeout_seconds=80.0,
+            scene_image_deadline_at=(
+                datetime.now(timezone.utc) + timedelta(minutes=8)
+            ).isoformat(),
+            scene_image_lease_guard=SimpleNamespace(assert_active=lambda: None),
+        )
+    )
+    result = handlers.generate_candidates(
+        "post-1",
+        SimpleNamespace(
+            candidate_count=1,
+            expected_revision=int(state["run"]["revision"]),
+        ),
+        third_request,
+    )
+
+    assert result.data["run_id"] == "run-1"
+    assert len(provider_renders) == 1
+    assert len(storage.upload_calls) == 1
+
+
+def test_upload_checkpoint_ack_loss_is_reconciled_before_the_put(monkeypatch):
+    handlers, state, storage = _install_repository(monkeypatch)
+    generated = _scene_plate_result(marker="checkpoint-ack-loss")
+    generated.candidates = generated.candidates[:1]
+    generated.prompts = generated.prompts[:1]
+    provider_renders = []
+
+    def generate_one(**kwargs):
+        provider_renders.append("rendered")
+        kwargs["candidate_ready_callback"](generated.candidates[0])
+        return generated
+
+    monkeypatch.setattr(handlers, "generate_scene_plate_candidates", generate_one)
+    committed_update = handlers.update_candidate_generation_progress
+    lost_ack = {"pending": True}
+
+    def checkpoint_then_lose_ack(**kwargs):
+        result = committed_update(**kwargs)
+        if (
+            lost_ack["pending"]
+            and kwargs["progress"].get("phase") == "uploading_candidate"
+        ):
+            lost_ack["pending"] = False
+            raise TimeoutError("checkpoint committed but response was lost")
+        return result
+
+    monkeypatch.setattr(
+        handlers,
+        "update_candidate_generation_progress",
+        checkpoint_then_lose_ack,
+    )
+
+    result = handlers.generate_candidates(
+        "post-1",
+        SimpleNamespace(candidate_count=1, expected_revision=None),
+        SimpleNamespace(
+            state=SimpleNamespace(
+                user_email="worker@example.com",
+                correlation_id="checkpoint-ack-loss",
+            )
+        ),
+    )
+
+    assert result.data["run_id"] == "run-1"
+    assert provider_renders == ["rendered"]
+    assert len(storage.upload_calls) == 1
+    assert state["run"]["master_snapshot"]["candidates"][0]["sha256"]
+
+
+def test_worker_lease_rejects_incomplete_context_before_provider_work(monkeypatch):
+    handlers, _state, storage = _install_repository(monkeypatch)
+    provider_calls = []
+    monkeypatch.setattr(
+        handlers,
+        "generate_scene_plate_candidates",
+        lambda **kwargs: provider_calls.append(kwargs),
+    )
+    request = SimpleNamespace(
+        state=SimpleNamespace(
+            scene_image_job_id="job-1",
+            scene_image_worker_id="semantic-scene-image-v2-test",
+        )
+    )
+
+    with pytest.raises(StateTransitionError, match="lease context is incomplete"):
+        handlers.generate_candidates(
+            "post-1",
+            SimpleNamespace(candidate_count=1, expected_revision=None),
+            request,
+        )
+
+    assert provider_calls == []
+    assert storage.download_calls == []
+
+
+def test_queued_worker_cannot_resurrect_a_run_cancelled_after_enqueue(monkeypatch):
+    handlers, state, storage = _install_repository(monkeypatch)
+    _seed_awaiting_paid_run(state, revision=0)
+    state["run"]["stage"] = "failed"
+    state["run"]["revision"] = 1
+    provider_calls = []
+    monkeypatch.setattr(
+        handlers,
+        "generate_scene_plate_candidates",
+        lambda **kwargs: provider_calls.append(kwargs),
+    )
+    request = SimpleNamespace(
+        state=SimpleNamespace(
+            user_email="worker@example.com",
+            correlation_id="cancel-race",
+            scene_image_job_id="job-stale",
+            scene_image_worker_id="semantic-scene-image-v2-test",
+            scene_image_lease_token="lease-stale",
+            scene_image_expected_run_id="run-1",
+            scene_image_provider_timeout_seconds=80.0,
+            scene_image_deadline_at=(
+                datetime.now(timezone.utc) + timedelta(minutes=8)
+            ).isoformat(),
+            scene_image_lease_guard=SimpleNamespace(assert_active=lambda: None),
+        )
+    )
+
+    with pytest.raises(StateTransitionError, match="stale and cannot replace"):
+        handlers.generate_candidates(
+            "post-1",
+            SimpleNamespace(candidate_count=1, expected_revision=0),
+            request,
+        )
+
+    assert provider_calls == []
+    assert storage.download_calls == []
+    assert state["run"]["stage"] == "failed"
+    assert state["run"]["revision"] == 1
+
+
 def test_candidate_endpoint_downloads_scene_references_concurrently(monkeypatch):
     handlers, _state, _storage = _install_repository(monkeypatch)
     from app.main import app
@@ -1216,11 +1838,16 @@ def test_candidate_endpoint_downloads_scene_references_concurrently(monkeypatch)
     roles_lock = Lock()
     original_download = handlers._download_reference
 
-    def concurrent_download(row, *, role, request):
+    def concurrent_download(row, *, role, request, timeout_seconds=None):
         with roles_lock:
             roles.append(role)
         barrier.wait(timeout=2)
-        return original_download(row, role=role, request=request)
+        return original_download(
+            row,
+            role=role,
+            request=request,
+            timeout_seconds=timeout_seconds,
+        )
 
     monkeypatch.setattr(handlers, "_download_reference", concurrent_download)
     monkeypatch.setattr(
@@ -1922,7 +2549,7 @@ def test_progress_endpoint_projects_queued_scene_image_without_run(monkeypatch):
     monkeypatch.setattr(
         handlers,
         "get_scene_image_job",
-        lambda _post_id: {
+        lambda _post_id, **_kwargs: {
             "id": "job-queued",
             "status": "queued",
             "expected_revision": None,
@@ -1935,10 +2562,144 @@ def test_progress_endpoint_projects_queued_scene_image_without_run(monkeypatch):
 
     assert response.status_code == 200, response.text
     payload = response.json()["data"]
-    assert payload["run_id"] == "job-queued"
+    assert payload["run_id"] == ""
+    assert payload["scene_image_job_id"] == "job-queued"
+    assert payload["scene_image_job_status"] == "queued"
+    assert payload["stage"] == "scene_image_queued"
     assert payload["candidate_generation_status"] == "generating"
     assert payload["candidate_generation_phase"] == "preparing_references"
     assert payload["candidate_count"] == 0
+
+
+def test_progress_endpoint_projects_new_queue_operation_over_historical_run(monkeypatch):
+    handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    _seed_awaiting_paid_run(state)
+    state["run"]["candidate_generation_progress"] = {
+        "phase": "ready",
+        "details": {"candidate_count": 1},
+        "updated_at": "2026-08-04T20:00:00+00:00",
+    }
+    monkeypatch.setattr(
+        handlers,
+        "get_scene_image_job",
+        lambda _post_id, **_kwargs: {
+            "id": "job-regeneration",
+            "status": "queued",
+            "expected_run_id": state["run"]["id"],
+            "expected_revision": state["run"]["revision"],
+            "run_id": None,
+            "created_at": "2026-08-05T05:00:00+00:00",
+            "deadline_at": "2099-08-05T06:00:00+00:00",
+        },
+    )
+
+    payload = TestClient(app, base_url="http://localhost").get(
+        "/semantic-videos/posts/post-1/progress"
+    ).json()["data"]
+
+    assert payload["scene_image_job_id"] == "job-regeneration"
+    assert payload["candidate_generation_status"] == "generating"
+    assert payload["candidate_generation_phase"] == "preparing_references"
+    assert payload["stage"] == "scene_image_queued"
+    assert payload["run_id"] == "run-1"
+
+
+def test_progress_endpoint_makes_terminal_scene_job_explicit_and_retryable(monkeypatch):
+    handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    _seed_awaiting_paid_run(state)
+    monkeypatch.setattr(
+        handlers,
+        "get_scene_image_job",
+        lambda _post_id, **_kwargs: {
+            "id": "job-failed",
+            "status": "failed",
+            "expected_run_id": state["run"]["id"],
+            "expected_revision": state["run"]["revision"],
+            "run_id": None,
+            "created_at": "2026-08-05T05:00:00+00:00",
+            "finished_at": "2026-08-05T05:01:00+00:00",
+            "error": {
+                "code": "provider_timeout",
+                "message": "The renderer timed out safely. Retry this script.",
+            },
+        },
+    )
+
+    payload = TestClient(app, base_url="http://localhost").get(
+        "/semantic-videos/posts/post-1/progress"
+    ).json()["data"]
+
+    assert payload["candidate_generation_status"] == "stalled"
+    assert payload["candidate_generation_phase"] == "failed"
+    assert payload["stage"] == "scene_image_failed"
+    assert payload["status_message"] == "The renderer timed out safely. Retry this script."
+
+
+def test_failed_unlinked_scene_job_does_not_expose_a_terminal_run_revision(
+    monkeypatch,
+):
+    handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    state["run"] = {
+        "id": "terminal-run",
+        "post_id": "post-1",
+        "revision": 9,
+        "stage": "failed",
+    }
+    monkeypatch.setattr(
+        handlers,
+        "get_scene_image_job",
+        lambda _post_id, **_kwargs: {
+            "id": "job-failed-before-reservation",
+            "status": "failed",
+            "expected_revision": 9,
+            "run_id": None,
+            "created_at": "2026-08-05T05:00:00+00:00",
+            "finished_at": "2026-08-05T05:00:05+00:00",
+            "error": {"code": "reference_download_failed", "message": "Retry safely."},
+        },
+    )
+
+    payload = TestClient(app, base_url="http://localhost").get(
+        "/semantic-videos/posts/post-1/progress"
+    ).json()["data"]
+
+    assert payload["stage"] == "scene_image_failed"
+    assert payload["run_id"] == ""
+    assert payload["revision"] == 9
+
+
+def test_progress_endpoint_stops_an_operation_at_its_deadline(monkeypatch):
+    handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    state["run"] = None
+    monkeypatch.setattr(
+        handlers,
+        "get_scene_image_job",
+        lambda _post_id, **_kwargs: {
+            "id": "job-expired",
+            "status": "processing",
+            "expected_revision": None,
+            "created_at": "2026-08-04T20:00:00+00:00",
+            "started_at": "2026-08-04T20:00:01+00:00",
+            "deadline_at": "2026-08-04T20:08:00+00:00",
+            "lease_expires_at": "2026-08-04T20:02:00+00:00",
+        },
+    )
+
+    payload = TestClient(app, base_url="http://localhost").get(
+        "/semantic-videos/posts/post-1/progress"
+    ).json()["data"]
+
+    assert payload["candidate_generation_status"] == "stalled"
+    assert payload["stage"] == "scene_image_failed"
+    assert "eight-minute deadline" in payload["status_message"]
 
 
 def test_progress_endpoint_returns_idle_instead_of_404_before_first_job(monkeypatch):
@@ -1946,7 +2707,9 @@ def test_progress_endpoint_returns_idle_instead_of_404_before_first_job(monkeypa
     from app.main import app
 
     state["run"] = None
-    monkeypatch.setattr(handlers, "get_scene_image_job", lambda _post_id: None)
+    monkeypatch.setattr(
+        handlers, "get_scene_image_job", lambda _post_id, **_kwargs: None
+    )
     response = TestClient(app, base_url="http://localhost").get(
         "/semantic-videos/posts/post-1/progress"
     )
@@ -3881,6 +4644,7 @@ def test_cancel_uses_one_atomic_transition(monkeypatch):
         cancelled_by,
         reason,
         correlation_id,
+        timeout_seconds=None,
     ):
         calls.append((run_id, expected_revision, cancelled_by, reason, correlation_id))
         cancelled = 0
