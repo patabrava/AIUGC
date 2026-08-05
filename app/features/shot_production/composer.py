@@ -246,6 +246,40 @@ def _expand_asr_compounds(
     return tuple(expanded_words), tuple(expanded_sources)
 
 
+def _expand_script_compounds_from_asr(
+    expected_words: Sequence[str],
+    actual_words: Sequence[str],
+) -> Tuple[str, ...]:
+    """Split approved-script compounds that ASR emitted as adjacent words.
+
+    Deepgram may split one German orthographic compound (for example
+    ``Plattformlift`` -> ``Plattform Lift``). Normalize only exact joins of two
+    to four adjacent ASR tokens, keeping semantic substitutions visible to WER.
+    """
+    compound_parts: dict[str, Tuple[str, ...]] = {}
+    ambiguous_compounds: set[str] = set()
+    for start in range(len(actual_words)):
+        for width in range(2, min(4, len(actual_words) - start) + 1):
+            parts = tuple(actual_words[start : start + width])
+            compound = "".join(parts)
+            if len(compound) < 6:
+                continue
+            existing = compound_parts.get(compound)
+            if existing is not None and existing != parts:
+                ambiguous_compounds.add(compound)
+            else:
+                compound_parts[compound] = parts
+
+    expanded: list[str] = []
+    for expected_word in expected_words:
+        parts = compound_parts.get(expected_word)
+        if parts is None or expected_word in ambiguous_compounds:
+            expanded.append(expected_word)
+        else:
+            expanded.extend(parts)
+    return tuple(expanded)
+
+
 def _finite_non_negative_seconds(value: object) -> Optional[float]:
     try:
         seconds = float(value)
@@ -272,6 +306,7 @@ def evaluate_take_transcript(
 
     expected_words = _canonicalize_german_measurements(normalize_german_words(beat.text))
     actual_words, source_words = _transcript_words_with_sources(transcript)
+    expected_words = _expand_script_compounds_from_asr(expected_words, actual_words)
     actual_words, source_words = _expand_asr_compounds(
         expected_words,
         actual_words,

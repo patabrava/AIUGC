@@ -132,6 +132,7 @@
             {% endif %}
 
             {% if semantic_step == 'production' %}
+            {% set progress_terminal = item.stage in ['completed', 'retry_approval_required', 'failed'] %}
             <div class="mt-4 grid grid-cols-2 gap-3" aria-label="Video generation progress">
                 <div class="rounded-xl border border-[#006AAB]/15 p-3 text-sm">
                     <span class="text-[#1C2740]/60">Generated</span><strong class="ml-2 text-[#1C2740]"><span data-field="generated-takes">{{ item.generated_takes }}</span>/<span data-field="total-takes">{{ item.take_count }}</span></strong>
@@ -153,9 +154,9 @@
                 <div class="flex items-center justify-between gap-3 text-sm font-bold text-[#1C2740]">
                     <span class="flex items-center gap-2">
                         <span class="hidden h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-[#006AAB]/25 border-t-[#006AAB]" data-field="progress-spinner" aria-hidden="true"></span>
-                        <span data-field="progress-message" aria-live="polite">{% if item.stage == 'completed' %}Video ready. No additional generation is pending.{% else %}Waiting for live generation status…{% endif %}</span>
+                        <span data-field="progress-message" aria-live="polite">{% if item.stage == 'completed' %}Video ready. No additional generation is pending.{% elif item.stage in generation_blocked_stages %}Generation stopped. Review the available result and status.{% else %}Waiting for live generation status…{% endif %}</span>
                     </span>
-                    <span data-field="progress-percent">{{ 100 if item.stage == 'completed' else 0 }}%</span>
+                    <span data-field="progress-percent">{{ 100 if progress_terminal else 0 }}%</span>
                 </div>
                 <div class="mt-2 h-2 overflow-hidden rounded-full bg-[#006AAB]/10">
                     <div
@@ -165,13 +166,13 @@
                         aria-label="Semantic video generation progress"
                         aria-valuemin="0"
                         aria-valuemax="100"
-                        aria-valuenow="{{ 100 if item.stage == 'completed' else 0 }}"
-                        style="width: {{ 100 if item.stage == 'completed' else 0 }}%"
+                        aria-valuenow="{{ 100 if progress_terminal else 0 }}"
+                        style="width: {{ 100 if progress_terminal else 0 }}%"
                     ></div>
                 </div>
                 <dl class="mt-2 grid grid-cols-2 gap-3 text-xs text-[#1C2740]/70">
                     <div><dt>Elapsed</dt><dd class="font-bold text-[#1C2740]" data-field="elapsed">—</dd></div>
-                    <div><dt>Typical time remaining</dt><dd class="font-bold text-[#1C2740]" data-field="remaining">{% if item.stage == 'completed' %}Ready{% else %}Calculating…{% endif %}</dd></div>
+                    <div><dt>Typical time remaining</dt><dd class="font-bold text-[#1C2740]" data-field="remaining">{% if item.stage == 'completed' %}Ready{% elif item.stage in generation_blocked_stages %}Review required{% else %}Calculating…{% endif %}</dd></div>
                 </dl>
             </section>
             {% endif %}

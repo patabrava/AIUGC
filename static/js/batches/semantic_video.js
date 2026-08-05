@@ -2,6 +2,7 @@
     const activePolls = new WeakMap();
     const candidateProgressRequests = new WeakMap();
     const sceneImageButtonDomainDisabled = new WeakMap();
+    const scheduledWorkflowReloads = new WeakSet();
     const SCENE_IMAGE_POST_TIMEOUT_MS = 15000;
     const RUN_PROGRESS_STAGES = [
         'generating',
@@ -656,7 +657,8 @@
                 })
                 : String(progress.candidate_generation_status || 'idle');
             if (progress.stage === 'retry_approval_required' || progress.stage === 'completed') {
-                window.location.reload();
+                stopPolling(root);
+                reloadWhenProductionSettled(root);
                 return progress;
             }
             if (managesSceneImage && ['ready', 'stalled'].includes(candidateStatus)) {
@@ -702,6 +704,29 @@
         const timer = window.setInterval(() => pollProgress(root), force ? 2000 : 8000);
         activePolls.set(root, timer);
         if (immediate) pollProgress(root);
+    }
+
+    function reloadWhenProductionSettled(root) {
+        const workflow = root.closest('[data-semantic-video-workflow]') || document;
+        const roots = Array.from(workflow.querySelectorAll('[data-semantic-video-controller]'));
+        const hasActiveProduction = roots.some((candidateRoot) => (
+            RUN_PROGRESS_STAGES.includes(candidateRoot.dataset.stage)
+        ));
+        if (hasActiveProduction || scheduledWorkflowReloads.has(workflow)) return false;
+        scheduledWorkflowReloads.add(workflow);
+        window.setTimeout(() => window.location.reload(), 100);
+        return true;
+    }
+
+    async function hydrateRunProgress(root) {
+        if (hasSceneImageSurface(root)) return;
+        try {
+            const progress = await fetchCurrentProgress(root);
+            if (!root.isConnected || !progress) return;
+            updateProgress(root, progress);
+        } catch (error) {
+            if (root.dataset.stage !== 'not_started') setStatus(root, error.message, true);
+        }
     }
 
     async function reconcileMasterApproval(root) {
@@ -995,6 +1020,7 @@
             }, 'Continuing with the existing generated videos at no additional Veo cost…');
         });
         recoverCandidateProgress(root);
+        hydrateRunProgress(root);
         startPolling(root);
     }
 

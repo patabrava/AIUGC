@@ -190,6 +190,43 @@ def test_german_asr_compound_does_not_create_false_missing_last_word():
     assert qa.final_word_end_seconds == 6.90
 
 
+def test_german_script_compound_split_by_asr_is_orthographically_equivalent():
+    beat = _beat(
+        0,
+        (
+            "Ein Plattformlift kann gerade, kurvige, steile oder enge Treppen "
+            "für deinen Alltag wieder sicher nutzbar machen."
+        ),
+    )
+    transcript = _transcript(
+        ("Ein", 0.16, 0.40),
+        ("Plattform", 0.40, 0.88),
+        ("Lift", 0.88, 1.20),
+        ("kann", 1.20, 1.60),
+        ("gerade", 1.60, 2.10),
+        ("kurvige", 2.24, 2.74),
+        ("steile", 3.04, 3.54),
+        ("oder", 3.60, 3.84),
+        ("enge", 3.84, 4.24),
+        ("Treppen", 4.24, 4.72),
+        ("für", 4.72, 4.96),
+        ("deinen", 4.96, 5.28),
+        ("Alltag", 5.28, 5.76),
+        ("wieder", 5.76, 6.00),
+        ("sicher", 6.00, 6.40),
+        ("nutzbar", 6.40, 6.80),
+        ("machen", 6.80, 7.30),
+    )
+
+    qa = evaluate_take_transcript(beat, transcript, other_beats=[])
+
+    assert qa.passed is True
+    assert qa.word_error_rate == 0.0
+    assert qa.expected_words == qa.actual_words
+    assert qa.first_word_start_seconds == 0.16
+    assert qa.final_word_end_seconds == 7.30
+
+
 def test_deepgram_numeric_formatting_does_not_reject_german_achte():
     beat = _beat(0, "Achte deshalb auf erreichbare Displays.")
     transcript = _transcript(

@@ -1273,6 +1273,10 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     ).read()
 
     assert "/progress" in source
+    assert "hydrateRunProgress(root)" in source
+    assert "reloadWhenProductionSettled(root)" in source
+    assert "RUN_PROGRESS_STAGES.includes(candidateRoot.dataset.stage)" in source
+    assert "stopPolling(root);" in source
     assert "confirm(" in source
     assert "approveReadyBatchPlans(workflow, button)" in source
     assert "approve-batch-plans" in source
@@ -1670,3 +1674,7 @@ def test_acoustic_plan_failure_renders_localized_paid_retry_for_legacy_evidence(
     ).render(batch=_semantic_batch(), batch_view=view)
     assert 'data-action="approve-retry" data-cost-usd="6.40"' in html
     assert "Continue with generated videos · $0.00" not in html
+    assert "Generation stopped. Review the available result and status." in html
+    assert 'data-field="progress-percent">100%' in html
+    assert 'aria-valuenow="100"' in html
+    assert 'data-field="remaining">Review required' in html
