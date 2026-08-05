@@ -1389,6 +1389,7 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert "hx-on::after-request" not in template_source
     assert "progress.estimated_remaining_seconds" in source
     assert "progress.progress_percent" in source
+    assert "cache: 'no-store'" in source
     assert "updateStatStatus(root, progress)" in source
     assert "generated-status" in source
     assert "verified-status" in source

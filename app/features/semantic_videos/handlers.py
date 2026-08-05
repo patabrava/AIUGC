@@ -14,7 +14,7 @@ from threading import Event, Lock, Thread
 from typing import Any, Mapping, Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response
 from fastapi.responses import RedirectResponse
 
 from app.adapters.storage_client import get_storage_client
@@ -2472,7 +2472,7 @@ def _scene_image_job_matches_run(
 
 
 @router.get("/{post_id}/progress", response_model=SuccessResponse)
-def get_progress(post_id: str, request: Request):
+def get_progress(post_id: str, request: Request, response: Response):
     if "text/html" in request.headers.get("accept", ""):
         context = load_semantic_video_context(post_id)
         batch_id = str(context["batch"]["id"])
@@ -2480,6 +2480,8 @@ def get_progress(post_id: str, request: Request):
             url=f"/batches/{batch_id}#semantic-video-post-{post_id}",
             status_code=303,
         )
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
     run = get_run_by_post(post_id)
     job = get_scene_image_job(post_id, timeout_seconds=5.0)
     job_status = str((job or {}).get("status") or "")

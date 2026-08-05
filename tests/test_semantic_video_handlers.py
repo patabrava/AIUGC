@@ -2193,13 +2193,16 @@ def test_progress_endpoint_preserves_pipeline_verification_after_take_rows_are_s
         },
     )
 
-    payload = client.get(
+    response = client.get(
         "/semantic-videos/posts/post-1/progress",
         headers={"accept": "application/json"},
-    ).json()["data"]
+    )
+    payload = response.json()["data"]
 
     assert payload["verified_takes"] == 1
     assert payload["takes"][0]["transcript_passed"] is True
+    assert response.headers["cache-control"] == "no-store, max-age=0"
+    assert response.headers["pragma"] == "no-cache"
 
 
 def test_progress_endpoint_redirects_browser_navigation_to_batch_workflow(monkeypatch):
