@@ -2179,7 +2179,7 @@ def test_progress_endpoint_preserves_pipeline_verification_after_take_rows_are_s
     state["takes"][0]["submission_state"] = "completed"
     state["takes"][0]["transcript_result"] = None
     state["run"].update(
-        stage="completed",
+        stage="voice_qa",
         artifact_manifest={
             "pipeline_manifest": {
                 "takes": [
@@ -2203,6 +2203,39 @@ def test_progress_endpoint_preserves_pipeline_verification_after_take_rows_are_s
     assert payload["takes"][0]["transcript_passed"] is True
     assert response.headers["cache-control"] == "no-store, max-age=0"
     assert response.headers["pragma"] == "no-cache"
+
+
+def test_completed_delivery_progress_is_verified_without_duplicate_take_qa_columns(
+    monkeypatch,
+):
+    _handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    client = TestClient(app, base_url="http://localhost")
+    _seed_awaiting_paid_run(state)
+    assert client.post(
+        "/semantic-videos/posts/post-1/plan",
+        json={"expected_revision": 0},
+    ).status_code == 200
+    for take in state["takes"]:
+        take["submission_state"] = "completed"
+        take["transcript_result"] = None
+    state["run"].update(
+        stage="completed",
+        final_video_uri="https://cdn.example.com/final.mp4",
+        final_video_sha256="a" * 64,
+        final_caption_uri="https://cdn.example.com/final-captioned.mp4",
+        final_caption_sha256="b" * 64,
+        artifact_manifest={},
+    )
+
+    payload = client.get(
+        "/semantic-videos/posts/post-1/progress",
+        headers={"accept": "application/json"},
+    ).json()["data"]
+
+    assert payload["verified_takes"] == payload["total_takes"] == 7
+    assert all(take["transcript_passed"] is True for take in payload["takes"])
 
 
 def test_progress_endpoint_redirects_browser_navigation_to_batch_workflow(monkeypatch):

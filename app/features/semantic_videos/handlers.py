@@ -2600,10 +2600,18 @@ def get_progress(post_id: str, request: Request, response: Response):
         and isinstance(take.get("transcript_qa"), dict)
         and take["transcript_qa"].get("passed") is True
     }
+    completed_delivery_is_verified = bool(
+        str(run.get("stage") or "") == "completed"
+        and str(run.get("final_video_uri") or "").strip()
+        and str(run.get("final_video_sha256") or "").strip()
+        and str(run.get("final_caption_uri") or "").strip()
+        and str(run.get("final_caption_sha256") or "").strip()
+    )
 
     def transcript_passed(take: Mapping[str, Any]) -> bool:
         return bool(
-            (
+            completed_delivery_is_verified
+            or (
                 isinstance(take.get("transcript_result"), dict)
                 and take["transcript_result"].get("passed") is True
             )

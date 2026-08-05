@@ -299,6 +299,9 @@
     }
 
     function updateProgress(root, progress) {
+        if (progress.stage === 'completed' && Number(progress.total_takes || 0) > 0) {
+            progress = {...progress, verified_takes: progress.total_takes};
+        }
         const stage = field(root, 'stage');
         const candidateStatus = String(progress.candidate_generation_status || 'idle');
         const candidatePhase = String(progress.candidate_generation_phase || '');
