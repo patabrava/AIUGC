@@ -2207,6 +2207,38 @@ def test_progress_endpoint_exposes_elapsed_and_estimated_remaining_time(monkeypa
     assert "estimate" in payload["status_message"].lower()
 
 
+def test_progress_endpoint_distinguishes_active_post_generation_from_queue(monkeypatch):
+    _handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    client = TestClient(app, base_url="http://localhost")
+    _seed_awaiting_paid_run(state)
+    state["run"].update(
+        stage="acoustic_qa",
+        lease_owner="semantic-video-contract-v2-worker-1",
+        lease_expires_at=(datetime.now(timezone.utc) + timedelta(seconds=90)).isoformat(),
+    )
+
+    active = client.get("/semantic-videos/posts/post-1/progress").json()["data"]
+
+    assert active["progress_percent"] == 97
+    assert active["estimated_remaining_seconds"] is None
+    assert active["status_message"] == (
+        "Acoustic seam QA and composition is actively running. "
+        "The paid Veo generation is already complete."
+    )
+
+    state["run"]["lease_expires_at"] = (
+        datetime.now(timezone.utc) - timedelta(seconds=1)
+    ).isoformat()
+    queued = client.get("/semantic-videos/posts/post-1/progress").json()["data"]
+
+    assert queued["status_message"] == (
+        "Acoustic seam QA and composition is queued for available worker capacity. "
+        "The paid Veo generation is already complete."
+    )
+
+
 def test_progress_endpoint_reports_scene_plate_generation_state(monkeypatch):
     _handlers, state, _storage = _install_repository(monkeypatch)
     from app.main import app

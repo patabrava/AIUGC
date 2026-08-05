@@ -205,6 +205,7 @@ jobs:
                   "SEMANTIC_SCENE_PLATE_THROTTLE_COOLDOWN_SECONDS": "30",
                   "SEMANTIC_SCENE_PLATE_TRANSIENT_COOLDOWN_SECONDS": "10",
                   "SEMANTIC_SCENE_IDENTITY_GATE_LOCATION": "global",
+                  "SEMANTIC_VIDEO_WORKER_CONCURRENCY": "2",
                   "TIKTOK_ENVIRONMENT": "production",
                   "TRAEFIK_CERTRESOLVER": env_map.get("TRAEFIK_CERTRESOLVER", "letsencrypt"),
                   "TRAEFIK_ENTRYPOINTS": env_map.get("TRAEFIK_ENTRYPOINTS", "websecure"),

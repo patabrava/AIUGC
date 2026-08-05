@@ -43,6 +43,8 @@ from app.features.shot_production.shot_deck import derive_shot_deck
 
 logger = get_logger(__name__)
 DEFAULT_MAX_INFLIGHT = 2
+DEFAULT_WORKER_CONCURRENCY = 2
+MAX_WORKER_CONCURRENCY = 4
 DEFAULT_LEASE_SECONDS = 120
 DEFAULT_HEARTBEAT_SECONDS = 40.0
 DEFAULT_WORKSPACE_RETENTION_SECONDS = 1800
@@ -1340,6 +1342,7 @@ class SemanticVideoWorker:
         video_loader: Callable[[str], bytes] = load_video_uri,
         worker_id: Optional[str] = None,
         max_inflight: int = DEFAULT_MAX_INFLIGHT,
+        generation_gate: Optional[Any] = None,
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
         heartbeat_seconds: Optional[float] = None,
     ) -> None:
@@ -1369,6 +1372,7 @@ class SemanticVideoWorker:
         self.video_loader = video_loader
         self.worker_id = worker_id or f"semantic-video-contract-v2-{os.getpid()}"
         self.max_inflight = max_inflight
+        self.generation_gate = generation_gate
         self.lease_seconds = lease_seconds
         self.heartbeat_seconds = float(resolved_heartbeat_seconds)
 
@@ -1443,7 +1447,18 @@ class SemanticVideoWorker:
         try:
             takes = _latest_attempts(self.repo.list_attempts(claimed_id))
             if stage == "generating":
-                return self._run_generation_wave(run, takes, lease_token)
+                if self.generation_gate is None:
+                    return self._run_generation_wave(run, takes, lease_token)
+                if not self.generation_gate.acquire(blocking=False):
+                    return WorkerTickResult(
+                        claimed_id,
+                        stage,
+                        "generation_capacity_wait",
+                    )
+                try:
+                    return self._run_generation_wave(run, takes, lease_token)
+                finally:
+                    self.generation_gate.release()
             return self._run_post_generation_stage(run, takes, lease_token)
         except Exception as exc:
             error = {
@@ -2070,16 +2085,90 @@ def deepcopy_rows(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     return json.loads(json.dumps([dict(row) for row in rows], default=str))
 
 
-def main() -> None:
-    poll_seconds = max(1.0, float(os.getenv("SEMANTIC_VIDEO_WORKER_POLL_SECONDS", "5")))
-    worker = SemanticVideoWorker()
-    logger.info("semantic_video_worker_started", worker_id=worker.worker_id)
-    while True:
+def _worker_concurrency() -> int:
+    raw = os.getenv(
+        "SEMANTIC_VIDEO_WORKER_CONCURRENCY",
+        str(DEFAULT_WORKER_CONCURRENCY),
+    )
+    try:
+        concurrency = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(
+            "Semantic video worker concurrency must be an integer."
+        ) from exc
+    if not 1 <= concurrency <= MAX_WORKER_CONCURRENCY:
+        raise ValidationError(
+            f"Semantic video worker concurrency must be between 1 and {MAX_WORKER_CONCURRENCY}."
+        )
+    return concurrency
+
+
+def _run_worker_loop(
+    worker: SemanticVideoWorker,
+    *,
+    poll_seconds: float,
+    stop_event: threading.Event,
+) -> None:
+    logger.info("semantic_video_worker_slot_started", worker_id=worker.worker_id)
+    while not stop_event.is_set():
         try:
             worker.tick()
         except Exception as exc:  # noqa: BLE001
-            logger.exception("semantic_video_worker_tick_failed", error=str(exc))
-        time.sleep(poll_seconds)
+            logger.exception(
+                "semantic_video_worker_tick_failed",
+                worker_id=worker.worker_id,
+                error=str(exc),
+            )
+        stop_event.wait(poll_seconds)
+
+
+def main() -> None:
+    poll_seconds = max(1.0, float(os.getenv("SEMANTIC_VIDEO_WORKER_POLL_SECONDS", "5")))
+    concurrency = _worker_concurrency()
+    generation_gate = threading.BoundedSemaphore(1)
+    work_root = Path(
+        os.getenv("SEMANTIC_VIDEO_WORK_ROOT", "/tmp/semantic-video-worker")
+    )
+    stop_event = threading.Event()
+    threads: list[threading.Thread] = []
+    for slot in range(concurrency):
+        worker_id = f"semantic-video-contract-v2-{os.getpid()}-{slot + 1}"
+        worker = SemanticVideoWorker(
+            worker_id=worker_id,
+            generation_gate=generation_gate,
+            stage_runner=ProductionStageRunner(
+                work_root=work_root / f"slot-{slot + 1}"
+            ),
+        )
+        threads.append(
+            threading.Thread(
+                target=_run_worker_loop,
+                kwargs={
+                    "worker": worker,
+                    "poll_seconds": poll_seconds,
+                    "stop_event": stop_event,
+                },
+                name=f"semantic-video-slot-{slot + 1}",
+            )
+        )
+
+    logger.info(
+        "semantic_video_worker_started",
+        concurrency=concurrency,
+        generation_wave_concurrency=1,
+    )
+    for thread in threads:
+        thread.start()
+    try:
+        while any(thread.is_alive() for thread in threads):
+            for thread in threads:
+                thread.join(timeout=1.0)
+    except KeyboardInterrupt:
+        logger.info("semantic_video_worker_stopping")
+    finally:
+        stop_event.set()
+        for thread in threads:
+            thread.join(timeout=max(10.0, DEFAULT_LEASE_SECONDS / 4))
 
 
 if __name__ == "__main__":

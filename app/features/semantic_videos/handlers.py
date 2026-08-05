@@ -321,7 +321,27 @@ def _generation_progress(
     percent = stage_progress.get(stage, 5)
     if stage in {"retry_approval_required", "failed"}:
         return percent, elapsed, None, "Generation stopped. Review the available result and status."
-    return percent, elapsed, 0, "The paid video is generated. Finishing delivery checks."
+    stage_labels = {
+        "transcript_qa": "Transcript validation",
+        "identity_qa": "Actor and scene identity QA",
+        "voice_qa": "Voice QA",
+        "acoustic_qa": "Acoustic seam QA and composition",
+        "composing": "Final composition",
+        "uploading": "Final delivery upload",
+    }
+    label = stage_labels.get(stage, "Post-generation processing")
+    lease_expiry = _parse_progress_time(run.get("lease_expires_at"))
+    is_actively_processing = bool(
+        str(run.get("lease_owner") or "").strip()
+        and lease_expiry
+        and lease_expiry > now
+    )
+    message = (
+        f"{label} is actively running. The paid Veo generation is already complete."
+        if is_actively_processing
+        else f"{label} is queued for available worker capacity. The paid Veo generation is already complete."
+    )
+    return percent, elapsed, None, message
 _FINAL_WORD_TARGET_PATTERN = re.compile(
     r"(?:final spoken word near|final word ends no later than|"
     r"finishes the final word around|targeting the final spoken word around)\s+"

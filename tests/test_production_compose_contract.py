@@ -172,6 +172,8 @@ def test_legacy_compose_files_follow_production_build_contract():
         assert web["environment"]["DISABLE_STARTUP_RECOVERY_CHECKS"] == "${DISABLE_STARTUP_RECOVERY_CHECKS:-true}"
         assert web["environment"]["VEO_ENABLE_SEGMENTED_ROUTE"] == "${VEO_ENABLE_SEGMENTED_ROUTE:-true}"
         assert worker["environment"]["VEO_ENABLE_SEGMENTED_ROUTE"] == "${VEO_ENABLE_SEGMENTED_ROUTE:-true}"
+        semantic_worker = data["services"]["semantic-video-worker"]
+        assert semantic_worker["environment"]["SEMANTIC_VIDEO_WORKER_CONCURRENCY"] == "${SEMANTIC_VIDEO_WORKER_CONCURRENCY:-2}"
         assert "DOCKER_BUILD_CONTEXT" not in compose_text
         assert "git clone" not in compose_text
         assert '${TRAEFIK_HOST_RULE:-Host(`lippelift.xyz`)}' in compose_text
@@ -206,6 +208,7 @@ def test_hostinger_runtime_checkout_tracks_remote_main():
     assert "traefik.http.routers.lippelift-prod-web-v4.rule" in compose_text
     assert "TIKTOK_ENVIRONMENT: ${TIKTOK_ENVIRONMENT:-production}" in compose_text
     assert "VEO_ENABLE_SEGMENTED_ROUTE: ${VEO_ENABLE_SEGMENTED_ROUTE:-true}" in compose_text
+    assert "SEMANTIC_VIDEO_WORKER_CONCURRENCY: ${SEMANTIC_VIDEO_WORKER_CONCURRENCY:-2}" in compose_text
     assert "external: true" not in compose_text
 
 
@@ -233,6 +236,7 @@ def test_github_action_deploys_on_push_to_main():
     assert "/api/vps/v1/virtual-machines/{vps_id}/docker" in step_text
     assert "\"project_name\": os.environ[\"HOSTINGER_PROJECT_NAME\"]" in step_text
     assert '"TIKTOK_ENVIRONMENT": "production"' in step_text
+    assert '"SEMANTIC_VIDEO_WORKER_CONCURRENCY": "2"' in step_text
     assert "Host(`www.lippelift.xyz`) || Host(`srv1498567.hstgr.cloud`)" in step_text
     assert "Triggered Hostinger action" in step_text
     assert "wait_for_url https://lippelift.xyz/health" in step_text

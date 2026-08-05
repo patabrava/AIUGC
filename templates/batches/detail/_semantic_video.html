@@ -177,11 +177,11 @@
             </section>
             {% endif %}
 
-            {% if semantic_step == 'delivery' and (item.final_video_url or item.final_caption_url) %}
+            {% if item.stage == 'completed' and (item.final_video_url or item.final_caption_url) %}
             {% set playback_url = item.final_caption_url or item.final_video_url %}
             <section class="mt-5 rounded-xl border border-emerald-300 bg-emerald-50 p-4" aria-label="Final delivery">
                 <h4 class="text-sm font-bold text-emerald-950">Final delivery</h4>
-                <p class="mt-1 text-xs text-emerald-900">Persisted completed-run artifacts. The player uses the captioned delivery when available.</p>
+                <p class="mt-1 text-xs text-emerald-900">This completed post is ready now. The player uses the stitched captioned delivery when available.</p>
                 <video class="mt-3 aspect-[9/16] max-h-[34rem] w-full rounded-xl bg-black object-contain" controls preload="metadata" src="{{ playback_url }}">
                     Your browser does not support video playback.
                 </video>
@@ -196,7 +196,7 @@
             </section>
             {% endif %}
 
-            {% if semantic_step == 'delivery' and item.qa_advisory %}
+            {% if item.stage == 'completed' and item.qa_advisory %}
             <section class="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4" aria-label="Manual quality review">
                 <h4 class="text-sm font-bold text-amber-950">Video delivered — manual review recommended</h4>
                 <p class="mt-1 text-sm text-amber-900">{{ item.qa_advisory.message or 'Automated QA flagged a possible issue.' }}</p>
@@ -397,7 +397,7 @@
             {% endif %}
             {% endif %}
 
-            {% if semantic_step in ['plan', 'production'] and item.provider_prompts %}
+            {% if semantic_step in ['plan', 'production'] and item.provider_prompts and item.stage != 'completed' %}
             <section class="mt-5" aria-label="Actual provider prompts">
                 <h4 class="text-sm font-bold text-[#1C2740]">Actual provider prompts</h4>
                 <p class="mt-1 text-xs text-[#1C2740]/60">Exact prompts from the latest persisted provider request contract for each take. The state shows whether a request is planned, submitted, or complete.</p>

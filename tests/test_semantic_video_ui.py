@@ -600,6 +600,50 @@ def test_completed_semantic_panel_renders_run_artifact_urls_without_legacy_promp
     assert 'href="https://cdn.example.com/semantic-captioned.mp4"' in html
     assert "post-captioned-fallback.mp4" not in html
 
+    item["provider_prompts"] = [
+        {
+            "take_index": 0,
+            "attempt": 1,
+            "submission_state": "completed",
+            "provider_model": "veo-3.1-generate-001",
+            "prompt": "Persisted provider prompt for the first raw take.",
+            "negative_prompt": "cut, transition",
+            "raw_artifact_uri": "https://cdn.example.com/raw-take-1.mp4",
+        },
+        {
+            "take_index": 1,
+            "attempt": 1,
+            "submission_state": "completed",
+            "provider_model": "veo-3.1-generate-001",
+            "prompt": "Persisted provider prompt for the second raw take.",
+            "negative_prompt": "cut, transition",
+            "raw_artifact_uri": "https://cdn.example.com/raw-take-2.mp4",
+        },
+    ]
+    mixed_batch_html = env.get_template(
+        "batches/detail/_semantic_video.html"
+    ).render(
+        batch=_semantic_batch(),
+        batch_view={
+            "semantic_workflow": {
+                "current_step": {"key": "production"},
+            },
+            "semantic_video": {
+                "requested_duration_seconds": 16,
+                "duration_contract": {},
+                "posts": [item],
+            },
+        },
+    )
+
+    assert "Final delivery" in mixed_batch_html
+    assert "stitched captioned delivery" in mixed_batch_html
+    assert 'src="https://cdn.example.com/semantic-captioned.mp4"' in mixed_batch_html
+    assert mixed_batch_html.count("<video") == 1
+    assert "Actual provider prompts" not in mixed_batch_html
+    assert "raw-take-1.mp4" not in mixed_batch_html
+    assert "raw-take-2.mp4" not in mixed_batch_html
+
 
 def test_semantic_projection_falls_back_to_persisted_post_artifact_urls(monkeypatch):
     run = {

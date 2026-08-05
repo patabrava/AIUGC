@@ -440,6 +440,84 @@ def test_worker_persists_intent_before_each_provider_call_and_acceptance_immedia
     ]
 
 
+def test_worker_releases_generation_run_when_shared_paid_wave_gate_is_busy():
+    from workers.semantic_video_worker import SemanticVideoWorker
+
+    repo = FakeRepo(take_count=2)
+    vertex = FakeVertex()
+    generation_gate = threading.BoundedSemaphore(1)
+    generation_gate.acquire()
+    worker = SemanticVideoWorker(
+        repo=repo,
+        vertex=vertex,
+        storage=FakeStorage(repo.master),
+        stage_runner=FakeStages(),
+        video_loader=lambda uri: f"video:{uri}".encode(),
+        worker_id="worker-1",
+        max_inflight=2,
+        generation_gate=generation_gate,
+    )
+
+    try:
+        result = worker.tick("run-1")
+    finally:
+        generation_gate.release()
+
+    assert result.action == "generation_capacity_wait"
+    assert vertex.submit_calls == []
+    assert repo.events[0][0] == "claim"
+    assert repo.events[-1][0] == "release"
+
+
+def test_worker_slots_process_independent_runs_concurrently():
+    from workers.semantic_video_worker import _run_worker_loop
+
+    barrier = threading.Barrier(2)
+    stop_event = threading.Event()
+    completed: list[str] = []
+    completed_lock = threading.Lock()
+
+    class SlotWorker:
+        def __init__(self, worker_id):
+            self.worker_id = worker_id
+
+        def tick(self):
+            barrier.wait(timeout=1.0)
+            with completed_lock:
+                completed.append(self.worker_id)
+                if len(completed) == 2:
+                    stop_event.set()
+
+    threads = [
+        threading.Thread(
+            target=_run_worker_loop,
+            kwargs={
+                "worker": SlotWorker(f"slot-{slot}"),
+                "poll_seconds": 0.01,
+                "stop_event": stop_event,
+            },
+        )
+        for slot in (1, 2)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=2.0)
+
+    assert all(not thread.is_alive() for thread in threads)
+    assert sorted(completed) == ["slot-1", "slot-2"]
+
+
+@pytest.mark.parametrize("value", ["0", "5", "many"])
+def test_worker_concurrency_rejects_unsafe_values(monkeypatch, value):
+    from workers.semantic_video_worker import _worker_concurrency
+
+    monkeypatch.setenv("SEMANTIC_VIDEO_WORKER_CONCURRENCY", value)
+
+    with pytest.raises(ValidationError):
+        _worker_concurrency()
+
+
 @pytest.mark.parametrize(
     "tamper",
     [
