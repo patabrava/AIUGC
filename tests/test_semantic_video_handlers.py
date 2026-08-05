@@ -2164,6 +2164,44 @@ def test_progress_endpoint_reports_persisted_generated_and_verified_counts(monke
     assert "queued" in payload["status_message"]
 
 
+def test_progress_endpoint_preserves_pipeline_verification_after_take_rows_are_stale(
+    monkeypatch,
+):
+    _handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    client = TestClient(app, base_url="http://localhost")
+    _seed_awaiting_paid_run(state)
+    assert client.post(
+        "/semantic-videos/posts/post-1/plan",
+        json={"expected_revision": 0},
+    ).status_code == 200
+    state["takes"][0]["submission_state"] = "completed"
+    state["takes"][0]["transcript_result"] = None
+    state["run"].update(
+        stage="completed",
+        artifact_manifest={
+            "pipeline_manifest": {
+                "takes": [
+                    {
+                        "index": 0,
+                        "attempt": 1,
+                        "transcript_qa": {"passed": True},
+                    }
+                ]
+            }
+        },
+    )
+
+    payload = client.get(
+        "/semantic-videos/posts/post-1/progress",
+        headers={"accept": "application/json"},
+    ).json()["data"]
+
+    assert payload["verified_takes"] == 1
+    assert payload["takes"][0]["transcript_passed"] is True
+
+
 def test_progress_endpoint_redirects_browser_navigation_to_batch_workflow(monkeypatch):
     _install_repository(monkeypatch)
     from app.main import app

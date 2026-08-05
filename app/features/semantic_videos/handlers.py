@@ -2579,6 +2579,39 @@ def get_progress(post_id: str, request: Request):
     ordered = [latest[index] for index in sorted(latest)]
     generated_states = {"completed", "qa_failed", "failed"}
     failed_states = {"qa_failed", "failed"}
+    artifact_manifest = (
+        run.get("artifact_manifest")
+        if isinstance(run.get("artifact_manifest"), dict)
+        else {}
+    )
+    pipeline_manifest = (
+        artifact_manifest.get("pipeline_manifest")
+        if isinstance(artifact_manifest.get("pipeline_manifest"), dict)
+        else {}
+    )
+    manifest_takes = pipeline_manifest.get("takes")
+    manifest_takes = manifest_takes if isinstance(manifest_takes, list) else []
+    verified_manifest_attempts = {
+        (int(take.get("index") or 0), int(take.get("attempt") or 1))
+        for take in manifest_takes
+        if isinstance(take, dict)
+        and isinstance(take.get("transcript_qa"), dict)
+        and take["transcript_qa"].get("passed") is True
+    }
+
+    def transcript_passed(take: Mapping[str, Any]) -> bool:
+        return bool(
+            (
+                isinstance(take.get("transcript_result"), dict)
+                and take["transcript_result"].get("passed") is True
+            )
+            or (
+                int(take.get("take_index") or 0),
+                int(take.get("attempt") or 1),
+            )
+            in verified_manifest_attempts
+        )
+
     progress_percent, elapsed_seconds, estimated_remaining_seconds, status_message = (
         _generation_progress(stage=str(run.get("stage") or ""), takes=ordered, run=run)
     )
@@ -2687,10 +2720,7 @@ def get_progress(post_id: str, request: Request):
         plan_hash=run.get("plan_hash"),
         total_takes=len(ordered),
         generated_takes=sum(str(take.get("submission_state")) in generated_states for take in ordered),
-        verified_takes=sum(
-            bool((take.get("transcript_result") or {}).get("passed"))
-            for take in ordered
-        ),
+        verified_takes=sum(transcript_passed(take) for take in ordered),
         progress_percent=progress_percent,
         elapsed_seconds=elapsed_seconds,
         estimated_remaining_seconds=estimated_remaining_seconds,
@@ -2707,7 +2737,7 @@ def get_progress(post_id: str, request: Request):
                 submission_state=str(take.get("submission_state") or "planned"),
                 provider_duration_seconds=int(take.get("provider_duration_seconds") or 0),
                 request_hash=str(take.get("request_hash") or ""),
-                transcript_passed=bool((take.get("transcript_result") or {}).get("passed")),
+                transcript_passed=transcript_passed(take),
                 identity_passed=bool((take.get("identity_qa_result") or {}).get("passed")),
             )
             for take in ordered
