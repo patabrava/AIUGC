@@ -67,9 +67,6 @@ from app.features.shot_production.duration import (
     build_semantic_duration_contract,
 )
 from app.features.semantic_videos import queries as semantic_video_queries
-from app.features.semantic_videos.qa_policy import (
-    acoustic_qa_requires_localized_paid_retry,
-)
 from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
 
 try:
@@ -950,18 +947,16 @@ def _build_semantic_video_post_projection(
         else None
     )
     qa_retry_mode = str(qa_failure.get("retry_mode") or "")
-    acoustic_paid_retry_required = acoustic_qa_requires_localized_paid_retry(
-        qa_failure,
-        pipeline_manifest,
-    )
     qa_resume_available = bool(
         str(run.get("stage") or "") == "retry_approval_required"
         and current_initial_approval
         and plan_hash
         and qa_failure.get("stage")
         in {"transcript_qa", "identity_qa", "voice_qa", "acoustic_qa"}
-        and not acoustic_paid_retry_required
-        and qa_retry_mode != "localized_paid_take"
+        and not (
+            qa_retry_mode == "localized_paid_take"
+            and int(run.get("requested_duration_seconds") or 0) <= 8
+        )
     )
     contact_sheet = (
         pipeline_manifest.get("contact_sheet")

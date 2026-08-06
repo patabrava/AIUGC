@@ -2023,13 +2023,13 @@ def _prepare_acoustic_segment_sources(
     for position, take in enumerate(ordered_takes):
         raw_path = Path(take["raw"]["path"])
         first_word_start = float(take["transcript_qa"]["first_word_start_seconds"])
-        if position == 0:
+        if position == 0 or first_word_start >= 0.120 - 1e-9:
             sources.append(raw_path)
             timing_offsets.append(0.0)
             duration_offsets.append(0.0)
             continue
 
-        padding_seconds = round(max(0.120, 0.120 - first_word_start), 3)
+        padding_seconds = round(max(0.0, 0.120 - first_word_start), 3)
         previous_take = ordered_takes[position - 1]
         previous_path = sources[position - 1]
         previous_offset = timing_offsets[position - 1]
@@ -2332,6 +2332,63 @@ def _accept_operator_delivery_qa_advisory(
     return True
 
 
+def _append_delivery_review_advisory(
+    payload: Dict[str, Any],
+    *,
+    report_kind: str,
+    message: str,
+    details: Optional[Mapping[str, Any]] = None,
+) -> None:
+    advisories = list(payload.get("delivery_review_advisories") or [])
+    advisory = {
+        "stage": str(report_kind),
+        "message": str(message),
+        "details": dict(details or {}),
+        "paid_retry_required": False,
+        "operator_review_required": True,
+    }
+    if advisory not in advisories:
+        advisories.append(advisory)
+    payload["delivery_review_advisories"] = advisories
+
+
+def _accept_operator_review_delivery_finding(
+    payload: Dict[str, Any],
+    report: Dict[str, Any],
+    *,
+    report_kind: str,
+    message: str,
+) -> bool:
+    """Preserve failed automated QA evidence while allowing a review delivery."""
+    if report.get("passed") is not False:
+        return False
+    report["provider_passed"] = False
+    report["provider_failure_reasons"] = list(
+        report.get("failure_reasons")
+        or report.get("blocking_reasons")
+        or report.get("deterministic_failure_reasons")
+        or []
+    )
+    report["operator_review_required"] = True
+    report["delivery_policy_passed"] = True
+    report["accepted_by"] = "automatic_full_video_operator_review_policy"
+    report["paid_retry_required"] = False
+    if report.get("requires_paid_regeneration") is True:
+        report["provider_requires_paid_regeneration"] = True
+        report["requires_paid_regeneration"] = False
+    report["passed"] = True
+    _append_delivery_review_advisory(
+        payload,
+        report_kind=report_kind,
+        message=message,
+        details={
+            "failed_seam_indexes": list(report.get("failed_seam_indexes") or []),
+            "failure_reasons": list(report.get("provider_failure_reasons") or []),
+        },
+    )
+    return True
+
+
 @_manifest_locked
 def compose_and_caption(
     manifest_path: Path,
@@ -2357,6 +2414,7 @@ def compose_and_caption(
     source_visual_tail_evaluator: Callable[..., Dict[str, Any]] = (
         evaluate_source_terminal_reset
     ),
+    operator_review_delivery: bool = False,
 ) -> Dict[str, Any]:
     manifest_path = Path(manifest_path)
     payload = _load_manifest(manifest_path)
@@ -2660,19 +2718,35 @@ def compose_and_caption(
                 "recommended_retry_take_indexes": recommended_retry_take_indexes,
                 "created_at": _utc_now(),
             }
-            payload["status"] = "acoustic_plan_failed"
+            if not operator_review_delivery:
+                payload["status"] = "acoustic_plan_failed"
+                payload["updated_at"] = _utc_now()
+                _atomic_write_json(manifest_path, payload)
+                raise
+            _append_delivery_review_advisory(
+                payload,
+                report_kind="acoustic_plan",
+                message=exc.message,
+                details=exc.details,
+            )
+            payload["composition_mode"] = "full_take_operator_review"
+            payload.pop("acoustic_seam_plan", None)
+            segment_paths = tuple(Path(take["raw"]["path"]) for take in ordered)
+            segment_videos = [path.read_bytes() for path in segment_paths]
+            trim_windows = None
+            payload["status"] = "operator_review_composition_planned"
             payload["updated_at"] = _utc_now()
             _atomic_write_json(manifest_path, payload)
-            raise
-        acoustic_plan_payload = asdict(acoustic_plan)
-        acoustic_plan_payload["visual_reframe_profiles"] = [
-            SEMANTIC_VISUAL_REFRAME_PROFILES[
-                min(position, len(SEMANTIC_VISUAL_REFRAME_PROFILES) - 1)
+        if acoustic_plan is not None:
+            acoustic_plan_payload = asdict(acoustic_plan)
+            acoustic_plan_payload["visual_reframe_profiles"] = [
+                SEMANTIC_VISUAL_REFRAME_PROFILES[
+                    min(position, len(SEMANTIC_VISUAL_REFRAME_PROFILES) - 1)
+                ]
+                for position in range(len(ordered))
             ]
-            for position in range(len(ordered))
-        ]
-        payload["acoustic_seam_plan"] = acoustic_plan_payload
-        _atomic_write_json(manifest_path, payload)
+            payload["acoustic_seam_plan"] = acoustic_plan_payload
+            _atomic_write_json(manifest_path, payload)
     stitched_bytes, stitch_metadata = stitch_fn(
         segment_videos=segment_videos,
         post_id=payload["run_id"],
@@ -2783,17 +2857,28 @@ def compose_and_caption(
             if "frozen_frames_intersect_visual_boundary"
             in (item.get("failure_reasons") or [])
         ]
-        delivery_visual_qa["recommended_retry_take_indexes"] = (
-            freeze_failed_seams
+        delivery_visual_qa["recommended_retry_take_indexes"] = sorted(
+            {
+                min(seam_index + 1, len(ordered) - 1)
+                for seam_index in freeze_failed_seams
+            }
         )
         delivery_visual_qa["requires_paid_regeneration"] = bool(
             freeze_failed_seams
         )
-        _accept_operator_delivery_qa_advisory(
-            payload,
-            delivery_visual_qa,
-            report_kind="delivery_visual_qa",
-        )
+        if operator_review_delivery:
+            _accept_operator_review_delivery_finding(
+                payload,
+                delivery_visual_qa,
+                report_kind="delivery_visual_qa",
+                message="Automated visual seam QA flagged the stitched boundary.",
+            )
+        else:
+            _accept_operator_delivery_qa_advisory(
+                payload,
+                delivery_visual_qa,
+                report_kind="delivery_visual_qa",
+            )
         payload["delivery_visual_qa"] = delivery_visual_qa
         _atomic_write_json(manifest_path, payload)
         if not delivery_visual_qa.get("passed"):
@@ -2866,6 +2951,13 @@ def compose_and_caption(
                 else "exact_take_transcripts_plus_speech_safe_acoustic_plan"
             )
     payload["final_transcript_qa"] = final_qa_payload
+    if operator_review_delivery:
+        _accept_operator_review_delivery_finding(
+            payload,
+            final_qa_payload,
+            report_kind="final_transcript_qa",
+            message="Automated final transcript QA found a possible spoken-text mismatch.",
+        )
     _atomic_write_json(manifest_path, payload)
     if not final_qa_payload["passed"]:
         payload["status"] = "final_transcript_failed"
@@ -2888,6 +2980,13 @@ def compose_and_caption(
             max_gap_seconds=0.6,
         )
     payload["seam_qa"] = seam_qa
+    if operator_review_delivery:
+        _accept_operator_review_delivery_finding(
+            payload,
+            seam_qa,
+            report_kind="seam_gap_qa",
+            message="Automated transcript timing QA flagged a pause at a stitched boundary.",
+        )
     _atomic_write_json(manifest_path, payload)
     if not seam_qa["passed"]:
         payload["status"] = "seam_qa_failed"
@@ -2956,11 +3055,19 @@ def compose_and_caption(
             report_payload["accepted_by"] = (
                 "exact_stitched_transcript_plus_deterministic_seam_consensus"
             )
-        _accept_operator_delivery_qa_advisory(
-            payload,
-            report_payload,
-            report_kind="acoustic_seam_qa",
-        )
+        if operator_review_delivery:
+            _accept_operator_review_delivery_finding(
+                payload,
+                report_payload,
+                report_kind="acoustic_seam_qa",
+                message="Automated acoustic seam QA flagged a possible audible transition.",
+            )
+        else:
+            _accept_operator_delivery_qa_advisory(
+                payload,
+                report_payload,
+                report_kind="acoustic_seam_qa",
+            )
         qualitative_failed_seam_indexes = [
             int(verdict.seam_index)
             for verdict in (getattr(report, "seam_verdicts", ()) or ())

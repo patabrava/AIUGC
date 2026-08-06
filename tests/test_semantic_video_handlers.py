@@ -4933,7 +4933,7 @@ def test_persist_semantic_video_plan_query_uses_one_rpc_and_returns_exact_contra
         )
 
 
-def test_acoustic_plan_failure_rejects_zero_cost_qa_resume(monkeypatch):
+def test_acoustic_plan_failure_can_resume_for_full_video_review(monkeypatch):
     handlers, state, _storage = _install_repository(monkeypatch)
     from app.main import app
 
@@ -4941,6 +4941,7 @@ def test_acoustic_plan_failure_rejects_zero_cost_qa_resume(monkeypatch):
     state["run"].update(
         {
             "stage": "retry_approval_required",
+            "requested_duration_seconds": 16,
             "plan_hash": "a" * 64,
             "artifact_manifest": {
                 "qa_failure": {
@@ -4957,6 +4958,49 @@ def test_acoustic_plan_failure_rejects_zero_cost_qa_resume(monkeypatch):
         }
     )
     resume_calls = []
+
+    def resume_qa_review(**kwargs):
+        resume_calls.append(kwargs)
+        return {**state["run"], "revision": 5, "stage": "acoustic_qa"}
+
+    monkeypatch.setattr(handlers, "resume_qa_review", resume_qa_review)
+
+    response = TestClient(app, base_url="http://localhost").post(
+        "/semantic-videos/posts/post-1/qa-resume",
+        json={"plan_hash": "a" * 64, "expected_revision": 4},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["stage"] == "acoustic_qa"
+    assert resume_calls == [
+        {
+            "run_id": "run-1",
+            "expected_revision": 4,
+            "plan_hash": "a" * 64,
+        }
+    ]
+
+
+def test_single_take_terminal_speech_failure_still_requires_paid_retry(monkeypatch):
+    handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    _seed_awaiting_paid_run(state, revision=4)
+    state["run"].update(
+        {
+            "stage": "retry_approval_required",
+            "requested_duration_seconds": 8,
+            "plan_hash": "a" * 64,
+            "artifact_manifest": {
+                "qa_failure": {
+                    "stage": "acoustic_qa",
+                    "message": "Speech overlaps the protected terminal window.",
+                    "retry_mode": "localized_paid_take",
+                }
+            },
+        }
+    )
+    resume_calls = []
     monkeypatch.setattr(
         handlers,
         "resume_qa_review",
@@ -4969,7 +5013,7 @@ def test_acoustic_plan_failure_rejects_zero_cost_qa_resume(monkeypatch):
     )
 
     assert response.status_code == 409, response.text
-    assert "localized paid take retry" in response.json()["message"]
+    assert "terminal speech protection" in response.json()["message"]
     assert resume_calls == []
 
 

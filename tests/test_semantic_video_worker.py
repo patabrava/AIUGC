@@ -1694,9 +1694,17 @@ def test_compose_delivery_repairs_one_failed_stitched_seam_without_new_paid_take
             self.compose_calls = 0
             self.repair_calls = 0
 
-        def compose_and_caption(self, path, deepgram, *, acoustic_seams):
+        def compose_and_caption(
+            self,
+            path,
+            deepgram,
+            *,
+            acoustic_seams,
+            operator_review_delivery,
+        ):
             del deepgram
             assert acoustic_seams is True
+            assert operator_review_delivery is True
             self.compose_calls += 1
             if self.compose_calls == 1:
                 path.write_text(
@@ -1718,13 +1726,20 @@ def test_compose_delivery_repairs_one_failed_stitched_seam_without_new_paid_take
                 )
             path.write_text(
                 json.dumps(
-                    {
-                        "status": "captioned",
-                        "stitch": {"path": str(stitched)},
-                        "seam_qa": {"passed": True},
-                        "acoustic_seam_qa": {"passed": True},
-                        "delivery_visual_qa": {"passed": True},
-                        "seam_repair_history": [{"gaps_seconds": [0.62]}],
+                        {
+                            "status": "captioned",
+                            "stitch": {"path": str(stitched)},
+                            "seam_qa": {"passed": True},
+                            "acoustic_seam_qa": {"passed": True},
+                            "delivery_visual_qa": {"passed": True},
+                            "delivery_review_advisories": [
+                                {
+                                    "stage": "seam_gap_qa",
+                                    "message": "Manual seam review requested.",
+                                    "paid_retry_required": False,
+                                }
+                            ],
+                            "seam_repair_history": [{"gaps_seconds": [0.62]}],
                     }
                 ),
                 encoding="utf-8",
@@ -1767,6 +1782,8 @@ def test_compose_delivery_repairs_one_failed_stitched_seam_without_new_paid_take
     assert pipeline.compose_calls == 2
     assert pipeline.repair_calls == 1
     assert result["artifacts"]["pipeline_manifest"]["seam_repair_history"]
+    assert result["artifacts"]["delivery"]["mode"] == "full_video_operator_review"
+    assert result["artifacts"]["qa_advisory"]["findings"][0]["stage"] == "seam_gap_qa"
 
 
 def test_successful_current_acoustic_gates_clear_a_superseded_advisory():

@@ -216,6 +216,7 @@ class ProductionStageRunner:
         "acoustic_seam_qa",
         "delivery_visual_qa",
         "delivery_terminal_qa",
+        "delivery_review_advisories",
         "caption",
         "media_qa",
         "upload_intent",
@@ -946,6 +947,7 @@ class ProductionStageRunner:
                 manifest_path,
                 self._deepgram(),
                 acoustic_seams=len(takes) > 1,
+                operator_review_delivery=True,
             )
         except ValidationError:
             failed_payload = self._read_manifest(manifest_path)
@@ -973,8 +975,14 @@ class ProductionStageRunner:
                 manifest_path,
                 self._deepgram(),
                 acoustic_seams=len(takes) > 1,
+                operator_review_delivery=True,
             )
         payload = self._read_manifest(manifest_path)
+        review_findings = [
+            dict(item)
+            for item in payload.get("delivery_review_advisories") or []
+            if isinstance(item, Mapping)
+        ]
         cleared_acoustic_advisory = self._clear_superseded_acoustic_advisory(payload)
         if cleared_acoustic_advisory:
             pipeline._atomic_write_json(manifest_path, payload)  # noqa: SLF001
@@ -1006,6 +1014,11 @@ class ProductionStageRunner:
         payload = self._read_manifest(manifest_path)
         delivery = {
             "passed": True,
+            "mode": (
+                "full_video_operator_review"
+                if review_findings
+                else "verified_delivery"
+            ),
             "raw": {"url": str(raw_upload["url"]), "sha256": raw_hash},
             "captioned": {"url": str(caption_upload["url"]), "sha256": caption_hash},
             "acoustic_status": (
@@ -1023,6 +1036,17 @@ class ProductionStageRunner:
         }
         if cleared_acoustic_advisory:
             artifacts["qa_advisory"] = None
+        if review_findings:
+            artifacts["qa_advisory"] = {
+                "required": True,
+                "stage": "delivery_review",
+                "message": (
+                    "The full video is ready. Automated quality checks flagged "
+                    "items for your manual review."
+                ),
+                "findings": review_findings,
+                "paid_retry_required": False,
+            }
         return {"passed": True, "artifacts": artifacts}
 
     @staticmethod

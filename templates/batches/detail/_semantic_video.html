@@ -180,8 +180,8 @@
             {% if item.stage == 'completed' and (item.final_video_url or item.final_caption_url) %}
             {% set playback_url = item.final_caption_url or item.final_video_url %}
             <section class="mt-5 rounded-xl border border-emerald-300 bg-emerald-50 p-4" aria-label="Final delivery">
-                <h4 class="text-sm font-bold text-emerald-950">Final delivery</h4>
-                <p class="mt-1 text-xs text-emerald-900">This completed post is ready now. The player uses the stitched captioned delivery when available.</p>
+                <h4 class="text-sm font-bold text-emerald-950">{% if item.qa_advisory %}Full video ready for review{% else %}Final delivery{% endif %}</h4>
+                <p class="mt-1 text-xs text-emerald-900">The player uses the complete stitched captioned video when available. Review the full result before choosing whether any regeneration is worthwhile.</p>
                 <video class="mt-3 aspect-[9/16] max-h-[34rem] w-full rounded-xl bg-black object-contain" controls preload="metadata" src="{{ playback_url }}">
                     Your browser does not support video playback.
                 </video>
@@ -200,7 +200,17 @@
             <section class="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4" aria-label="Manual quality review">
                 <h4 class="text-sm font-bold text-amber-950">Video delivered — manual review recommended</h4>
                 <p class="mt-1 text-sm text-amber-900">{{ item.qa_advisory.message or 'Automated QA flagged a possible issue.' }}</p>
-                <p class="mt-2 text-sm font-bold text-amber-950">No paid retry is required. Use the delivered raw video and adjust or regenerate manually only if you choose.</p>
+                {% if item.qa_advisory.findings %}
+                <ul class="mt-3 space-y-2 text-sm text-amber-950">
+                    {% for finding in item.qa_advisory.findings %}
+                    <li class="rounded-lg border border-amber-300/70 bg-white/70 p-3">
+                        <span class="font-bold">{{ finding.stage | replace('_', ' ') }}:</span>
+                        {{ finding.message }}
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+                <p class="mt-3 text-sm font-bold text-amber-950">No paid retry is automatic. Accept this delivery or regenerate only after you review the complete video.</p>
             </section>
             {% endif %}
 

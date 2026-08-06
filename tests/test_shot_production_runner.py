@@ -1771,9 +1771,9 @@ def test_compose_acoustic_mode_plans_crossfades_and_requires_acoustic_gate(tmp_p
         output.write_bytes(b"room-tone-bridged")
 
     def plan_fn(evidence, **_kwargs):
-        assert evidence[1].provider_duration_seconds == pytest.approx(8.12)
-        assert evidence[1].first_word_start_seconds == pytest.approx(0.20)
-        assert evidence[1].final_word_end_seconds == pytest.approx(6.92)
+        assert evidence[1].provider_duration_seconds == pytest.approx(8.04)
+        assert evidence[1].first_word_start_seconds == pytest.approx(0.12)
+        assert evidence[1].final_word_end_seconds == pytest.approx(6.84)
         return plan
 
     compose_and_caption(
@@ -1812,7 +1812,7 @@ def test_compose_acoustic_mode_plans_crossfades_and_requires_acoustic_gate(tmp_p
     assert saved["acoustic_preroll_normalization"][0]["take_index"] == 1
 
 
-def test_acoustic_source_preparation_always_bridges_cross_take_room_tone(tmp_path):
+def test_acoustic_source_preparation_uses_native_preroll_when_available(tmp_path):
     from app.features.shot_production.runner import _prepare_acoustic_segment_sources
 
     manifest_path = _manifest_with_raw_takes(tmp_path)
@@ -1837,18 +1837,11 @@ def test_acoustic_source_preparation_always_bridges_cross_take_room_tone(tmp_pat
     )
 
     assert paths[0] == Path(takes[0]["raw"]["path"])
-    assert paths[1].read_bytes() == b"room-tone-bridged"
-    assert timing_offsets == (0.0, 0.12)
-    assert duration_offsets == (0.0, 0.12)
-    assert calls[0][0] == paths[0]
-    assert calls[0][1] == Path(takes[1]["raw"]["path"])
-    assert calls[0][3] == {
-        "bridge_start_seconds": pytest.approx(6.9),
-        "padding_seconds": pytest.approx(0.12),
-    }
-    assert records[0]["take_index"] == 1
-    assert records[0]["padding_seconds"] == pytest.approx(0.12)
-    assert records[0]["source_take_index"] == 0
+    assert paths[1] == Path(takes[1]["raw"]["path"])
+    assert timing_offsets == (0.0, 0.0)
+    assert duration_offsets == (0.0, 0.0)
+    assert calls == []
+    assert records == []
 
 
 def test_acoustic_source_preparation_never_clones_video_when_previous_take_ends_on_word(
@@ -1881,18 +1874,7 @@ def test_acoustic_source_preparation_never_clones_video_when_previous_take_ends_
     assert paths == tuple(Path(take["raw"]["path"]) for take in takes)
     assert timing_offsets == (0.0, 0.0)
     assert duration_offsets == (0.0, 0.0)
-    assert records == [
-        {
-            "take_index": 1,
-            "source_take_index": 0,
-            "source_path": takes[1]["raw"]["path"],
-            "source_sha256": takes[1]["raw"]["sha256"],
-            "mode": "unsafe_predecessor_tail_left_unmodified",
-            "available_incoming_preroll_seconds": 0.4,
-            "required_preroll_seconds": 0.12,
-            "synthetic_visual_padding_seconds": 0.0,
-        }
-    ]
+    assert records == []
 
 
 def test_long_form_acoustic_planning_uses_cadence_floor_before_requesting_regeneration():
@@ -2580,6 +2562,98 @@ def test_acoustic_duration_failure_prefers_targeted_final_take_retry(tmp_path):
     )
     assert reset["takes"][1]["status"] == "planned"
     assert reset["qa_failure_history"][-1]["stage"] == "acoustic_plan"
+
+
+def test_operator_review_delivery_falls_back_to_full_take_composition(tmp_path):
+    from app.features.shot_production.runner import compose_and_caption
+
+    manifest_path = _manifest_with_raw_takes(tmp_path)
+    payload = _read(manifest_path)
+    for take in payload["takes"]:
+        take["status"] = "transcribed"
+        take["transcript_qa"] = {
+            "passed": True,
+            "first_word_start_seconds": 0.2,
+            "final_word_end_seconds": 6.8,
+        }
+        take["trim_window"] = {
+            "start_seconds": 0.0,
+            "end_seconds": 7.2,
+            "source": "deepgram_word_window",
+        }
+    payload["visual_qa"] = {"passed": True}
+    payload["voice_qa"] = {"passed": True}
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+    stitch_calls = []
+
+    def fail_plan(_evidence, **_kwargs):
+        raise ValidationError(
+            "Acoustic duration extension exceeds the seam energy limit.",
+            {"seam_index": 0, "short_window_energy_delta_db": 12.8},
+        )
+
+    def stitch_fn(**kwargs):
+        stitch_calls.append(kwargs)
+        return b"full-sixteen-second-review", {
+            "stitch_segment_count": 2,
+            "stitch_fps": 24.0,
+            "stitch_audio_video_duration_delta_s": 0.0,
+        }
+
+    def caption_fn(**_kwargs):
+        output = manifest_path.parent / "review-captioned.mp4"
+        output.write_bytes(b"review-captioned")
+        return str(output)
+
+    compose_and_caption(
+        manifest_path,
+        _DeepgramByCall([SCRIPT]),
+        acoustic_seams=True,
+        analyze_audio_fn=lambda _path: (),
+        plan_acoustic_fn=fail_plan,
+        stitch_fn=stitch_fn,
+        caption_fn=caption_fn,
+        probe_fn=lambda _path: _valid_final_probe("16.0"),
+        operator_review_delivery=True,
+    )
+
+    saved = _read(manifest_path)
+    assert saved["status"] == "captioned"
+    assert saved["composition_mode"] == "full_take_operator_review"
+    assert saved["acoustic_plan_failure"]["details"][
+        "short_window_energy_delta_db"
+    ] == pytest.approx(12.8)
+    assert saved["delivery_review_advisories"][0]["stage"] == "acoustic_plan"
+    assert stitch_calls[0]["acoustic_plan"] is None
+    assert stitch_calls[0]["trim_windows"] is None
+    assert stitch_calls[0]["target_duration_seconds"] == pytest.approx(16.0)
+
+
+def test_operator_review_policy_preserves_failed_gate_evidence():
+    from app.features.shot_production.runner import (
+        _accept_operator_review_delivery_finding,
+    )
+
+    payload = {}
+    report = {
+        "passed": False,
+        "failed_seam_indexes": [0],
+        "failure_reasons": ["frozen_frames_intersect_visual_boundary"],
+        "requires_paid_regeneration": True,
+    }
+
+    assert _accept_operator_review_delivery_finding(
+        payload,
+        report,
+        report_kind="delivery_visual_qa",
+        message="Automated visual seam QA flagged the stitched boundary.",
+    ) is True
+    assert report["passed"] is True
+    assert report["provider_passed"] is False
+    assert report["provider_requires_paid_regeneration"] is True
+    assert report["requires_paid_regeneration"] is False
+    assert report["operator_review_required"] is True
+    assert payload["delivery_review_advisories"][0]["paid_retry_required"] is False
 
 
 def test_transcript_safe_planning_failure_persists_adjacent_retry_indexes(tmp_path):

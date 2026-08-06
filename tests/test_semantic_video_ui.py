@@ -600,6 +600,19 @@ def test_completed_semantic_panel_renders_run_artifact_urls_without_legacy_promp
     assert 'href="https://cdn.example.com/semantic-captioned.mp4"' in html
     assert "post-captioned-fallback.mp4" not in html
 
+    item["qa_advisory"] = {
+        "required": True,
+        "stage": "delivery_review",
+        "message": "The full video is ready for manual review.",
+        "findings": [
+            {
+                "stage": "delivery_visual_qa",
+                "message": "Automated visual seam QA flagged the stitched boundary.",
+            }
+        ],
+        "paid_retry_required": False,
+    }
+
     item["provider_prompts"] = [
         {
             "take_index": 0,
@@ -636,8 +649,10 @@ def test_completed_semantic_panel_renders_run_artifact_urls_without_legacy_promp
         },
     )
 
-    assert "Final delivery" in mixed_batch_html
-    assert "stitched captioned delivery" in mixed_batch_html
+    assert "Full video ready for review" in mixed_batch_html
+    assert "complete stitched captioned video" in mixed_batch_html
+    assert "Automated visual seam QA flagged the stitched boundary." in mixed_batch_html
+    assert "No paid retry is automatic" in mixed_batch_html
     assert 'src="https://cdn.example.com/semantic-captioned.mp4"' in mixed_batch_html
     assert mixed_batch_html.count("<video") == 1
     assert "Actual provider prompts" not in mixed_batch_html
@@ -1650,7 +1665,7 @@ def test_pending_script_keeps_semantic_production_out_of_the_script_step(monkeyp
     assert "Create and approve the scene" not in html
 
 
-def test_acoustic_plan_failure_renders_localized_paid_retry_for_legacy_evidence(
+def test_acoustic_plan_failure_offers_free_full_video_review_for_legacy_evidence(
     monkeypatch,
 ):
     run = {
@@ -1711,15 +1726,15 @@ def test_acoustic_plan_failure_renders_localized_paid_retry_for_legacy_evidence(
 
     view = batch_handlers._build_batch_detail_view(_semantic_batch())
     item = view["semantic_video"]["posts"][0]
-    assert item["qa_resume_available"] is False
+    assert item["qa_resume_available"] is True
     assert item["retry_provider_seconds"] == 16
     assert item["retry_estimated_cost_usd"] == "6.40"
 
     html = Environment(loader=FileSystemLoader("templates")).get_template(
         "batches/detail/_semantic_video.html"
     ).render(batch=_semantic_batch(), batch_view=view)
-    assert 'data-action="approve-retry" data-cost-usd="6.40"' in html
-    assert "Continue with generated videos · $0.00" not in html
+    assert 'data-action="approve-retry" data-cost-usd="6.40"' not in html
+    assert "Continue with generated videos · $0.00" in html
     assert "Generation stopped. Review the available result and status." in html
     assert 'data-field="progress-percent">100%' in html
     assert 'aria-valuenow="100"' in html
