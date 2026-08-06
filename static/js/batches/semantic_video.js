@@ -140,35 +140,6 @@
         return hasActiveRun ? Number(root.dataset.revision || 0) : null;
     }
 
-    window.handleSemanticDeliveryDecision = function (event, postId) {
-        if (!event.detail.successful) return;
-        let payload = {};
-        try {
-            payload = JSON.parse(event.detail.xhr.responseText || '{}');
-        } catch (_error) {
-            payload = {};
-        }
-        const target = payload?.data?.batch_advanced
-            ? '#publish-workflow'
-            : `#semantic-video-post-${encodeURIComponent(postId)}`;
-        window.history.replaceState(
-            null,
-            '',
-            `${window.location.pathname}${window.location.search}${target}`,
-        );
-        window.location.reload();
-    };
-
-    document.addEventListener('htmx:afterRequest', (event) => {
-        const trigger = event.detail?.elt || event.target;
-        const decision = trigger?.closest?.('[data-semantic-delivery-post-id]');
-        if (!decision) return;
-        window.handleSemanticDeliveryDecision(
-            event,
-            decision.dataset.semanticDeliveryPostId,
-        );
-    });
-
     async function requestJson(url, options = {}) {
         const response = await fetch(url, {
             credentials: 'same-origin',

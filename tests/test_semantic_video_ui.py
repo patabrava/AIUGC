@@ -1395,12 +1395,9 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert "candidateRoot.dataset.candidateGenerationStatus === 'generating'" in source
     assert 'data-run-id="{{ item.run_id or \'\' }}"' in template_source
     assert "#semantic-video-post-" in source
-    assert "handleSemanticDeliveryDecision" in source
-    assert "'#publish-workflow'" in source
-    assert "payload?.data?.batch_advanced" in source
-    assert "event.detail?.elt || event.target" in source
-    assert "decision.dataset.semanticDeliveryPostId" in source
-    assert 'data-semantic-delivery-post-id="{{ item.post_id }}"' in template_source
+    assert "handleSemanticDeliveryDecision" not in source
+    assert "htmx:afterRequest" not in source
+    assert 'data-semantic-delivery-post-id="{{ item.post_id }}"' not in template_source
     assert "hx-on::after-request" not in template_source
     assert "progress.estimated_remaining_seconds" in source
     assert "progress.progress_percent" in source

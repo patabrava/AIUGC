@@ -316,17 +316,18 @@ async def approve_qa(post_id: str, req: Request):
                 "batch_advanced": should_advance
             }
         )
-        if (
-            should_advance
-            and batch_id
-            and req.headers.get("hx-request", "").lower() == "true"
-        ):
+        if batch_id and req.headers.get("hx-request", "").lower() == "true":
+            redirect_anchor = (
+                "publish-workflow"
+                if should_advance
+                else f"semantic-video-post-{quote(str(post_id), safe='')}"
+            )
             return JSONResponse(
                 content=response_payload.model_dump(mode="json"),
                 headers={
                     "HX-Redirect": (
                         f"/batches/{quote(str(batch_id), safe='')}"
-                        "#publish-workflow"
+                        f"#{redirect_anchor}"
                     )
                 },
             )

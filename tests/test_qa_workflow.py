@@ -191,6 +191,55 @@ async def test_semantic_delivery_approval_redirects_htmx_to_publish(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_semantic_delivery_decision_redirects_htmx_to_current_post_when_batch_waits(
+    monkeypatch,
+):
+    db = {
+        "batches": [
+            {
+                "id": "batch-1",
+                "state": "S6_QA",
+                "creation_mode": "semantic_ugc",
+            }
+        ],
+        "posts": [
+            {
+                "id": "post-first",
+                "batch_id": "batch-1",
+                "qa_pass": None,
+                "video_status": "caption_completed",
+                "seed_data": {"script_review_status": "approved"},
+            },
+            {
+                "id": "post-pending",
+                "batch_id": "batch-1",
+                "qa_pass": None,
+                "video_status": "caption_completed",
+                "seed_data": {"script_review_status": "approved"},
+            },
+        ],
+    }
+    fake_client = _FakeSupabaseClient(db)
+    monkeypatch.setattr(
+        qa_handlers,
+        "get_supabase",
+        lambda: SimpleNamespace(client=fake_client),
+    )
+
+    response = await qa_handlers.approve_qa(
+        "post-first",
+        _HtmxJsonRequest({"approved": True}),
+    )
+
+    assert response.status_code == 200
+    assert response.headers["hx-redirect"] == (
+        "/batches/batch-1#semantic-video-post-post-first"
+    )
+    assert db["batches"][0]["state"] == "S6_QA"
+    assert db["posts"][0]["qa_pass"] is True
+
+
+@pytest.mark.asyncio
 async def test_rejecting_video_excludes_it_and_advances_with_remaining_approved_posts(monkeypatch):
     db = {
         "batches": [{"id": "batch-1", "state": "S6_QA"}],
