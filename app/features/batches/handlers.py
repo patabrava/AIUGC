@@ -811,6 +811,7 @@ def _build_semantic_video_post_projection(
     scene_image_job_status = str(scene_image_job.get("status") or "").strip()
     base = {
         "post_id": post_id,
+        "post_type": str(post.get("post_type") or "").strip().lower(),
         "topic_title": str(post.get("topic_title") or "Untitled post"),
         "script_review_status": script_review_status,
         "run_id": None,

@@ -200,6 +200,7 @@ def test_semantic_projection_exposes_persisted_approval_and_cost_contract(monkey
     item = semantic["posts"][0]
 
     assert semantic["requested_duration_seconds"] == 50
+    assert item["post_type"] == "value"
     assert item["delivery_duration_seconds"] == 49.8
     assert item["master_state"] == "approved"
     assert item["master_hash_is_current"] is True
@@ -1157,6 +1158,7 @@ def test_unapproved_candidate_set_is_labeled_as_regeneration():
                 "posts": [
                     {
                         "post_id": "post-candidate-refresh",
+                        "post_type": "lifestyle",
                         "topic_title": "Refresh candidates",
                         "revision": 0,
                         "stage": "awaiting_reference_approval",
@@ -1173,6 +1175,33 @@ def test_unapproved_candidate_set_is_labeled_as_regeneration():
     )
 
     assert "Regenerate script image" in html
+    assert "lifestyle post" in html
+
+
+def test_semantic_script_review_keeps_post_type_visible():
+    html = Environment(loader=FileSystemLoader("templates")).get_template(
+        "batches/detail/_semantic_script_review_card.html"
+    ).render(
+        post={
+            "id": "post-product",
+            "post_type": "product",
+            "topic_title": "Lift comparison",
+            "topic_rotation": "Compare the available lift configurations.",
+            "seed_data": {"script_review_status": "pending"},
+        },
+        batch_view={
+            "semantic_video": {
+                "duration_contract": {
+                    "requested_duration_seconds": 16,
+                    "minimum_words": 30,
+                    "maximum_words": 45,
+                    "minimum_semantic_blocks": 2,
+                }
+            }
+        },
+    )
+
+    assert "product post · Script" in html
 
 
 @pytest.mark.parametrize("creation_mode", ["semantic_ugc", "manual_semantic_ugc"])

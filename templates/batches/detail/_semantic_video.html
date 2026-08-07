@@ -107,7 +107,12 @@
         >
             <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                    <h3 class="font-bold text-[#1C2740]">{{ item.topic_title }}</h3>
+                    {% if item.post_type %}
+                    <span class="inline-flex rounded-full px-2.5 py-1 text-xs font-bold capitalize {% if item.post_type == 'lifestyle' %}bg-emerald-100 text-emerald-800{% elif item.post_type == 'product' %}bg-amber-100 text-amber-900{% else %}bg-[#EAF3FB] text-[#006AAB]{% endif %}">
+                        {{ item.post_type }} post
+                    </span>
+                    {% endif %}
+                    <h3 class="mt-2 font-bold text-[#1C2740]">{{ item.topic_title }}</h3>
                     <p class="mt-1 text-sm text-[#1C2740]/65">
                         Requested {{ item.requested_duration_seconds or semantic.requested_duration_seconds }}s ·
                         Delivery {% if item.delivery_duration_seconds is not none %}{{ item.delivery_duration_seconds }}s{% else %}pending{% endif %}
