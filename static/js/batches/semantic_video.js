@@ -283,7 +283,8 @@
 
         workflow.dataset.planBuildStarted = 'true';
         setBatchPlanStatus(workflow, `Building ${roots.length} free production plan${roots.length === 1 ? '' : 's'}…`);
-        const results = await Promise.all(roots.map(async (root) => {
+        const results = [];
+        for (const root of roots) {
             const button = action(root, 'create-plan');
             const feedbackState = window.beginActionFeedback(button, 'Building plan…');
             button.disabled = true;
@@ -294,7 +295,10 @@
                     {method: 'GET'},
                 );
                 updateProgress(root, progress);
-                if (progress.plan_hash) return {ok: true, root, button, feedbackState};
+                if (progress.plan_hash) {
+                    results.push({ok: true, root, button, feedbackState});
+                    continue;
+                }
                 if (progress.stage !== 'awaiting_paid_approval') {
                     throw new Error('The scene approval changed before its production plan could be built.');
                 }
@@ -309,14 +313,14 @@
                         }),
                     },
                 );
-                return {ok: true, root, button, feedbackState};
+                results.push({ok: true, root, button, feedbackState});
             } catch (error) {
                 window.endActionFeedback(button, feedbackState);
                 button.disabled = false;
                 showPlanError(root, error.message);
-                return {ok: false, root, button, feedbackState};
+                results.push({ok: false, root, button, feedbackState});
             }
-        }));
+        }
 
         if (results.every((result) => result.ok)) {
             setBatchPlanStatus(workflow, `Built all ${roots.length} production plan${roots.length === 1 ? '' : 's'}.`);
