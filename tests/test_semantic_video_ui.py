@@ -1374,6 +1374,13 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert "showPlanError(root, error.message)" in source
     assert "Building production plan" in source
     assert "Plan could not be built" in source
+    assert "buildMissingPlans(workflow)" in source
+    assert "workflow.dataset.planBuildStarted === 'true'" in source
+    assert "const results = await Promise.all(roots.map(async (root) =>" in source
+    assert "if (progress.plan_hash) return {ok: true" in source
+    assert "results.every((result) => result.ok)" in source
+    assert "results.filter((result) => result.ok)" in source
+    assert "The successful plans were preserved." in source
     assert "['takes', 'seconds', 'cost']" in source
     assert "force ? 2000 : 8000" in source
     assert "payload?.message" in source

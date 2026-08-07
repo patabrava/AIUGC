@@ -269,6 +269,72 @@
         }
     }
 
+    async function buildMissingPlans(workflow) {
+        if (workflow.dataset.planBuildStarted === 'true') return;
+        const roots = Array.from(workflow.querySelectorAll('[data-semantic-video-controller]'))
+            .filter((root) => {
+                const button = action(root, 'create-plan');
+                return root.dataset.stage === 'awaiting_paid_approval'
+                    && !root.dataset.planHash
+                    && button
+                    && !button.disabled;
+            });
+        if (!roots.length) return;
+
+        workflow.dataset.planBuildStarted = 'true';
+        setBatchPlanStatus(workflow, `Building ${roots.length} free production plan${roots.length === 1 ? '' : 's'}…`);
+        const results = await Promise.all(roots.map(async (root) => {
+            const button = action(root, 'create-plan');
+            const feedbackState = window.beginActionFeedback(button, 'Building plan…');
+            button.disabled = true;
+            showPlanLoading(root);
+            try {
+                const progress = await requestJson(
+                    `/semantic-videos/posts/${encodeURIComponent(root.dataset.postId)}/progress`,
+                    {method: 'GET'},
+                );
+                updateProgress(root, progress);
+                if (progress.plan_hash) return {ok: true, root, button, feedbackState};
+                if (progress.stage !== 'awaiting_paid_approval') {
+                    throw new Error('The scene approval changed before its production plan could be built.');
+                }
+                await requestJson(
+                    `/semantic-videos/posts/${encodeURIComponent(root.dataset.postId)}/plan`,
+                    {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            expected_revision: Number(progress.revision || 0),
+                            base_seed: 240713,
+                            resolution: '1080p',
+                        }),
+                    },
+                );
+                return {ok: true, root, button, feedbackState};
+            } catch (error) {
+                window.endActionFeedback(button, feedbackState);
+                button.disabled = false;
+                showPlanError(root, error.message);
+                return {ok: false, root, button, feedbackState};
+            }
+        }));
+
+        if (results.every((result) => result.ok)) {
+            setBatchPlanStatus(workflow, `Built all ${roots.length} production plan${roots.length === 1 ? '' : 's'}.`);
+            window.location.reload();
+            return;
+        }
+        results.filter((result) => result.ok).forEach(({root, button, feedbackState}) => {
+            window.endActionFeedback(button, feedbackState);
+            setStatus(root, 'Production plan ready. Reload after resolving the remaining plan.');
+            root.setAttribute('aria-busy', 'false');
+        });
+        setBatchPlanStatus(
+            workflow,
+            'At least one free production plan needs attention. The successful plans were preserved.',
+            true,
+        );
+    }
+
     function updateProgress(root, progress) {
         if (progress.stage === 'completed' && Number(progress.total_takes || 0) > 0) {
             progress = {...progress, verified_takes: progress.total_takes};
@@ -1011,6 +1077,7 @@
             const button = workflow.querySelector('[data-action="approve-batch-plans"]');
             button?.addEventListener('click', () => approveReadyBatchPlans(workflow, button));
             syncSceneImageWorkflowGate(workflow);
+            buildMissingPlans(workflow);
         });
     }
 
