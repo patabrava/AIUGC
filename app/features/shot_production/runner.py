@@ -44,6 +44,7 @@ from app.features.shot_production.audio_seams import (
     MAX_EXACT_DELIVERY_RETIME_RATIO,
     MAX_MEASURED_TERMINAL_RESET_ENERGY_DELTA_DB,
     MAX_PERCEPTUAL_SEAM_ENERGY_DELTA_DB,
+    SEMANTIC_INTERNAL_VISUAL_TAIL_EXCLUSION_SECONDS,
     TakeAudioEvidence,
     analyze_audio_frames,
     delivered_seam_timing_failures,
@@ -1206,6 +1207,22 @@ def _delivered_visual_cut_times(
         elapsed += (
             take.video_end_seconds - take.video_start_seconds
         ) * delivered_timeline_ratio
+        cut_times.append(elapsed)
+    return cut_times
+
+
+def _transcript_window_visual_cut_times(
+    trim_windows: Sequence[Dict[str, Any]],
+    *,
+    delivery_retime_ratio: float = 1.0,
+) -> list[float]:
+    cut_times = []
+    elapsed = 0.0
+    for window in trim_windows[:-1]:
+        elapsed += (
+            float(window["end_seconds"])
+            - float(window["start_seconds"])
+        ) * delivery_retime_ratio
         cut_times.append(elapsed)
     return cut_times
 
@@ -2574,6 +2591,7 @@ def compose_and_caption(
         }
         _atomic_write_json(manifest_path, payload)
     acoustic_plan = None
+    operator_review_retime_ratio = None
     if acoustic_seams:
         source_visual_tail_records = []
         for position, take in enumerate(ordered[:-1]):
@@ -2729,11 +2747,59 @@ def compose_and_caption(
                 message=exc.message,
                 details=exc.details,
             )
-            payload["composition_mode"] = "full_take_operator_review"
+            payload["composition_mode"] = "transcript_safe_operator_review"
             payload.pop("acoustic_seam_plan", None)
             segment_paths = tuple(Path(take["raw"]["path"]) for take in ordered)
             segment_videos = [path.read_bytes() for path in segment_paths]
-            trim_windows = None
+            trim_windows = []
+            for position, take in enumerate(ordered):
+                window = dict(take["trim_window"])
+                if position < len(ordered) - 1:
+                    conservative_end = max(
+                        0.0,
+                        float(take["duration_seconds"])
+                        - SEMANTIC_INTERNAL_VISUAL_TAIL_EXCLUSION_SECONDS,
+                    )
+                    window["end_seconds"] = min(
+                        float(window["end_seconds"]),
+                        conservative_end,
+                    )
+                window["source"] = "transcript_safe_operator_review"
+                if float(window["end_seconds"]) <= float(window["start_seconds"]):
+                    raise ValidationError(
+                        "Operator-review trim window is empty.",
+                        {"take_index": int(take["index"])},
+                    )
+                trim_windows.append(window)
+            if exact_delivery_target is not None:
+                review_content_duration = sum(
+                    float(window["end_seconds"])
+                    - float(window["start_seconds"])
+                    for window in trim_windows
+                )
+                operator_review_retime_ratio = (
+                    exact_delivery_target / review_content_duration
+                )
+                if not (
+                    1.0
+                    <= operator_review_retime_ratio
+                    <= MAX_EXACT_DELIVERY_RETIME_RATIO + 1e-9
+                ):
+                    raise ValidationError(
+                        "Transcript-safe operator review cannot satisfy the exact duration within the cadence bound.",
+                        {
+                            "content_duration_seconds": round(
+                                review_content_duration, 6
+                            ),
+                            "target_duration_seconds": exact_delivery_target,
+                            "required_retime_ratio": round(
+                                operator_review_retime_ratio, 6
+                            ),
+                            "maximum_retime_ratio": (
+                                MAX_EXACT_DELIVERY_RETIME_RATIO
+                            ),
+                        },
+                    )
             payload["status"] = "operator_review_composition_planned"
             payload["updated_at"] = _utc_now()
             _atomic_write_json(manifest_path, payload)
@@ -2762,6 +2828,11 @@ def compose_and_caption(
         **(
             {"target_duration_seconds": exact_delivery_target}
             if exact_delivery_target is not None
+            else {}
+        ),
+        **(
+            {"delivery_retime_ratio": operator_review_retime_ratio}
+            if operator_review_retime_ratio is not None
             else {}
         ),
         **(
@@ -2834,11 +2905,38 @@ def compose_and_caption(
                 },
             )
 
-    if acoustic_plan is not None:
-        cut_times = _delivered_visual_cut_times(acoustic_plan, stitch_metadata)
-        reframe_profiles = list(
-            payload["acoustic_seam_plan"]["visual_reframe_profiles"]
-        )
+    transcript_safe_operator_review = bool(
+        acoustic_plan is None
+        and len(ordered) > 1
+        and trim_windows
+        and payload.get("composition_mode")
+        == "transcript_safe_operator_review"
+    )
+    if acoustic_plan is not None or transcript_safe_operator_review:
+        if acoustic_plan is not None:
+            cut_times = _delivered_visual_cut_times(
+                acoustic_plan,
+                stitch_metadata,
+            )
+            reframe_profiles = list(
+                payload["acoustic_seam_plan"]["visual_reframe_profiles"]
+            )
+        else:
+            cut_times = _transcript_window_visual_cut_times(
+                trim_windows,
+                delivery_retime_ratio=float(
+                    operator_review_retime_ratio or 1.0
+                ),
+            )
+            reframe_profiles = [
+                SEMANTIC_VISUAL_REFRAME_PROFILES[
+                    min(
+                        position,
+                        len(SEMANTIC_VISUAL_REFRAME_PROFILES) - 1,
+                    )
+                ]
+                for position in range(len(ordered))
+            ]
         delivery_visual_qa = visual_seam_evaluator(
             stitched_path,
             cut_times_seconds=cut_times,

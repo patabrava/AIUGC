@@ -12,11 +12,14 @@ from typing import Any, Dict, Sequence
 
 
 DELIVERY_VISUAL_SEAM_QA_VERSION = "delivery-visual-seam-v1"
-SOURCE_TERMINAL_RESET_QA_VERSION = "source-terminal-reset-v1"
+SOURCE_TERMINAL_RESET_QA_VERSION = "source-terminal-reset-v2"
 FREEZE_NOISE_DB = -50
 MINIMUM_BOUNDARY_FREEZE_FRAMES = 3
 PRE_CUT_INSPECTION_SECONDS = 0.350
 TERMINAL_RESET_SCENE_SCORE = 0.080
+TERMINAL_RESET_CUMULATIVE_SCENE_SCORE = 0.100
+TERMINAL_RESET_CUMULATIVE_FRAMES = 2
+TERMINAL_RESET_MINIMUM_FRAME_SCORE = 0.030
 
 _FREEZE_EVENT = re.compile(
     r"lavfi\.freezedetect\.freeze_(start|duration|end):\s*"
@@ -77,8 +80,36 @@ def _parse_scene_scores(output: str) -> list[Dict[str, float]]:
     return records
 
 
+def _first_terminal_reset(
+    frame_scores: Sequence[Dict[str, float]],
+) -> tuple[Dict[str, float] | None, str | None, float | None]:
+    candidates: list[tuple[Dict[str, float], str, float]] = []
+    for frame in frame_scores:
+        if frame["scene_score"] >= TERMINAL_RESET_SCENE_SCORE:
+            candidates.append(
+                (frame, "single_frame", float(frame["scene_score"]))
+            )
+    for start in range(
+        0,
+        len(frame_scores) - TERMINAL_RESET_CUMULATIVE_FRAMES + 1,
+    ):
+        window = frame_scores[
+            start : start + TERMINAL_RESET_CUMULATIVE_FRAMES
+        ]
+        scores = [float(frame["scene_score"]) for frame in window]
+        cumulative_score = sum(scores)
+        if (
+            cumulative_score >= TERMINAL_RESET_CUMULATIVE_SCENE_SCORE
+            and max(scores) >= TERMINAL_RESET_MINIMUM_FRAME_SCORE
+        ):
+            candidates.append((window[0], "multi_frame", cumulative_score))
+    if not candidates:
+        return None, None, None
+    return min(candidates, key=lambda candidate: candidate[0]["seconds"])
+
+
 def evaluate_source_terminal_reset(video_path: Path) -> Dict[str, Any]:
-    """Locate a hard whole-frame Veo reframe inside the final 350 ms."""
+    """Locate abrupt or distributed whole-frame Veo motion in the final 350 ms."""
     video_path = Path(video_path)
     if not video_path.is_file() or video_path.stat().st_size <= 0:
         raise ValueError("Source terminal-reset QA requires a non-empty video")
@@ -112,12 +143,9 @@ def evaluate_source_terminal_reset(video_path: Path) -> Dict[str, Any]:
             f"FFmpeg source terminal-reset QA failed: {result.stderr[-300:]}"
         )
     frame_scores = _parse_scene_scores(result.stderr)
-    reset_events = [
-        frame
-        for frame in frame_scores
-        if frame["scene_score"] >= TERMINAL_RESET_SCENE_SCORE
-    ]
-    first_reset = reset_events[0] if reset_events else None
+    first_reset, reset_detection_mode, reset_cumulative_score = (
+        _first_terminal_reset(frame_scores)
+    )
     safe_video_end = (
         float(first_reset["seconds"])
         if first_reset is not None
@@ -129,6 +157,11 @@ def evaluate_source_terminal_reset(video_path: Path) -> Dict[str, Any]:
         "duration_seconds": round(duration, 6),
         "inspection_start_seconds": round(inspection_start, 6),
         "scene_score_threshold": TERMINAL_RESET_SCENE_SCORE,
+        "cumulative_scene_score_threshold": (
+            TERMINAL_RESET_CUMULATIVE_SCENE_SCORE
+        ),
+        "cumulative_frame_count": TERMINAL_RESET_CUMULATIVE_FRAMES,
+        "minimum_frame_score": TERMINAL_RESET_MINIMUM_FRAME_SCORE,
     }
     return {
         "version": SOURCE_TERMINAL_RESET_QA_VERSION,
@@ -149,9 +182,20 @@ def evaluate_source_terminal_reset(video_path: Path) -> Dict[str, Any]:
             if first_reset is not None
             else None
         ),
+        "reset_detection_mode": reset_detection_mode,
+        "reset_cumulative_scene_score": (
+            round(float(reset_cumulative_score), 6)
+            if reset_cumulative_score is not None
+            else None
+        ),
         "duration_seconds": duration,
         "inspection_start_seconds": inspection_start,
         "scene_score_threshold": TERMINAL_RESET_SCENE_SCORE,
+        "cumulative_scene_score_threshold": (
+            TERMINAL_RESET_CUMULATIVE_SCENE_SCORE
+        ),
+        "cumulative_frame_count": TERMINAL_RESET_CUMULATIVE_FRAMES,
+        "minimum_frame_score": TERMINAL_RESET_MINIMUM_FRAME_SCORE,
         "frame_scores": frame_scores,
         "input_sha256": sha256(
             json.dumps(
@@ -323,7 +367,11 @@ def evaluate_delivered_visual_seams(
 __all__ = [
     "DELIVERY_VISUAL_SEAM_QA_VERSION",
     "SOURCE_TERMINAL_RESET_QA_VERSION",
+    "TERMINAL_RESET_CUMULATIVE_FRAMES",
+    "TERMINAL_RESET_CUMULATIVE_SCENE_SCORE",
+    "TERMINAL_RESET_MINIMUM_FRAME_SCORE",
     "TERMINAL_RESET_SCENE_SCORE",
+    "_first_terminal_reset",
     "evaluate_source_terminal_reset",
     "evaluate_delivered_visual_seams",
 ]

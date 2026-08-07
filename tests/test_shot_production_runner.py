@@ -2564,27 +2564,28 @@ def test_acoustic_duration_failure_prefers_targeted_final_take_retry(tmp_path):
     assert reset["qa_failure_history"][-1]["stage"] == "acoustic_plan"
 
 
-def test_operator_review_delivery_falls_back_to_full_take_composition(tmp_path):
+def test_operator_review_delivery_preserves_transcript_safe_windows(tmp_path):
     from app.features.shot_production.runner import compose_and_caption
 
     manifest_path = _manifest_with_raw_takes(tmp_path)
     payload = _read(manifest_path)
-    for take in payload["takes"]:
+    for position, take in enumerate(payload["takes"]):
         take["status"] = "transcribed"
         take["transcript_qa"] = {
             "passed": True,
             "first_word_start_seconds": 0.2,
-            "final_word_end_seconds": 6.8,
+            "final_word_end_seconds": 7.35,
         }
         take["trim_window"] = {
             "start_seconds": 0.0,
-            "end_seconds": 7.2,
+            "end_seconds": 7.8 if position == 0 else 7.6,
             "source": "deepgram_word_window",
         }
     payload["visual_qa"] = {"passed": True}
     payload["voice_qa"] = {"passed": True}
     manifest_path.write_text(json.dumps(payload), encoding="utf-8")
     stitch_calls = []
+    visual_seam_calls = []
 
     def fail_plan(_evidence, **_kwargs):
         raise ValidationError(
@@ -2605,6 +2606,10 @@ def test_operator_review_delivery_falls_back_to_full_take_composition(tmp_path):
         output.write_bytes(b"review-captioned")
         return str(output)
 
+    def visual_seam_evaluator(_path, **kwargs):
+        visual_seam_calls.append(kwargs)
+        return {"passed": True, "seams": [], "failed_seam_indexes": []}
+
     compose_and_caption(
         manifest_path,
         _DeepgramByCall([SCRIPT]),
@@ -2614,19 +2619,41 @@ def test_operator_review_delivery_falls_back_to_full_take_composition(tmp_path):
         stitch_fn=stitch_fn,
         caption_fn=caption_fn,
         probe_fn=lambda _path: _valid_final_probe("16.0"),
+        visual_seam_evaluator=visual_seam_evaluator,
+        visual_seam_sheet_fn=lambda *_args, **_kwargs: {"frames": []},
         operator_review_delivery=True,
     )
 
     saved = _read(manifest_path)
     assert saved["status"] == "captioned"
-    assert saved["composition_mode"] == "full_take_operator_review"
+    assert saved["composition_mode"] == "transcript_safe_operator_review"
     assert saved["acoustic_plan_failure"]["details"][
         "short_window_energy_delta_db"
     ] == pytest.approx(12.8)
     assert saved["delivery_review_advisories"][0]["stage"] == "acoustic_plan"
     assert stitch_calls[0]["acoustic_plan"] is None
-    assert stitch_calls[0]["trim_windows"] is None
+    assert stitch_calls[0]["trim_windows"] == [
+        {
+            "start_seconds": 0.0,
+            "end_seconds": 7.65,
+            "source": "transcript_safe_operator_review",
+        },
+        {
+            "start_seconds": 0.0,
+            "end_seconds": 7.6,
+            "source": "transcript_safe_operator_review",
+        },
+    ]
     assert stitch_calls[0]["target_duration_seconds"] == pytest.approx(16.0)
+    assert stitch_calls[0]["delivery_retime_ratio"] == pytest.approx(16.0 / 15.25)
+    assert visual_seam_calls[0]["cut_times_seconds"] == [
+        pytest.approx(7.65 * (16.0 / 15.25))
+    ]
+    assert visual_seam_calls[0]["reframe_profiles"] == [
+        "full",
+        "punch_in_center",
+    ]
+    assert saved["delivery_visual_qa"]["passed"] is True
 
 
 def test_operator_review_policy_preserves_failed_gate_evidence():

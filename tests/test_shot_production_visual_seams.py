@@ -6,6 +6,7 @@ import subprocess
 import pytest
 
 from app.features.shot_production.visual_seams import (
+    _first_terminal_reset,
     _parse_freeze_intervals,
     evaluate_delivered_visual_seams,
     evaluate_source_terminal_reset,
@@ -160,8 +161,12 @@ def test_source_terminal_reset_qa_locates_first_bad_tail_frame(tmp_path):
     report = evaluate_source_terminal_reset(video_path)
 
     assert report["reset_detected"] is True
-    assert 0.90 <= report["safe_video_end_seconds"] <= 0.96
-    assert report["reset_scene_score"] >= report["scene_score_threshold"]
+    assert 0.85 <= report["safe_video_end_seconds"] <= 0.96
+    assert (
+        report["reset_scene_score"] >= report["scene_score_threshold"]
+        or report["reset_cumulative_scene_score"]
+        >= report["cumulative_scene_score_threshold"]
+    )
     assert report["video_sha256"]
 
 
@@ -176,3 +181,31 @@ def test_source_terminal_reset_qa_keeps_conservative_fallback_when_not_detected(
     assert report["reset_detected"] is False
     assert report["safe_video_end_seconds"] is None
     assert report["status"] == "not_detected"
+
+
+def test_source_terminal_reset_qa_detects_distributed_tail_motion():
+    first_reset, mode, cumulative_score = _first_terminal_reset(
+        [
+            {"seconds": 7.875, "scene_score": 0.028165},
+            {"seconds": 7.916667, "scene_score": 0.075308},
+            {"seconds": 7.958333, "scene_score": 0.043973},
+        ]
+    )
+
+    assert first_reset == {"seconds": 7.875, "scene_score": 0.028165}
+    assert mode == "multi_frame"
+    assert cumulative_score == pytest.approx(0.103473)
+
+
+def test_source_terminal_reset_qa_prefers_earliest_distributed_motion():
+    first_reset, mode, cumulative_score = _first_terminal_reset(
+        [
+            {"seconds": 7.875, "scene_score": 0.04},
+            {"seconds": 7.916667, "scene_score": 0.07},
+            {"seconds": 7.958333, "scene_score": 0.18},
+        ]
+    )
+
+    assert first_reset == {"seconds": 7.875, "scene_score": 0.04}
+    assert mode == "multi_frame"
+    assert cumulative_score == pytest.approx(0.11)

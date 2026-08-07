@@ -118,6 +118,38 @@ def test_stitch_trims_segments_to_spoken_windows(tmp_path):
     assert meta["stitch_trim_window_source"] == ["test", "test"]
 
 
+def test_stitch_retimes_transcript_windowed_operator_review_to_exact_target(
+    tmp_path,
+):
+    clip_a = str(tmp_path / "a.mp4")
+    clip_b = str(tmp_path / "b.mp4")
+    _make_clip(clip_a, seconds=8, color="red")
+    _make_clip(clip_b, seconds=8, color="blue")
+    segment_videos = []
+    for path in (clip_a, clip_b):
+        with open(path, "rb") as handle:
+            segment_videos.append(handle.read())
+
+    final_bytes, meta = stitch_segments(
+        segment_videos=segment_videos,
+        post_id="operator-review",
+        correlation_id="operator-review",
+        trim_windows=[
+            {"start_seconds": 0.0, "end_seconds": 7.6, "source": "review"},
+            {"start_seconds": 0.0, "end_seconds": 7.6, "source": "review"},
+        ],
+        target_duration_seconds=16.0,
+        delivery_retime_ratio=16.0 / 15.2,
+    )
+    output_path = str(tmp_path / "operator-review.mp4")
+    with open(output_path, "wb") as handle:
+        handle.write(final_bytes)
+
+    assert _probe_duration(output_path) == pytest.approx(16.0, abs=1 / 24)
+    assert meta["stitch_delivery_retime_ratio"] == pytest.approx(16.0 / 15.2)
+    assert meta["stitch_trim_window_source"] == ["review", "review"]
+
+
 def test_stitch_acoustic_plan_hard_cuts_video_and_crossfades_audio(tmp_path):
     clip_a = str(tmp_path / "a.mp4")
     clip_b = str(tmp_path / "b.mp4")

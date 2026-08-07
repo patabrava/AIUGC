@@ -356,6 +356,7 @@ def stitch_segments(
     trim_windows: Optional[List[Dict[str, Any]]] = None,
     acoustic_plan: Optional[Dict[str, Any]] = None,
     target_duration_seconds: Optional[float] = None,
+    delivery_retime_ratio: Optional[float] = None,
     terminal_tail_exclusion_seconds: Optional[float] = None,
 ) -> Tuple[bytes, Dict[str, Any]]:
     """Concatenate ordered segment videos into one mp4.
@@ -371,6 +372,8 @@ def stitch_segments(
             never shortened by more than one source frame. Cadence-safe source windows are used
             first, then a bounded whole-output A/V retime may fill the remaining duration. At most
             one frame/sample interval may be resolved as encoder rounding.
+        delivery_retime_ratio: Optional bounded whole-output A/V retime for a transcript-windowed
+            operator-review delivery when no acoustic crossfade plan is available.
         terminal_tail_exclusion_seconds: Optional source-tail margin to remove before
             pitch-preservingly retiming the retained content to the exact delivery target.
 
@@ -388,6 +391,7 @@ def stitch_segments(
         len(segment_videos) == 1
         and not trim_windows
         and target_duration_seconds is None
+        and delivery_retime_ratio is None
         and terminal_tail_exclusion_seconds is None
     ):
         logger.info(
@@ -470,18 +474,36 @@ def stitch_segments(
                 raise ValueError(
                     "Terminal tail exclusion requires an exact delivery target"
                 )
-        delivery_retime_ratio = 1.0
+        explicit_delivery_retime = delivery_retime_ratio is not None
+        planned_delivery_retime = None
         if acoustic_plan is not None and acoustic_plan.get("delivery_retime_ratio") is not None:
-            delivery_retime_ratio = _finite_plan_seconds(
+            planned_delivery_retime = _finite_plan_seconds(
                 acoustic_plan.get("delivery_retime_ratio"),
                 field="delivery retime ratio",
             )
+        if explicit_delivery_retime:
+            delivery_retime_ratio = _finite_plan_seconds(
+                delivery_retime_ratio,
+                field="delivery retime ratio",
+            )
+            if (
+                planned_delivery_retime is not None
+                and abs(delivery_retime_ratio - planned_delivery_retime) > 1e-6
+            ):
+                raise ValueError(
+                    "Explicit delivery retime ratio does not match acoustic plan"
+                )
+        else:
+            delivery_retime_ratio = planned_delivery_retime or 1.0
         if not 1.0 <= delivery_retime_ratio <= MAX_EXACT_DELIVERY_RETIME_RATIO + 1e-9:
-            raise ValueError("Acoustic plan delivery retime ratio exceeds the bounded allowance")
-        if delivery_retime_ratio > 1.0 + 1e-9 and (
-            target_duration_seconds is None or planned_seams is None
-        ):
-            raise ValueError("Bounded delivery retime requires a targeted acoustic plan")
+            raise ValueError("Delivery retime ratio exceeds the bounded allowance")
+        if delivery_retime_ratio > 1.0 + 1e-9:
+            if target_duration_seconds is None:
+                raise ValueError("Bounded delivery retime requires an exact target")
+            if planned_seams is None and not (explicit_delivery_retime and trim_windows):
+                raise ValueError(
+                    "Bounded delivery retime requires an acoustic plan or transcript windows"
+                )
 
         command: List[str] = ["ffmpeg", "-y"]
         for path in input_paths:
