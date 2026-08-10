@@ -1995,7 +1995,7 @@ def _discover_semantic_topics_for_batch_sync(batch: Dict[str, Any]) -> Dict[str,
     reserved_topics = list(all_generated_topics)
     for post_type, count in post_type_counts.items():
         missing_count = len(missing_slots[post_type])
-        if missing_count <= 0 or post_type in {"lifestyle", "product"}:
+        if missing_count <= 0 or post_type == "product":
             continue
         stored_suggestions = list_topic_suggestions(
             target_length_tier=_SEMANTIC_TOPIC_INPUT_TIER,
@@ -2081,12 +2081,17 @@ def _discover_semantic_topics_for_batch_sync(batch: Dict[str, Any]) -> Dict[str,
         )
 
         if post_type == "lifestyle":
-            candidates = _missing_semantic_lifestyle_candidates(
-                count=missing_count,
-                used_family_identities=reserved_family_identities,
-                reserved_topics=reserved_topics,
-                existing_topics=existing_topics,
-            )
+            candidates = list(preselected_suggestions.get(post_type, []))
+            remaining = missing_count - len(candidates)
+            if remaining > 0:
+                candidates.extend(
+                    _missing_semantic_lifestyle_candidates(
+                        count=remaining,
+                        used_family_identities=reserved_family_identities,
+                        reserved_topics=reserved_topics,
+                        existing_topics=existing_topics,
+                    )
+                )
         elif post_type == "product":
             candidates = _reserve_semantic_candidates(
                 generate_product_topics(

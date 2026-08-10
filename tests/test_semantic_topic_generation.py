@@ -135,6 +135,10 @@ def test_semantic_discovery_generates_each_family_once_from_duration_neutral_inp
         return [candidate]
 
     def fake_generate_family(*, count, target_length_tier):
+        if post_type == "lifestyle":
+            raise AssertionError(
+                "audited lifestyle coverage must be selected before provider generation"
+            )
         input_tiers.append(target_length_tier)
         assert target_length_tier == 32
         return [candidate]
