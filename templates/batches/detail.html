@@ -13,7 +13,7 @@
     hx-swap="outerHTML"
     hx-select="#batch-detail-root"
     {% endif %}
-    hx-on::before-request="if (window.batchDetailExpanded || window.isBatchDetailPlaybackActive?.()) { event.preventDefault(); }"
+    hx-on::before-request="if (window.batchDetailExpanded || window.isBatchDetailPlaybackActive?.() || window.isBlogPanelEditing?.()) { event.preventDefault(); }"
 >
     {% include "batches/detail/_breadcrumbs.html" %}
     {% include "batches/detail/_progress_stepper.html" %}
