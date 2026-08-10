@@ -513,6 +513,39 @@ def test_valid_32_second_audited_source_bypasses_provider_regeneration(post_type
     assert "außerdem gilt" not in result.script.casefold()
 
 
+@pytest.mark.parametrize("post_type", ["value", "lifestyle"])
+def test_32_second_recovery_waits_for_topic_aware_generation(post_type):
+    topic_script = _valid_script_for_duration(32)
+
+    class _TopicAwareLLM:
+        def __init__(self):
+            self.calls = []
+
+        def generate_gemini_text(self, **kwargs):
+            self.calls.append(kwargs)
+            return topic_script
+
+    client = _TopicAwareLLM()
+    result = generate_semantic_script(
+        post_type=post_type,
+        title="Sicher entscheiden",
+        cta="Speichere dir den Hinweis.",
+        facts=["Ein kurzer, aber eindeutiger Themenhinweis."],
+        recovery_facts=[
+            VALUE_RECOVERY_SOURCE
+            if post_type == "value"
+            else LIFESTYLE_RECOVERY_SOURCE
+        ],
+        requested_duration_seconds=32,
+        llm_client=client,
+    )
+
+    assert result.script == topic_script
+    assert result.provenance["source"] == "gemini"
+    assert len(client.calls) == 1
+    assert "Sicher entscheiden" in client.calls[0]["prompt"]
+
+
 @pytest.mark.parametrize(
     ("post_type", "recovery_source"),
     [

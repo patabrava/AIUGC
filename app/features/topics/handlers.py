@@ -917,7 +917,16 @@ def _missing_semantic_lifestyle_candidates(
         used_family_identities.update(selected_identities)
         return selected
 
-    candidates: List[Dict[str, Any]] = []
+    # Preserve topic diversity by exhausting the history-aware generation lane
+    # before entering the deliberately small deterministic availability lane.
+    candidates = reserve_lifestyle(
+        generate_lifestyle_topics(
+            count=count,
+            target_length_tier=_SEMANTIC_TOPIC_INPUT_TIER,
+        ),
+        limit=count,
+        include_history=True,
+    )
     for fallback_builder in (
         _build_lifestyle_fallback_candidates,
         _force_fill_lifestyle_candidates,
@@ -951,18 +960,6 @@ def _missing_semantic_lifestyle_candidates(
             include_history=False,
         )
         candidates.extend(additions)
-    remaining = count - len(candidates)
-    if remaining > 0:
-        candidates.extend(
-            reserve_lifestyle(
-                generate_lifestyle_topics(
-                    count=remaining,
-                    target_length_tier=_SEMANTIC_TOPIC_INPUT_TIER,
-                ),
-                limit=remaining,
-                include_history=True,
-            )
-        )
     return candidates
 
 

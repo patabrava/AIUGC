@@ -1735,28 +1735,8 @@ def generate_semantic_script(
                     source_urls=source_urls,
                 ),
             )
-        if recovery_fact_values:
-            try:
-                script = _build_audience_safe_fallback_script(
-                    post_type=normalized_post_type,
-                    title=title,
-                    cta=cta,
-                    facts=recovery_fact_values,
-                    contract=contract,
-                )
-            except ValueError:
-                pass
-            else:
-                return SemanticScriptResult(
-                    script=script,
-                    contract_hash=contract.contract_hash,
-                    provenance=_build_result_provenance(
-                        source="deterministic_recovery",
-                        post_type=normalized_post_type,
-                        research_provenance=research_provenance,
-                        source_urls=source_urls,
-                    ),
-                )
+    # A family recovery source protects provider exhaustion; it must not
+    # replace a distinct selected topic while the provider is available.
     prompt = build_semantic_script_prompt(
         post_type=normalized_post_type,
         title=title,

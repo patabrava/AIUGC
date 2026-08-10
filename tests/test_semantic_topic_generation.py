@@ -196,7 +196,7 @@ def test_semantic_discovery_generates_each_family_once_from_duration_neutral_inp
     result = handlers._discover_topics_for_batch_sync(batch["id"])
 
     assert result["posts_created"] == 1
-    assert input_tiers == ([] if post_type == "lifestyle" else [32])
+    assert input_tiers == [32]
     assert 50 not in input_tiers
     assert len(semantic_calls) == 1
     semantic_call = semantic_calls[0]
@@ -681,12 +681,37 @@ def test_semantic_lifestyle_force_fill_survives_exhausted_global_history(
     assert selected[0]["post_type"] == "lifestyle"
 
 
-def test_semantic_lifestyle_uses_deterministic_families_before_provider(monkeypatch):
+def test_semantic_lifestyle_uses_provider_topics_before_deterministic_recovery(
+    monkeypatch,
+):
+    generated = [
+        {
+            "post_type": "lifestyle",
+            "title": "Neue Cafes mit verlässlichen Zugängen entdecken",
+            "rotation": (
+                "Prüfe vor einem spontanen Cafebesuch den stufenlosen Eingang und "
+                "eine erreichbare Toilette."
+            ),
+        },
+        {
+            "post_type": "lifestyle",
+            "title": "Konzerte mit ruhigen Rückzugsorten planen",
+            "rotation": (
+                "Frage vor dem Konzert nach einem ruhigen Bereich und einem "
+                "barrierefreien Rückweg."
+            ),
+        },
+    ]
     monkeypatch.setattr(
         handlers,
         "generate_lifestyle_topics",
+        lambda **_kwargs: list(generated),
+    )
+    monkeypatch.setattr(
+        handlers,
+        "_build_lifestyle_fallback_candidates",
         lambda **_kwargs: (_ for _ in ()).throw(
-            AssertionError("provider topic generation should not block known-good recovery")
+            AssertionError("recovery should not run when provider topics fill the batch")
         ),
     )
     monkeypatch.setattr(
@@ -703,8 +728,9 @@ def test_semantic_lifestyle_uses_deterministic_families_before_provider(monkeypa
     )
 
     assert len(selected) == 2
-    assert len({candidate["title"] for candidate in selected}) == 2
-    assert all(candidate["dialog_scripts"] for candidate in selected)
+    assert [candidate["title"] for candidate in selected] == [
+        candidate["title"] for candidate in generated
+    ]
 
 
 def test_semantic_lifestyle_fallback_title_is_not_numbered_by_global_history(
