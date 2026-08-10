@@ -1,10 +1,25 @@
 {# Batch-level publish scheduling panel for S7_PUBLISH_PLAN #}
+{% set blog_review_posts = batch_view.visible_posts | selectattr('blog_enabled') | list %}
 <div id="publish-workflow" x-data='batchPublishComponent({
     batchId: {{ batch.id | tojson }},
     posts: {{ batch_view.publish_posts_json | tojson }},
     metaState: {{ batch_view.meta_publish_state | tojson }},
     tiktokState: {{ batch_view.tiktok_publish_state | tojson }}
 })'>
+
+    {% if blog_review_posts %}
+    <div class="mb-6 flex flex-col gap-3 rounded-xl border border-[#006AAB]/25 bg-[#F6FAFF] p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+            <p class="text-sm font-bold text-[#1C2740]">Review blog drafts before final submission</p>
+            <p class="mt-1 text-xs text-[#1C2740]/70">
+                {{ blog_review_posts | length }} blog draft{% if blog_review_posts | length != 1 %}s{% endif %} are attached to this batch. Review the articles, sources, and preview images before scheduling all content.
+            </p>
+        </div>
+        <a href="#blog-panel" class="brand-focus inline-flex shrink-0 items-center justify-center rounded-lg border border-[#006AAB] bg-white px-4 py-2 text-sm font-bold text-[#006AAB] hover:bg-[#006AAB]/5">
+            Review {{ blog_review_posts | length }} blog draft{% if blog_review_posts | length != 1 %}s{% endif %}
+        </a>
+    </div>
+    {% endif %}
 
     {# ── Batch Schedule Panel ── #}
     <div class="bg-[#006AAB]/5 border border-[#006AAB]/30 rounded-lg p-4 sm:p-6 mb-6">
@@ -299,11 +314,19 @@
             </div>
 
             {# Confirm #}
-            <div class="border-t border-gray-200 bg-gray-50 px-6 py-4 flex items-center justify-between">
-                <button type="button" @click="showReviewModal = false"
-                    class="px-4 py-2 text-sm font-medium text-[var(--lippe-deep-blue)] hover:text-gray-900 transition">
-                    Back to editing
-                </button>
+            <div class="border-t border-gray-200 bg-gray-50 px-6 py-4 flex items-center justify-between gap-3">
+                <div class="flex flex-wrap items-center gap-2">
+                    <button type="button" @click="showReviewModal = false"
+                        class="px-4 py-2 text-sm font-medium text-[var(--lippe-deep-blue)] hover:text-gray-900 transition">
+                        Back to editing
+                    </button>
+                    {% if blog_review_posts %}
+                    <a href="#blog-panel" @click="showReviewModal = false"
+                        class="brand-focus rounded-md border border-[#006AAB]/30 bg-white px-4 py-2 text-sm font-semibold text-[#006AAB] hover:bg-[#006AAB]/5">
+                        Review blog drafts
+                    </a>
+                    {% endif %}
+                </div>
                 <button type="button" @click="armDispatch()"
                     :disabled="!canArm"
                     class="inline-flex items-center gap-2 rounded-md px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition"

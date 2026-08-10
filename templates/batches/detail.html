@@ -33,6 +33,11 @@
         {% include "batches/detail/_workflow_panels.html" %}
         {% include "batches/detail/_posts_section.html" %}
     {% endif %}
+
+    {# Blog review is a cross-cutting workspace and must remain reachable after Scripts. #}
+    {% include "batches/detail/_blog_panel.html" %}
+    {% include "batches/detail/_blog_modal.html" %}
+
     {% if batch.creation_mode not in ['semantic_ugc', 'manual_semantic_ugc'] %}
     {% include "batches/detail/_video_settings.html" %}
     {% endif %}

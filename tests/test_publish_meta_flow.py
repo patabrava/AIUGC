@@ -43,6 +43,15 @@ def test_publish_panel_preflights_dispatch_contract_and_preserves_validation_err
     assert "x-collapse" not in panel
 
 
+def test_publish_panel_links_back_to_blog_review_before_final_schedule():
+    panel = Path("templates/batches/detail/_publish_panel.html").read_text()
+
+    assert "Review blog drafts before final submission" in panel
+    assert 'href="#blog-panel"' in panel
+    assert "Review blog drafts" in panel
+    assert "Schedule all posts" in panel
+
+
 class _FakeResponse:
     def __init__(self, data):
         self.data = data

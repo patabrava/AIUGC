@@ -879,6 +879,38 @@ def test_semantic_modes_render_workflow_without_generic_model_selector(
     assert "Veo 3.1 Lite" not in html
 
 
+def test_semantic_blog_review_remains_available_after_scripts(monkeypatch):
+    monkeypatch.setattr(
+        batch_handlers.semantic_video_queries,
+        "get_run_by_post",
+        lambda post_id: None,
+    )
+    batch = _semantic_batch()
+    batch["posts"][0].update(
+        {
+            "blog_enabled": True,
+            "blog_status": "draft",
+            "blog_content": {
+                "name": "Accessible routes",
+                "body_html": "<p>Draft body</p>",
+            },
+        }
+    )
+
+    view = batch_handlers._build_batch_detail_view(batch)
+    env = Environment(loader=FileSystemLoader("templates"))
+    html = env.get_template("batches/detail.html").render(
+        batch=batch,
+        batch_view=view,
+        static_version="1",
+    )
+
+    assert 'href="#blog-panel"' in html
+    assert "Review 1 blog draft" in html
+    assert 'id="blog-panel"' in html
+    assert html.count('id="blog-panel"') == 1
+
+
 def test_semantic_partial_has_accessible_hash_gated_approval_controls():
     env = Environment(loader=FileSystemLoader("templates"))
     template = env.get_template("batches/detail/_semantic_video.html")
@@ -1202,6 +1234,44 @@ def test_semantic_script_review_keeps_post_type_visible():
     )
 
     assert "product post · Script" in html
+
+
+def test_semantic_script_review_exposes_blog_generation_and_script_sources():
+    html = Environment(loader=FileSystemLoader("templates")).get_template(
+        "batches/detail/_semantic_script_review_card.html"
+    ).render(
+        post={
+            "id": "post-value",
+            "post_type": "value",
+            "topic_title": "Accessible checkout",
+            "topic_rotation": "Explain the accessible checkout requirements.",
+            "seed_data": {"script_review_status": "pending"},
+            "blog_enabled": False,
+            "caption_source_links": [
+                {
+                    "label": "Official accessibility guidance",
+                    "url": "https://source.example/accessibility",
+                }
+            ],
+        },
+        batch_view={
+            "semantic_video": {
+                "duration_contract": {
+                    "requested_duration_seconds": 16,
+                    "minimum_words": 30,
+                    "maximum_words": 45,
+                    "minimum_semantic_blocks": 2,
+                }
+            }
+        },
+    )
+
+    assert "Script sources" in html
+    assert "Official accessibility guidance" in html
+    assert 'href="https://source.example/accessibility"' in html
+    assert "Blog post" in html
+    assert "/blog/posts/post-value/blog-toggle" in html
+    assert "Enable blog post generation" in html
 
 
 @pytest.mark.parametrize("creation_mode", ["semantic_ugc", "manual_semantic_ugc"])

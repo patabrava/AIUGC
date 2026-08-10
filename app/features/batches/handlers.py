@@ -514,7 +514,21 @@ def _resolve_review_caption(post: Dict[str, Any]) -> str:
 def _resolve_caption_source_links(post: Dict[str, Any]) -> list[Dict[str, str]]:
     seed_data = post.get("seed_data") or {}
     caption_bundle = seed_data.get("caption_bundle") or {}
-    raw_urls = list(caption_bundle.get("source_urls") or seed_data.get("source_urls") or [])
+    raw_urls = list(caption_bundle.get("source_urls") or [])
+    seed_sources = seed_data.get("source_urls") or seed_data.get("sources") or []
+    if isinstance(seed_sources, list):
+        raw_urls.extend(seed_sources)
+    primary_source_url = str(seed_data.get("primary_source_url") or "").strip()
+    if primary_source_url:
+        raw_urls.append(
+            {
+                "url": primary_source_url,
+                "title": seed_data.get("primary_source_title"),
+            }
+        )
+    source = seed_data.get("source")
+    if isinstance(source, dict):
+        raw_urls.append(source)
     raw_labels = list(caption_bundle.get("source_labels") or [])
     links: list[Dict[str, str]] = []
     seen = set()

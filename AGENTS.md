@@ -256,6 +256,8 @@ Rules that become generally useful across repos should later move into `bridgeco
 
 ## 10) Specific repo rules
 
+- Specialized workflow post cards must preserve the general post card's cross-cutting operator capabilities: expose persisted script sources and the per-post blog-generation control during script review, and keep both wired to the shared source projection and blog endpoints.
+- Semantic workflow pages must keep enabled blog drafts mounted and directly reachable throughout Scene, Plan, Produce, Delivery, and Publish; the final schedule action must include a return path to blog review. Blog dossier lookup must follow persisted research-title provenance when a generated canonical post title differs from the topic registry title.
 - SEO keyword demand is a feature-flagged upstream topic and blog input: with `SEO_TOPIC_CATALOG_ENABLED=false`, preserve the frozen topic-bank selection and original blog prompt exactly; when enabled, snapshot provenance-aware SEO briefs into dossiers, keep workbook actor/first-person notes out of AIUGC scripting, and render internal links only from verified `www.lippelift.de` catalog IDs.
 
 - TikTok direct-publish readiness comes from the connected account's `video.publish` scope plus live creator privacy options, regardless of its configured environment label; Post Now and scheduled dispatch must share this capability result and must never downgrade a proven direct-post account to draft mode solely because it is labeled sandbox.

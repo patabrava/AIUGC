@@ -445,27 +445,49 @@ def _build_error_content(post: Dict[str, Any], error: str) -> Dict[str, Any]:
 
 def _lookup_dossier(post: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Find the research dossier for a post via topic_registry."""
-    topic_title = post.get("topic_title") or post.get("seed_data", {}).get("canonical_topic", "")
-    if not topic_title:
+    seed_data = post.get("seed_data") or {}
+    topic_titles = []
+    for value in (
+        post.get("topic_title"),
+        seed_data.get("canonical_topic"),
+        seed_data.get("research_title"),
+    ):
+        title = str(value or "").strip()
+        if title and title not in topic_titles:
+            topic_titles.append(title)
+    if not topic_titles:
         return None
 
     supabase = get_supabase()
-    response = (
-        supabase.client.table("topic_registry")
-        .select("id")
-        .eq("title", topic_title)
-        .limit(1)
-        .execute()
-    )
-    if not response.data:
-        return None
+    for topic_title in topic_titles:
+        response = (
+            supabase.client.table("topic_registry")
+            .select("id")
+            .eq("title", topic_title)
+            .limit(1)
+            .execute()
+        )
+        if response.data:
+            dossiers = get_topic_research_dossiers(
+                topic_registry_id=response.data[0]["id"],
+                limit=1,
+            )
+            if dossiers:
+                return dossiers[0]
 
-    registry_id = response.data[0]["id"]
-    dossiers = get_topic_research_dossiers(topic_registry_id=registry_id, limit=1)
-    if not dossiers:
-        return None
+    for topic_title in topic_titles:
+        response = (
+            supabase.client.table("topic_research_dossiers")
+            .select("*")
+            .eq("normalized_payload->>topic", topic_title)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if response.data:
+            return response.data[0]
 
-    return dossiers[0]
+    return None
 
 
 def generate_blog_draft(post_id: str) -> Dict[str, Any]:

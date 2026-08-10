@@ -797,6 +797,64 @@ def test_blog_prompt_requests_plain_text_output():
     assert "Bildprompt:" in prompt
 
 
+def test_blog_dossier_lookup_follows_persisted_research_title(monkeypatch):
+    research_title = "Original researched topic"
+    dossier = {
+        "id": "dossier-1",
+        "normalized_payload": {"topic": research_title},
+    }
+
+    class _FakeResponse:
+        def __init__(self, data):
+            self.data = data
+
+    class _FakeTable:
+        def __init__(self, table_name):
+            self.table_name = table_name
+            self.filters = []
+
+        def select(self, *_fields):
+            return self
+
+        def eq(self, key, value):
+            self.filters.append((key, value))
+            return self
+
+        def order(self, *_args, **_kwargs):
+            return self
+
+        def limit(self, _value):
+            return self
+
+        def execute(self):
+            if self.table_name == "topic_research_dossiers" and (
+                "normalized_payload->>topic",
+                research_title,
+            ) in self.filters:
+                return _FakeResponse([dossier])
+            return _FakeResponse([])
+
+    class _FakeClient:
+        def table(self, table_name):
+            return _FakeTable(table_name)
+
+    fake_supabase = type("FakeSupabase", (), {"client": _FakeClient()})()
+    monkeypatch.setattr(blog_runtime, "get_supabase", lambda: fake_supabase)
+    monkeypatch.setattr(blog_runtime, "get_topic_research_dossiers", lambda **_kwargs: [])
+
+    result = blog_runtime._lookup_dossier(
+        {
+            "topic_title": "Generated canonical title",
+            "seed_data": {
+                "canonical_topic": "Generated canonical title",
+                "research_title": research_title,
+            },
+        }
+    )
+
+    assert result == dossier
+
+
 def test_update_blog_status_fails_closed_for_scheduled_legacy_status_constraint(monkeypatch):
     class _FakeResponse:
         def __init__(self, data):

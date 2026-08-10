@@ -612,6 +612,37 @@ def test_batch_detail_view_exposes_caption_source_links_for_review_and_publish()
     ]
 
 
+def test_batch_detail_view_projects_all_persisted_script_source_shapes():
+    batch_view = batch_handlers._build_batch_detail_view(
+        {
+            "state": "S2_SEEDED",
+            "posts": [
+                {
+                    "id": "post-sources",
+                    "post_type": "value",
+                    "topic_title": "Thema",
+                    "seed_data": {
+                        "source_urls": [
+                            {"title": "Research source", "url": "https://source.example/research"}
+                        ],
+                        "primary_source_url": "https://source.example/primary",
+                        "primary_source_title": "Primary source",
+                        "source": {
+                            "title": "Research source duplicate",
+                            "url": "https://source.example/research",
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    assert batch_view["visible_posts"][0]["caption_source_links"] == [
+        {"url": "https://source.example/research", "label": "Research source"},
+        {"url": "https://source.example/primary", "label": "Primary source"},
+    ]
+
+
 def test_batch_detail_view_repairs_persisted_damaged_value_caption():
     damaged = "Wichtiger Punkt: Die Physiotherapie fokussiert sich auf die Wiederherstellung und den E..."
     seed_data = {

@@ -98,9 +98,17 @@
     <div class="mt-5 rounded-xl border border-[#006AAB]/15 bg-[#F6FAFF] px-4 py-3">
         <p class="text-sm font-bold text-[#1C2740]">Next: {{ workflow.current_step.title }}</p>
         <p class="mt-1 max-w-3xl text-sm text-[#1C2740]/70">{{ workflow.current_step.description }}</p>
-        <a href="{{ workflow.current_step.href }}" class="brand-focus mt-3 inline-flex rounded-lg bg-[#006AAB] px-3.5 py-2 text-sm font-bold text-white hover:bg-[#005586]">
-            Go to current step
-        </a>
+        {% set blog_review_posts = batch_view.visible_posts | selectattr('blog_enabled') | list %}
+        <div class="mt-3 flex flex-wrap gap-2">
+            <a href="{{ workflow.current_step.href }}" class="brand-focus inline-flex rounded-lg bg-[#006AAB] px-3.5 py-2 text-sm font-bold text-white hover:bg-[#005586]">
+                Go to current step
+            </a>
+            {% if blog_review_posts %}
+            <a href="#blog-panel" class="brand-focus inline-flex rounded-lg border border-[#006AAB] bg-white px-3.5 py-2 text-sm font-bold text-[#006AAB] hover:bg-[#EAF3FB]">
+                Review {{ blog_review_posts | length }} blog draft{% if blog_review_posts | length != 1 %}s{% endif %}
+            </a>
+            {% endif %}
+        </div>
     </div>
     {% else %}
     <div class="mb-4">
