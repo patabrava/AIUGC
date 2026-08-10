@@ -16,6 +16,24 @@ SAFE_WORDS_PER_TAKE = 18
 EXACT_SHORT_FORM_DURATION_SECONDS = 16
 DELIVERY_CONTRACT_FPS = 24.0
 SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS = 0.5
+# One 48 kHz AAC frame preserves the final phoneme while keeping the last visible
+# 24 fps frame inside the actor's active speech articulation.
+SEMANTIC_TERMINAL_SPEECH_GUARD_SECONDS = 1024.0 / 48000.0
+
+
+def semantic_terminal_speech_cut_floor(final_word_end_seconds: object) -> float:
+    """Return the earliest safe source cut after the final spoken syllable."""
+    try:
+        final_word_end = float(final_word_end_seconds)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "Terminal protection requires a finite final-word timestamp."
+        ) from exc
+    if not math.isfinite(final_word_end) or final_word_end < 0:
+        raise ValueError(
+            "Terminal protection requires a finite non-negative final-word timestamp."
+        )
+    return final_word_end + SEMANTIC_TERMINAL_SPEECH_GUARD_SECONDS
 
 
 @dataclass(frozen=True)
@@ -130,6 +148,8 @@ __all__ = [
     "MINIMUM_SEMANTIC_UGC_DURATION_SECONDS",
     "SAFE_WORDS_PER_TAKE",
     "SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS",
+    "SEMANTIC_TERMINAL_SPEECH_GUARD_SECONDS",
     "SemanticDurationContract",
     "build_semantic_duration_contract",
+    "semantic_terminal_speech_cut_floor",
 ]

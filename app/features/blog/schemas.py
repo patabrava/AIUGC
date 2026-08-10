@@ -19,6 +19,7 @@ DEFAULT_SUMMARY_TITLE = "Das Wichtigste auf einen Blick"
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s+")
+_LINK_TOKEN_RE = re.compile(r"\[\[LINK:([a-z0-9_-]{1,80})\|([^\[\]]{1,160})\]\]", re.IGNORECASE)
 
 
 class BlogSource(BaseModel):
@@ -31,6 +32,24 @@ class BlogSource(BaseModel):
     @classmethod
     def _strip_text(cls, value: str) -> str:
         return _compact_text(value)
+
+
+class BlogInternalLink(BaseModel):
+    id: str = Field(..., min_length=1, max_length=80)
+    title: str = Field(..., min_length=1, max_length=200)
+    url: str = Field(..., min_length=1, max_length=500)
+
+    @field_validator("id", "title", "url")
+    @classmethod
+    def _strip_link_text(cls, value: str) -> str:
+        return _compact_text(value)
+
+    @field_validator("url")
+    @classmethod
+    def _allow_lippe_url(cls, value: str) -> str:
+        if not value.startswith("https://www.lippelift.de/"):
+            raise ValueError("Internal blog links must use the verified Lippe Lift host")
+        return value
 
 
 class BlogSection(BaseModel):
@@ -121,6 +140,8 @@ class BlogContent(BaseModel):
     meta_title: str = Field(..., min_length=1, max_length=160)
     meta_description: str = Field(..., min_length=1, max_length=320)
     sources: List[BlogSource] = Field(default_factory=list)
+    internal_links: List[BlogInternalLink] = Field(default_factory=list)
+    seo_brief: Optional[Dict[str, Any]] = None
     word_count: int = Field(..., ge=0)
     generated_at: str = Field(...)
     dossier_id: str = Field(...)
@@ -252,11 +273,49 @@ def _sanitize_source_list(raw_sources: Any) -> List[Dict[str, str]]:
     return cleaned
 
 
-def _render_bullet_list(items: List[str]) -> str:
+def _sanitize_internal_links(raw_links: Any) -> List[Dict[str, str]]:
+    if not isinstance(raw_links, list):
+        return []
+    cleaned: List[Dict[str, str]] = []
+    seen: set[str] = set()
+    for raw_link in raw_links:
+        if not isinstance(raw_link, dict):
+            continue
+        link_id = _compact_text(raw_link.get("id")).lower()
+        title = _compact_text(raw_link.get("title"))
+        url = _compact_text(raw_link.get("url"))
+        if not link_id or link_id in seen or not title or not url.startswith("https://www.lippelift.de/"):
+            continue
+        seen.add(link_id)
+        cleaned.append({"id": link_id, "title": title, "url": url})
+    return cleaned
+
+
+def _render_inline_html(value: Any, internal_links: Optional[List[Dict[str, str]]] = None) -> str:
+    text = _compact_text(value)
+    if not text:
+        return ""
+    allowed = {link["id"].lower(): link for link in _sanitize_internal_links(internal_links)}
+    parts: List[str] = []
+    cursor = 0
+    for match in _LINK_TOKEN_RE.finditer(text):
+        parts.append(escape(text[cursor : match.start()]))
+        link = allowed.get(match.group(1).lower())
+        anchor = _compact_text(match.group(2))
+        if link and anchor:
+            parts.append(f'<a href="{escape(link["url"], quote=True)}">{escape(anchor)}</a>')
+        else:
+            parts.append(escape(match.group(0)))
+        cursor = match.end()
+    parts.append(escape(text[cursor:]))
+    return "".join(parts)
+
+
+def _render_bullet_list(items: List[str], internal_links: Optional[List[Dict[str, str]]] = None) -> str:
     safe_items = [item for item in (_compact_text(value) for value in items) if item]
     if not safe_items:
         return ""
-    rendered = "".join(f"<li>{escape(item)}</li>" for item in safe_items)
+    rendered = "".join(f"<li>{_render_inline_html(item, internal_links)}</li>" for item in safe_items)
     return f"<ul>{rendered}</ul>"
 
 
@@ -280,6 +339,7 @@ def render_body_html(
     sections: List[Dict[str, Any]],
     conclusion_heading: Optional[str],
     conclusion_paragraphs: List[str],
+    internal_links: Optional[List[Dict[str, str]]] = None,
 ) -> str:
     parts: List[str] = []
     heading = _compact_text(intro_heading)
@@ -288,7 +348,7 @@ def render_body_html(
     for paragraph in introduction_paragraphs or []:
         text = _compact_text(paragraph)
         if text:
-            parts.append(f"<p>{escape(text)}</p>")
+            parts.append(f"<p>{_render_inline_html(text, internal_links)}</p>")
     for section in sections or []:
         if not isinstance(section, dict):
             continue
@@ -298,8 +358,8 @@ def render_body_html(
         for paragraph in section.get("paragraphs") or []:
             text = _compact_text(paragraph)
             if text:
-                parts.append(f"<p>{escape(text)}</p>")
-        bullets_html = _render_bullet_list(section.get("bullets") or [])
+                parts.append(f"<p>{_render_inline_html(text, internal_links)}</p>")
+        bullets_html = _render_bullet_list(section.get("bullets") or [], internal_links)
         if bullets_html:
             parts.append(bullets_html)
     ending = _compact_text(conclusion_heading)
@@ -308,7 +368,7 @@ def render_body_html(
     for paragraph in conclusion_paragraphs or []:
         text = _compact_text(paragraph)
         if text:
-            parts.append(f"<p>{escape(text)}</p>")
+            parts.append(f"<p>{_render_inline_html(text, internal_links)}</p>")
     return "".join(parts)
 
 
@@ -342,17 +402,20 @@ def build_blog_content_from_llm(
     dossier_id: str,
     sources: Optional[List[Dict[str, str]]] = None,
     scheduled_at: Optional[str] = None,
+    seo_brief: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     prepared = dict(data or {})
     prepared["image_prompt"] = _compact_limited_text(prepared.get("image_prompt"), 500) or None
     parsed = BlogLLMOutput.model_validate(prepared)
     sections = [section.model_dump() for section in parsed.sections]
+    internal_links = _sanitize_internal_links((seo_brief or {}).get("internal_links"))
     body_html = render_body_html(
         intro_heading=parsed.intro_heading,
         introduction_paragraphs=parsed.introduction_paragraphs,
         sections=sections,
         conclusion_heading=parsed.conclusion_heading,
         conclusion_paragraphs=parsed.conclusion_paragraphs,
+        internal_links=internal_links,
     )
     summary_title = DEFAULT_SUMMARY_TITLE
     summary_html = render_summary_html(summary_title, parsed.summary_bullets)
@@ -388,6 +451,8 @@ def build_blog_content_from_llm(
             "meta_description": parsed.meta_description,
             "image_prompt": _compact_limited_text(parsed.image_prompt, 500) if parsed.image_prompt else None,
             "sources": sources or [],
+            "internal_links": internal_links,
+            "seo_brief": seo_brief,
             "word_count": word_count,
             "generated_at": generated_at,
             "dossier_id": dossier_id,
@@ -444,12 +509,14 @@ def normalize_blog_content(
 
     body_html = content.get("body_html") or ""
     if not body_html and (intro_heading or sections or conclusion_heading or conclusion_paragraphs):
+        internal_links = _sanitize_internal_links(content.get("internal_links"))
         body_html = render_body_html(
             intro_heading=intro_heading,
             introduction_paragraphs=introduction_paragraphs,
             sections=sections,
             conclusion_heading=conclusion_heading,
             conclusion_paragraphs=conclusion_paragraphs,
+            internal_links=internal_links,
         )
     if not body_html:
         legacy_body = str(content.get("body") or "")
@@ -507,6 +574,8 @@ def normalize_blog_content(
         "meta_title": _compact_text(content.get("meta_title")) or name,
         "meta_description": _compact_text(content.get("meta_description")) or _truncate(preview_text or plain_body, 160),
         "sources": _sanitize_source_list(content.get("sources")),
+        "internal_links": _sanitize_internal_links(content.get("internal_links")),
+        "seo_brief": content.get("seo_brief") if isinstance(content.get("seo_brief"), dict) else None,
         "word_count": word_count,
         "generated_at": _compact_text(content.get("generated_at")) or datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
         "dossier_id": _compact_text(content.get("dossier_id")),

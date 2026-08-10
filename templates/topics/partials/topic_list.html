@@ -14,6 +14,16 @@
                 Inspect generated topics and their scripts.
                 </span>
             </p>
+            {% if seo_catalog_status %}
+            <div class="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+                <span class="rounded-full px-2.5 py-1 font-bold {{ 'bg-emerald-100 text-emerald-800' if seo_catalog_status.enabled else 'bg-slate-100 text-slate-600' }}">
+                    SEO catalog {{ 'active' if seo_catalog_status.enabled else 'off' }}
+                </span>
+                <span class="text-[#1C2740]/55">
+                    {{ seo_catalog_status.keyword_count }} opportunities · {{ seo_catalog_status.internal_link_count }} verified links
+                </span>
+            </div>
+            {% endif %}
         </div>
         <div class="inline-flex rounded-2xl border border-[#1C2740]/10 bg-[#1C2740]/10 p-1 text-xs font-semibold">
             <button type="button"
@@ -50,6 +60,15 @@
                     <div>
                         <h3 class="text-sm font-bold text-[#1C2740]">{{ topic.title }}</h3>
                         <div class="mt-1 text-xs text-[#1C2740]/60">{{ topic.post_type or 'unknown' }}</div>
+                        {% if topic.seo_brief and topic.seo_brief.source_kind == 'catalog' %}
+                        <div class="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] font-semibold text-emerald-800">
+                            <span class="rounded-full bg-emerald-50 px-2 py-0.5">Search-led</span>
+                            <span>{{ topic.seo_brief.primary_keyword }}</span>
+                            {% if topic.seo_brief.metrics and topic.seo_brief.metrics.search_volume %}
+                            <span class="text-[#1C2740]/45">· {{ topic.seo_brief.metrics.search_volume }} searches</span>
+                            {% endif %}
+                        </div>
+                        {% endif %}
                     </div>
                     <span class="rounded-full bg-[#1C2740]/10 px-2.5 py-1 text-[11px] font-bold text-[#1C2740]">Launch</span>
                 </div>

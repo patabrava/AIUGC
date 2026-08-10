@@ -1,5 +1,7 @@
 # Blog Post Feature — Changelog & Reference
 
+The optional search-intent and internal-link layer is documented in [seo-content-workflow.md](seo-content-workflow.md). It remains disabled by default through `SEO_TOPIC_CATALOG_ENABLED=false`.
+
 **Branch:** `main` (merged from `feature/blog-post-feature`)
 **Spec:** `docs/superpowers/specs/2026-03-27-blog-post-feature-design.md`
 **Plan:** `docs/superpowers/plans/2026-03-27-blog-post-feature.md`

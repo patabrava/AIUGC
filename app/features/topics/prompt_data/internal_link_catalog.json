@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "source": {
+    "base_url": "https://www.lippelift.de",
+    "sitemap_url": "https://www.lippelift.de/sitemap.xml",
+    "verified_at": "2026-08-07"
+  },
+  "links": [
+    {
+      "id": "home",
+      "title": "LIPPE Lift Startseite",
+      "url": "https://www.lippelift.de/",
+      "tags": ["treppenlift", "barrierefreiheit", "mobilität", "beratung"]
+    },
+    {
+      "id": "products",
+      "title": "Treppenlifte und Plattformlifte",
+      "url": "https://www.lippelift.de/produkte",
+      "tags": ["treppenlift", "plattformlift", "sitzlift", "homelift", "senkrechtlift", "produkt", "vergleich"]
+    },
+    {
+      "id": "t80_platform",
+      "title": "T80 Plattformtreppenlift",
+      "url": "https://www.lippelift.de/produkte/t80-plattformtreppenlift",
+      "tags": ["plattformlift", "rollstuhl", "treppenlift für rollstuhl", "treppen mit rollstuhl", "rampe"]
+    },
+    {
+      "id": "stl300_vertical",
+      "title": "STL300 Vertikal-Plattformlift",
+      "url": "https://www.lippelift.de/produkte/stl300-vertikal-plattformlift",
+      "tags": ["vertikallift", "senkrechtlift", "plattformlift", "homelift", "rollstuhl"]
+    },
+    {
+      "id": "st70_seat",
+      "title": "ST70 Sitztreppenlift",
+      "url": "https://www.lippelift.de/produkte/st70-sitztreppenlift",
+      "tags": ["sitzlift", "treppenlift", "knieschmerzen", "krücken", "treppensteigen"]
+    },
+    {
+      "id": "t80_seat",
+      "title": "T80 Sitztreppenlift",
+      "url": "https://www.lippelift.de/produkte/t80-sitztreppenlift",
+      "tags": ["sitzlift", "treppenlift", "barrierefrei wohnen", "mobilität"]
+    },
+    {
+      "id": "funding",
+      "title": "Fördermöglichkeiten für Barrierefreiheit",
+      "url": "https://www.lippelift.de/foerderung",
+      "tags": ["förderung", "zuschuss", "pflegegrad", "pflegegeld", "pflegekasse", "umbau", "kosten"]
+    },
+    {
+      "id": "care_funding",
+      "title": "Wohnumfeldverbesserung für Pflegebedürftige",
+      "url": "https://www.lippelift.de/foerderung/wohnumfeldverbesserung-fur-pflegebedurftige",
+      "tags": ["pflegegrad", "pflegekasse", "pflegehilfsmittel", "wohnraumanpassung", "zuschuss", "barrierefreier umbau"]
+    },
+    {
+      "id": "faq",
+      "title": "Häufige Fragen zu Treppenliften",
+      "url": "https://www.lippelift.de/faq",
+      "tags": ["faq", "fragen", "treppenlift", "kosten", "montage", "sicherheit"]
+    },
+    {
+      "id": "downloads",
+      "title": "Downloads und Anleitungen",
+      "url": "https://www.lippelift.de/downloads",
+      "tags": ["anleitung", "maße", "sicherheit", "wartung", "montage", "produktdetails"]
+    },
+    {
+      "id": "blog",
+      "title": "LIPPE Lift Ratgeber",
+      "url": "https://www.lippelift.de/blog",
+      "tags": ["ratgeber", "barrierefreiheit", "mobilität", "alltag", "wissen"]
+    },
+    {
+      "id": "contact",
+      "title": "Kostenlose Beratung anfragen",
+      "url": "https://www.lippelift.de/kontakt",
+      "tags": ["beratung", "kontakt", "angebot", "kaufen", "kosten", "transaktion"]
+    }
+  ]
+}

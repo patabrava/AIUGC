@@ -85,6 +85,25 @@ class ResearchLaneCandidate(BaseModel):
     suggested_length_tiers: List[int] = Field(default_factory=list, max_length=3)
 
 
+class ResearchSeoInternalLink(BaseModel):
+    id: str = Field(..., min_length=1, max_length=80)
+    title: str = Field(..., min_length=2, max_length=200)
+    url: HttpUrl
+
+
+class ResearchSeoBrief(BaseModel):
+    primary_keyword: str = Field(..., min_length=1, max_length=200)
+    secondary_keywords: List[str] = Field(default_factory=list, max_length=6)
+    search_intent: str = Field(..., min_length=2, max_length=80)
+    target_audience: str = Field(..., min_length=2, max_length=240)
+    internal_links: List[ResearchSeoInternalLink] = Field(default_factory=list, max_length=3)
+    cta: str = Field(..., min_length=2, max_length=240)
+    avoid_terms: List[str] = Field(default_factory=list, max_length=12)
+    source_kind: Literal["catalog", "derived"]
+    cluster: Optional[str] = Field(default=None, max_length=160)
+    metrics: Optional[Dict[str, Any]] = None
+
+
 class ResearchDossier(BaseModel):
     """Durable research dossier used by the topic bank and hub."""
     cluster_id: str = Field(..., min_length=2, max_length=120)
@@ -101,6 +120,7 @@ class ResearchDossier(BaseModel):
     risk_notes: List[str] = Field(default_factory=list, min_length=1, max_length=10)
     disclaimer: str = Field(..., min_length=5, max_length=240)
     lane_candidates: List[ResearchLaneCandidate] = Field(default_factory=list, min_length=1, max_length=12)
+    seo_brief: Optional[ResearchSeoBrief] = None
 
     @validator("framework_candidates", "facts", "angle_options", "risk_notes", each_item=False)
     def validate_non_empty_lists(cls, v):

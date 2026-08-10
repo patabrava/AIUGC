@@ -217,6 +217,11 @@ class Settings(BaseSettings):
         default=False,
         description="Enable the daily topic script-bank expansion inside the video poller worker",
     )
+    seo_topic_catalog_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("SEO_TOPIC_CATALOG_ENABLED"),
+        description="Enable the guarded SEO opportunity catalog for topic research and blog generation.",
+    )
     video_poller_identity: str = Field(
         default="",
         description="Optional stable identity label for the video poller worker instance",

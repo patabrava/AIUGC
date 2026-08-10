@@ -7,6 +7,8 @@ Per Constitution § V: Locality & Vertical Slices
 
 from __future__ import annotations
 
+import json
+import re
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -34,10 +36,12 @@ from app.features.blog.schemas import (
 )
 from app.features.blog.webflow_client import WebflowClient
 from app.features.topics.queries import get_topic_research_dossiers
+from app.features.topics.seo_catalog import format_seo_prompt_block, get_enabled_seo_brief, seo_catalog_enabled
 
 logger = get_logger(__name__)
 
 _PROMPT_PATH = Path(__file__).resolve().parent.parent / "topics" / "prompt_data" / "blog_post.txt"
+_SEO_PROMPT_PATH = Path(__file__).resolve().parent.parent / "topics" / "prompt_data" / "blog_post_seo.txt"
 BLOG_IMAGE_WIDTH = 1150
 BLOG_IMAGE_HEIGHT = 850
 
@@ -73,7 +77,8 @@ def _convert_generated_image_to_webp(image_bytes: bytes, *, correlation_id: str)
 
 def _load_prompt_template() -> str:
     """Load the blog post prompt template from disk."""
-    return _PROMPT_PATH.read_text(encoding="utf-8")
+    prompt_path = _SEO_PROMPT_PATH if seo_catalog_enabled() else _PROMPT_PATH
+    return prompt_path.read_text(encoding="utf-8")
 
 
 def _isoformat_optional(value: Any) -> Optional[str]:
@@ -103,6 +108,20 @@ def _build_blog_prompt(dossier_payload: Dict[str, Any]) -> str:
     risk_notes = dossier_payload.get("risk_notes") or []
     risks_text = "\n".join(f"- {r}" for r in risk_notes)
 
+    seo_brief = _resolve_blog_seo_brief(dossier_payload)
+    seo_data = format_seo_prompt_block(seo_brief) or "Keine verbindlichen SEO-Daten vorhanden."
+    internal_link_rules = "Keine internen Links erzwingen."
+    if seo_brief and seo_brief.get("internal_links"):
+        tokens = "\n".join(
+            f"- [[LINK:{link['id']}|natürlicher Ankertext]] für {link['title']}"
+            for link in seo_brief["internal_links"]
+        )
+        internal_link_rules = (
+            "Nutze 1 bis 3 der folgenden kontrollierten Link-Tokens natürlich im Haupttext. "
+            "Verwende ausschließlich die aufgeführten IDs und schreibe keine URL selbst:\n"
+            f"{tokens}"
+        )
+
     prompt = template.replace("{topic}", dossier_payload.get("topic", ""))
     prompt = prompt.replace("{cluster_summary}", dossier_payload.get("cluster_summary", ""))
     prompt = prompt.replace("{facts}", facts_text)
@@ -111,8 +130,19 @@ def _build_blog_prompt(dossier_payload: Dict[str, Any]) -> str:
     prompt = prompt.replace("{source_summary}", dossier_payload.get("source_summary", ""))
     prompt = prompt.replace("{risk_notes}", risks_text)
     prompt = prompt.replace("{disclaimer}", dossier_payload.get("disclaimer", ""))
+    prompt = prompt.replace("{seo_data}", seo_data)
+    prompt = prompt.replace("{internal_link_rules}", internal_link_rules)
 
     return prompt
+
+
+def _resolve_blog_seo_brief(dossier_payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if not seo_catalog_enabled():
+        return None
+    persisted = dossier_payload.get("seo_brief")
+    if isinstance(persisted, dict) and persisted.get("primary_keyword"):
+        return dict(persisted)
+    return get_enabled_seo_brief(str(dossier_payload.get("topic") or dossier_payload.get("seed_topic") or ""))
 
 
 def _build_blog_image_prompt(blog_content: Dict[str, Any], dossier_payload: Dict[str, Any]) -> str:
@@ -145,7 +175,27 @@ def _limit_text(value: Any, limit: int) -> str:
     return f"{clipped}…"
 
 
-def _collect_blog_contract_issues(parsed: Dict[str, Any]) -> list[str]:
+def _seo_tokens(value: Any) -> set[str]:
+    return {token for token in re.findall(r"[\wäöüß]+", _compact_line(value).lower()) if len(token) > 1}
+
+
+def _contains_primary_keyword(value: Any, primary_keyword: str) -> bool:
+    primary_tokens = _seo_tokens(primary_keyword)
+    value_tokens = _seo_tokens(value)
+    return bool(primary_tokens) and all(
+        any(
+            candidate == primary
+            or (len(primary) >= 5 and (candidate.startswith(primary) or primary.startswith(candidate)))
+            for candidate in value_tokens
+        )
+        for primary in primary_tokens
+    )
+
+
+def _collect_blog_contract_issues(
+    parsed: Dict[str, Any],
+    seo_brief: Optional[Dict[str, Any]] = None,
+) -> list[str]:
     issues: list[str] = []
 
     if not _compact_line(parsed.get("name")):
@@ -204,6 +254,39 @@ def _collect_blog_contract_issues(parsed: Dict[str, Any]) -> list[str]:
         issues.append("Meta-Titel fehlt.")
     if not _compact_line(parsed.get("meta_description")):
         issues.append("Meta-Beschreibung fehlt.")
+
+    if seo_brief:
+        primary = _compact_line(seo_brief.get("primary_keyword"))
+        required_fields = {
+            "Name": parsed.get("name"),
+            "Slug": parsed.get("slug"),
+            "erster Einleitungsabsatz": (parsed.get("introduction_paragraphs") or [""])[0],
+            "Meta-Titel": parsed.get("meta_title"),
+            "Meta-Beschreibung": parsed.get("meta_description"),
+        }
+        for label, value in required_fields.items():
+            if primary and not _contains_primary_keyword(value, primary):
+                issues.append(f"{label} braucht das Hauptkeyword oder eine natürliche Wortform davon: {primary}.")
+        headings = [parsed.get("intro_heading"), parsed.get("conclusion_heading")] + [
+            (section or {}).get("heading") for section in sections
+        ]
+        if primary and not any(_contains_primary_keyword(heading, primary) for heading in headings):
+            issues.append(f"Mindestens eine Zwischenüberschrift braucht das Hauptkeyword: {primary}.")
+        if len(_compact_line(parsed.get("meta_title"))) > 65:
+            issues.append("Meta-Titel ist laenger als 65 Zeichen.")
+        if len(_compact_line(parsed.get("meta_description"))) > 160:
+            issues.append("Meta-Beschreibung ist laenger als 160 Zeichen.")
+
+        allowed_ids = {str(link.get("id") or "").lower() for link in seo_brief.get("internal_links") or []}
+        serialized = json.dumps(parsed, ensure_ascii=False)
+        used_ids = [match.lower() for match in re.findall(r"\[\[LINK:([a-z0-9_-]+)\|", serialized, re.IGNORECASE)]
+        if allowed_ids and not used_ids:
+            issues.append("Der Haupttext braucht mindestens einen erlaubten internen Link-Token.")
+        if len(used_ids) > 3:
+            issues.append("Der Haupttext darf höchstens drei interne Link-Tokens enthalten.")
+        unknown_ids = sorted(set(used_ids) - allowed_ids)
+        if unknown_ids:
+            issues.append("Unbekannte interne Link-IDs: " + ", ".join(unknown_ids) + ".")
 
     return issues
 
@@ -410,6 +493,7 @@ def generate_blog_draft(post_id: str) -> Dict[str, Any]:
 
         llm = get_llm_client()
         dossier_sources = dossier_payload.get("sources") or []
+        seo_brief = _resolve_blog_seo_brief(dossier_payload)
         prompt = _build_blog_prompt(dossier_payload)
         sources = [
             {"title": s.get("title", ""), "url": str(s.get("url", ""))}
@@ -428,7 +512,7 @@ def generate_blog_draft(post_id: str) -> Dict[str, Any]:
             parsed = _parse_labeled_blog_text(raw_text, dossier_payload)
             parsed["image_prompt"] = parsed.get("image_prompt") or _build_blog_image_prompt(parsed, dossier_payload)
 
-            contract_issues = _collect_blog_contract_issues(parsed)
+            contract_issues = _collect_blog_contract_issues(parsed, seo_brief)
             if contract_issues:
                 logger.warning(
                     "blog_generation_contract_retry",
@@ -447,6 +531,7 @@ def generate_blog_draft(post_id: str) -> Dict[str, Any]:
                     dossier_id=dossier_id,
                     sources=sources,
                     scheduled_at=_isoformat_optional(post.get("blog_scheduled_at")),
+                    seo_brief=seo_brief,
                 )
                 break
             except PydanticValidationError as exc:

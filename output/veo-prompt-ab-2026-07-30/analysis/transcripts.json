@@ -1,0 +1,287 @@
+{
+  "old": {
+    "full_text": "Die Herausforderungen reichen von der aufzubringenden Kraft über die Positionierung des Rollstuhls bis hin zur Koordination der Bewegungen.",
+    "words": [
+      {
+        "word": "die",
+        "start": 0.08,
+        "end": 0.39999998
+      },
+      {
+        "word": "herausforderungen",
+        "start": 0.39999998,
+        "end": 0.9
+      },
+      {
+        "word": "reichen",
+        "start": 1.36,
+        "end": 1.68
+      },
+      {
+        "word": "von",
+        "start": 1.68,
+        "end": 1.76
+      },
+      {
+        "word": "der",
+        "start": 1.76,
+        "end": 2.0
+      },
+      {
+        "word": "aufzubringenden",
+        "start": 2.0,
+        "end": 2.5
+      },
+      {
+        "word": "kraft",
+        "start": 2.8,
+        "end": 3.3
+      },
+      {
+        "word": "über",
+        "start": 3.36,
+        "end": 3.52
+      },
+      {
+        "word": "die",
+        "start": 3.52,
+        "end": 3.76
+      },
+      {
+        "word": "positionierung",
+        "start": 3.76,
+        "end": 4.26
+      },
+      {
+        "word": "des",
+        "start": 4.48,
+        "end": 4.72
+      },
+      {
+        "word": "rollstuhls",
+        "start": 4.72,
+        "end": 5.22
+      },
+      {
+        "word": "bis",
+        "start": 5.3599997,
+        "end": 5.52
+      },
+      {
+        "word": "hin",
+        "start": 5.52,
+        "end": 5.68
+      },
+      {
+        "word": "zur",
+        "start": 5.68,
+        "end": 5.92
+      },
+      {
+        "word": "koordination",
+        "start": 5.92,
+        "end": 6.42
+      },
+      {
+        "word": "der",
+        "start": 6.56,
+        "end": 6.96
+      },
+      {
+        "word": "bewegungen",
+        "start": 6.96,
+        "end": 7.46
+      }
+    ]
+  },
+  "new": {
+    "full_text": "Die Herausforderungen reichen von der aufzubringenden Kraft über die Positionierung des Rollstuhls bis hin zur Koordination der Bewegungen.",
+    "words": [
+      {
+        "word": "die",
+        "start": 0.08,
+        "end": 0.24
+      },
+      {
+        "word": "herausforderungen",
+        "start": 0.24,
+        "end": 0.74
+      },
+      {
+        "word": "reichen",
+        "start": 1.28,
+        "end": 1.52
+      },
+      {
+        "word": "von",
+        "start": 1.52,
+        "end": 1.68
+      },
+      {
+        "word": "der",
+        "start": 1.68,
+        "end": 1.8399999
+      },
+      {
+        "word": "aufzubringenden",
+        "start": 1.8399999,
+        "end": 2.34
+      },
+      {
+        "word": "kraft",
+        "start": 2.8,
+        "end": 3.3
+      },
+      {
+        "word": "über",
+        "start": 3.36,
+        "end": 3.52
+      },
+      {
+        "word": "die",
+        "start": 3.52,
+        "end": 3.76
+      },
+      {
+        "word": "positionierung",
+        "start": 3.76,
+        "end": 4.26
+      },
+      {
+        "word": "des",
+        "start": 4.4,
+        "end": 4.72
+      },
+      {
+        "word": "rollstuhls",
+        "start": 4.72,
+        "end": 5.22
+      },
+      {
+        "word": "bis",
+        "start": 5.3599997,
+        "end": 5.52
+      },
+      {
+        "word": "hin",
+        "start": 5.52,
+        "end": 5.68
+      },
+      {
+        "word": "zur",
+        "start": 5.68,
+        "end": 5.92
+      },
+      {
+        "word": "koordination",
+        "start": 5.92,
+        "end": 6.42
+      },
+      {
+        "word": "der",
+        "start": 6.64,
+        "end": 6.96
+      },
+      {
+        "word": "bewegungen",
+        "start": 6.96,
+        "end": 7.46
+      }
+    ]
+  },
+  "final": {
+    "full_text": "Die Herausforderungen reichen von der aufzubringenden Kraft über die Positionierung des Rollstuhls bis hin zur Koordination der Bewegungen.",
+    "words": [
+      {
+        "word": "die",
+        "start": 0.08,
+        "end": 0.58
+      },
+      {
+        "word": "herausforderungen",
+        "start": 1.12,
+        "end": 1.4399999
+      },
+      {
+        "word": "reichen",
+        "start": 1.4399999,
+        "end": 1.76
+      },
+      {
+        "word": "von",
+        "start": 1.76,
+        "end": 1.92
+      },
+      {
+        "word": "der",
+        "start": 1.92,
+        "end": 2.08
+      },
+      {
+        "word": "aufzubringenden",
+        "start": 2.08,
+        "end": 2.58
+      },
+      {
+        "word": "kraft",
+        "start": 3.04,
+        "end": 3.36
+      },
+      {
+        "word": "über",
+        "start": 3.36,
+        "end": 3.52
+      },
+      {
+        "word": "die",
+        "start": 3.52,
+        "end": 3.84
+      },
+      {
+        "word": "positionierung",
+        "start": 3.84,
+        "end": 4.34
+      },
+      {
+        "word": "des",
+        "start": 4.48,
+        "end": 4.7999997
+      },
+      {
+        "word": "rollstuhls",
+        "start": 4.7999997,
+        "end": 5.2999997
+      },
+      {
+        "word": "bis",
+        "start": 5.3599997,
+        "end": 5.6
+      },
+      {
+        "word": "hin",
+        "start": 5.6,
+        "end": 5.68
+      },
+      {
+        "word": "zur",
+        "start": 5.68,
+        "end": 5.92
+      },
+      {
+        "word": "koordination",
+        "start": 5.92,
+        "end": 6.42
+      },
+      {
+        "word": "der",
+        "start": 6.64,
+        "end": 6.96
+      },
+      {
+        "word": "bewegungen",
+        "start": 6.96,
+        "end": 7.46
+      }
+    ]
+  }
+}

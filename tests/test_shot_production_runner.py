@@ -1506,11 +1506,11 @@ def test_compose_single_take_marks_seam_qa_not_applicable(tmp_path):
     take["transcript_qa"] = {
         "passed": True,
         "first_word_start_seconds": 0.2,
-        "final_word_end_seconds": 6.8,
+        "final_word_end_seconds": 7.3,
     }
     take["trim_window"] = {
         "start_seconds": 0.0,
-        "end_seconds": 7.25,
+        "end_seconds": 7.55,
         "source": "deepgram_word_window",
     }
     payload["visual_qa"] = {"passed": True}
@@ -1561,12 +1561,22 @@ def test_compose_single_take_marks_seam_qa_not_applicable(tmp_path):
     saved = _read(manifest_path)
     assert stitch_calls[0]["trim_windows"] is None
     assert stitch_calls[0]["target_duration_seconds"] == 8.0
-    assert stitch_calls[0]["terminal_tail_exclusion_seconds"] == 0.5
+    assert stitch_calls[0]["terminal_tail_exclusion_seconds"] == pytest.approx(
+        8.0 - 7.3 - (1024.0 / 48000.0)
+    )
     assert terminal_evaluations == [
         Path(take["raw"]["path"]).name,
         "stitched.mp4",
     ]
     assert saved["source_visual_tail_qa"]["takes"][0]["reset_detected"] is True
+    assert saved["source_visual_tail_qa"]["final_word_end_seconds"] == 7.3
+    assert saved["source_visual_tail_qa"]["speech_cut_floor_seconds"] == pytest.approx(
+        7.321333, abs=1e-6
+    )
+    assert saved["source_visual_tail_qa"]["transcript_window_end_seconds"] == 7.55
+    assert saved["source_visual_tail_qa"]["applied_tail_exclusion_seconds"] == pytest.approx(
+        0.678667, abs=1e-6
+    )
     assert saved["delivery_terminal_qa"]["passed"] is True
     assert saved["delivery_terminal_qa"]["reset_detected"] is False
     assert saved["seam_qa"] == {
@@ -1574,6 +1584,63 @@ def test_compose_single_take_marks_seam_qa_not_applicable(tmp_path):
         "passed": True,
         "gaps_seconds": [],
     }
+
+
+@pytest.mark.parametrize(
+    ("final_word_end", "message", "failure_type"),
+    [
+        (
+            7.49,
+            "terminal protection would cut transcript-safe context",
+            "terminal_tail_speech_overlap",
+        ),
+        (
+            7.0,
+            "active-speech cut exceeds the cadence bound",
+            "terminal_active_speech_timing",
+        ),
+    ],
+)
+def test_compose_single_take_rejects_unsafe_active_speech_cut(
+    tmp_path,
+    final_word_end,
+    message,
+    failure_type,
+):
+    from app.features.shot_production.runner import compose_and_caption
+
+    manifest_path = _manifest_with_raw_takes(
+        tmp_path,
+        script=SINGLE_TAKE_SCRIPT,
+        target_length_tier=8,
+    )
+    payload = _read(manifest_path)
+    take = payload["takes"][0]
+    take["transcript_qa"] = {
+        "passed": True,
+        "first_word_start_seconds": 0.2,
+        "final_word_end_seconds": final_word_end,
+    }
+    take["trim_window"] = {
+        "start_seconds": 0.0,
+        "end_seconds": 7.49,
+        "source": "deepgram_word_window",
+    }
+    payload["visual_qa"] = {"passed": True}
+    payload["voice_qa"] = {"passed": True, "status": "not_applicable"}
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(
+        ValidationError,
+        match=message,
+    ) as exc_info:
+        compose_and_caption(manifest_path, _DeepgramByCall([]))
+
+    assert exc_info.value.details["failure_type"] == failure_type
+    assert exc_info.value.details["final_word_end_seconds"] == final_word_end
+    assert exc_info.value.details["speech_cut_floor_seconds"] == pytest.approx(
+        final_word_end + (1024.0 / 48000.0)
+    )
 
 
 def test_compose_rejects_legacy_trim_windows_from_direct_callers(tmp_path):

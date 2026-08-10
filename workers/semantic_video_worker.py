@@ -36,7 +36,12 @@ from app.features.semantic_videos.visual_contract import (
     validate_scene_plate_generation_contract,
     validate_visual_contract,
 )
-from app.features.shot_production.duration import build_semantic_duration_contract
+from app.features.shot_production.audio_seams import MAX_EXACT_DELIVERY_RETIME_RATIO
+from app.features.shot_production.duration import (
+    SEMANTIC_TERMINAL_SPEECH_GUARD_SECONDS,
+    build_semantic_duration_contract,
+    semantic_terminal_speech_cut_floor,
+)
 from app.features.shot_production.runner import load_video_uri
 from app.features.shot_production.shot_deck import derive_shot_deck
 
@@ -478,7 +483,17 @@ class ProductionStageRunner:
         ):
             return
         report = payload.get("visual_qa")
-        if not isinstance(report, dict) or report.get("passed") is not False:
+        if not isinstance(report, dict):
+            report = {
+                "passed": False,
+                "status": "qa_service_unavailable",
+                "blocking_reasons": [
+                    str(qa_advisory.get("message") or "Identity QA service unavailable.")
+                ],
+                "observed_differences": [],
+            }
+            payload["visual_qa"] = report
+        elif report.get("passed") is not False:
             return
         report["provider_passed"] = False
         report["provider_blocking_reasons"] = list(
@@ -1129,13 +1144,39 @@ class ProductionStageRunner:
             float(requested_duration)
             - SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS
         )
-        transcript_safe_end = float(trim_window.get("end_seconds") or 0.0)
-        if transcript_safe_end > protected_source_end + 1e-6:
+        transcript_window_end = float(trim_window.get("end_seconds") or 0.0)
+        try:
+            speech_cut_floor = semantic_terminal_speech_cut_floor(
+                transcript_qa.get("final_word_end_seconds")
+            )
+        except ValueError as exc:
+            raise StateTransitionError(str(exc)) from exc
+        if speech_cut_floor > protected_source_end + 1e-6:
             raise StateTransitionError(
                 "Advisory terminal protection would cut transcript-safe context.",
                 {
-                    "transcript_safe_end_seconds": transcript_safe_end,
+                    "final_word_end_seconds": float(
+                        transcript_qa["final_word_end_seconds"]
+                    ),
+                    "speech_guard_seconds": SEMANTIC_TERMINAL_SPEECH_GUARD_SECONDS,
+                    "speech_cut_floor_seconds": speech_cut_floor,
+                    "transcript_window_end_seconds": transcript_window_end,
                     "protected_source_end_seconds": protected_source_end,
+                },
+            )
+        active_cut_retime_ratio = float(requested_duration) / speech_cut_floor
+        if active_cut_retime_ratio > MAX_EXACT_DELIVERY_RETIME_RATIO + 1e-9:
+            raise StateTransitionError(
+                "Advisory active-speech cut exceeds the cadence bound.",
+                {
+                    "failure_type": "terminal_active_speech_timing",
+                    "final_word_end_seconds": float(
+                        transcript_qa["final_word_end_seconds"]
+                    ),
+                    "speech_guard_seconds": SEMANTIC_TERMINAL_SPEECH_GUARD_SECONDS,
+                    "speech_cut_floor_seconds": speech_cut_floor,
+                    "required_retime_ratio": active_cut_retime_ratio,
+                    "maximum_retime_ratio": MAX_EXACT_DELIVERY_RETIME_RATIO,
                 },
             )
 
@@ -1168,7 +1209,7 @@ class ProductionStageRunner:
             acoustic_plan=None,
             target_duration_seconds=float(requested_duration),
             terminal_tail_exclusion_seconds=(
-                SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS
+                float(requested_duration) - speech_cut_floor
             ),
         )
         stitched_path = manifest_path.parent / "stitched-advisory.mp4"
@@ -2004,14 +2045,30 @@ class SemanticVideoWorker:
                 takes=deepcopy_rows(takes),
             )
         except StateTransitionError as exc:
-            if str(exc) != "Advisory terminal protection would cut transcript-safe context.":
+            retryable_terminal_failures = {
+                "Advisory terminal protection would cut transcript-safe context.": (
+                    "terminal_tail_speech_overlap",
+                    "Retry only the take whose verified final word overlaps the protected "
+                    "terminal window. Preserve every completed sibling take.",
+                    "terminal_speech_overlap_retry_required",
+                ),
+                "Advisory active-speech cut exceeds the cadence bound.": (
+                    "terminal_active_speech_timing",
+                    "Retry only the take whose final word ends too early for an active-speech "
+                    "cut within the cadence bound. Preserve every completed sibling take.",
+                    "terminal_active_speech_retry_required",
+                ),
+            }
+            retry_policy = retryable_terminal_failures.get(str(exc))
+            if retry_policy is None:
                 raise
+            failure_type, retry_guidance, retry_action = retry_policy
             terminal_failure = {
                 "stage": "acoustic_qa",
                 "message": str(exc),
                 "details": dict(exc.details or {}),
                 "failed_take_indexes": [int(take.get("take_index") or 0)],
-                "failure_type": "terminal_tail_speech_overlap",
+                "failure_type": failure_type,
                 "retry_mode": "localized_paid_take",
             }
             self.repo.require_retry_approval(
@@ -2023,16 +2080,13 @@ class SemanticVideoWorker:
                 evidence={
                     **dict(artifacts),
                     "qa_failure": terminal_failure,
-                    "guidance": (
-                        "Retry only the take whose verified final word overlaps the protected "
-                        "500 ms terminal window. Preserve every completed sibling take."
-                    ),
+                    "guidance": retry_guidance,
                 },
             )
             return WorkerTickResult(
                 run_id,
                 "retry_approval_required",
-                "terminal_speech_overlap_retry_required",
+                retry_action,
             )
         caption_uri = str(captioned.get("url") or "")
         caption_hash = str(captioned.get("sha256") or "")

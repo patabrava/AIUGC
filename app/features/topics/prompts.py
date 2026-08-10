@@ -14,6 +14,12 @@ from typing import Any, Dict, List, Optional
 import yaml
 from app.core.video_profiles import DurationProfile, get_duration_profile
 from app.features.topics.schemas import ProductKnowledgeEntry, ResearchDossier
+from app.features.topics.seo_catalog import (
+    format_seo_prompt_block,
+    get_enabled_seo_brief,
+    get_seo_seed_candidates,
+    seo_catalog_enabled,
+)
 from app.features.topics.topic_validation import sanitize_spoken_fragment, sanitize_metadata_text
 
 PROMPT_DATA_DIR = Path(__file__).resolve().parent / "prompt_data"
@@ -193,23 +199,36 @@ def _load_hook_bank_payload() -> Dict[str, Any]:
     return extract_hook_bank_from_prompt1_source(_load_seed_canon_text())
 
 
-@lru_cache(maxsize=None)
 def get_topic_seed_catalog() -> List[str]:
-    """Return cached list of seed topics from the topic bank."""
+    """Return the frozen bank, optionally prefixed by the guarded SEO catalog."""
     payload = _load_topic_bank_payload()
     topics = [str(topic).strip() for topic in list(payload.get("topics") or []) if str(topic).strip()]
-    return topics
+    if not seo_catalog_enabled():
+        return topics
+    merged: List[str] = []
+    seen: set[str] = set()
+    for topic in get_seo_seed_candidates() + topics:
+        signature = _normalize_bank_topic_signature(topic)
+        if signature and signature not in seen:
+            seen.add(signature)
+            merged.append(topic)
+    return merged
 
 
-@lru_cache(maxsize=None)
 def get_topic_pool_candidates() -> List[str]:
     """Backward-compatible alias for the frozen seed catalog."""
     return get_topic_seed_catalog()
 
 
-@lru_cache(maxsize=None)
 def get_topic_bank() -> Dict[str, Any]:
-    return _load_topic_bank_payload()
+    payload = _load_topic_bank_payload()
+    if not seo_catalog_enabled():
+        return payload
+    return {
+        **payload,
+        "topics": get_topic_seed_catalog(),
+        "seo_catalog_enabled": True,
+    }
 
 
 @lru_cache(maxsize=None)
@@ -338,6 +357,7 @@ def _format_research_prompt_context(
     post_type: str,
     target_length_tier: int,
 ) -> str:
+    seo_block = format_seo_prompt_block(get_enabled_seo_brief(seed_topic))
     return _join_sections(
         "DU SCHREIBST NUR EINE EINZIGE RESEARCH-DOSSIER-AUSGABE.",
         "Ziel: Sammle so viel verwertbaren Kontext wie möglich für spätere Skripte.",
@@ -350,6 +370,15 @@ def _format_research_prompt_context(
         "- Konzentriere dich auf Quellen, Fakten, Winkel, Risiken und hilfreiche Einordnung.",
         "- Die Ausgabe soll als dauerhafte Dossier-Datenbank gespeichert werden.",
         "- Antworte als lesbarer Rohtext auf Deutsch, ohne JSON-Schema.",
+        seo_block,
+        (
+            "SEO-EINORDNUNG:\n"
+            "- Nutze die SEO-Daten als Rechercheorientierung, nicht als Ersatz für Quellen.\n"
+            "- Behandle Suchintention, Nutzerfragen und passende Begriffe im Dossier.\n"
+            "- Übernimm keine unbelegten Claims und keine Ich-Erfahrungen aus Themenhinweisen."
+            if seo_block
+            else ""
+        ),
     )
 
 

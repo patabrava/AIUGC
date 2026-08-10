@@ -1,0 +1,101 @@
+{
+  "experiment": "VEO 3.1 old-vs-new-vs-final prompt comparison",
+  "created_at": "2026-07-29T23:39:24.321736+00:00",
+  "status": "completed",
+  "controlled_parameters": {
+    "model": "veo-3.1-generate-001",
+    "seed": 240713,
+    "duration_seconds": 8,
+    "aspect_ratio": "9:16",
+    "resolution": "720p",
+    "generate_audio": true,
+    "sample_count": 1,
+    "dialogue": "Die Herausforderungen reichen von der aufzubringenden Kraft über die Positionierung des Rollstuhls bis hin zur Koordination der Bewegungen.",
+    "reference_order": [
+      "actor_identity_front",
+      "actor_identity_three_quarter",
+      "canonical_scene"
+    ]
+  },
+  "references": [
+    {
+      "role": "actor_identity_front",
+      "path": "/Users/patabrava/Documents/AI/github/Camilo/AIUGC/output/veo-prompt-ab-2026-07-30/references/01-actor-front.png",
+      "mime_type": "image/png",
+      "sha256": "aebdd1ae3be4ac94ad5c3dd842aecbcf692b98721714d21f9ec4e3495badccf3",
+      "bytes": 1880019
+    },
+    {
+      "role": "actor_identity_three_quarter",
+      "path": "/Users/patabrava/Documents/AI/github/Camilo/AIUGC/output/veo-prompt-ab-2026-07-30/references/02-actor-three-quarter.jpg",
+      "mime_type": "image/jpeg",
+      "sha256": "e81f72137b002f95906b9ae429b7ba4f50ab5334317c2ce546b1014855759718",
+      "bytes": 3036880
+    },
+    {
+      "role": "canonical_scene",
+      "path": "/Users/patabrava/Documents/AI/github/Camilo/AIUGC/output/veo-prompt-ab-2026-07-30/references/03-home-office.png",
+      "mime_type": "image/png",
+      "sha256": "aeb8ff892e2109891d7ad85e527f2afb06eb84ec5d34e69d0f4aef5683f2db1b",
+      "bytes": 1182572
+    }
+  ],
+  "variants": {
+    "old": {
+      "prompt": "Treat the supplied approved matched reference images as the sole visual truth. Use them to keep the same adult woman's exact identity, facial geometry, apparent age, hair, seated posture, camera position, and framing exactly as shown. Keep the frozen location exactly as shown and described: Home office advice scene A. Keep this exact room identity across all generated angles: tidy small home study, warm off-white wall behind, a simple light-oak desk against that wall, one closed silver-grey laptop centered on the desk, a small neat stack of plain white papers on the desk's right edge, a narrow oak wall shelf above carrying three or four upright books with muted spines, a plain window with a thin pale roller blind at far left letting in soft daylight, pale oak floor, calm and uncluttered, no people, no monitor, no desk lamp, no cables, no plants, no wall art, no pinboard, no coffee cup. Keep her upper-body outfit exactly: soft-beige blazer over a plain white top. Keep the wheelchair exactly: The same lightweight manual wheelchair in every image: matte dark-graphite frame, slim black armrests, black seat and back cushion, and silver hand rims. Keep the framing exactly: Use a static vertical 9:16 medium close-up from head to mid-torso at seated eye-level. Keep her face large and identity-readable while at least one armrest and part of a large rear wheel or silver hand rim remain clearly visible. Continue as restrained, natural phone-camera UGC with a subtle conversational expression, subtle blinking, and minimal head movement. Use the same warm adult German female voice across every take, speaking native German with natural conversational pacing and close smartphone microphone sound. Use the shot duration naturally, pacing the beat to place the final spoken word near 7.0 seconds without sounding slow or theatrical. She says exactly this German beat once: “Die Herausforderungen reichen von der aufzubringenden Kraft über die Positionierung des Rollstuhls bis hin zur Koordination der Bewegungen.” Do not speak any other words or any English. After the final word, naturally stop speaking, close her mouth, and keep quiet eye contact. The camera remains locked in the exact same position after the final word: no pan, tilt, zoom, dolly, orbit, or reframing. She may keep subtle blinking and natural breathing without moving the camera. Do not freeze or perform an artificial end pose. Keep every frame completely free of on-screen text: no captions, subtitles, logos, watermarks, letters, symbols, or gibberish glyphs.",
+      "negative_prompt": "face change, age change, hair change, wardrobe change, room change, extra person, wheelchair change, cropped wheelchair, standing, walking, camera movement, camera pan, camera tilt, camera zoom, push-in, dolly, orbit, reframe, posture reset, generated text, subtitles, music, background voices, extra speech, hands entering frame, repeated dialogue, English speech, logos, watermarks, gibberish text",
+      "state": "completed",
+      "submission_started_at": "2026-07-29T23:39:30.079546+00:00",
+      "operation_id": "projects/project-402e0012-e068-462f-acf/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/215b9f6e-6bea-4c52-a9c1-9334cadc1916",
+      "provider_model": "veo-3.1-generate-001",
+      "submitted_at": "2026-07-29T23:39:34.485104+00:00",
+      "last_polled_at": "2026-07-29T23:40:14.605707+00:00",
+      "provider_status": "completed",
+      "completed_at": "2026-07-29T23:40:16.246858+00:00",
+      "video_uri": "gs://project-402e0012-e068-462f-acf-vertex-output/17441700793604977256/sample_0.mp4",
+      "artifact": {
+        "path": "/Users/patabrava/Documents/AI/github/Camilo/AIUGC/output/veo-prompt-ab-2026-07-30/old-prompt.mp4",
+        "sha256": "278833f681e1be26fe7660c1a7cf38a0c58a5add8d51bc364315675c3225c0b9",
+        "bytes": 2323212
+      }
+    },
+    "new": {
+      "prompt": "One continuous, unedited vertical smartphone UGC take guided by the supplied approved matched reference images.\n\nCamera: static fixed 9:16 medium close-up at seated eye level, framed from head to mid-torso. Keep her face large and identity-readable, with at least one wheelchair armrest and part of a large rear wheel or silver hand rim clearly visible. The camera stays completely still from the opening frame through the final frame.\n\nVisual continuity: use the two actor references as identity anchors for the same adult woman, preserving her facial geometry, apparent age, and hair. Place her in the exact calm, uncluttered home-office identity shown by the room reference. She wears a soft-beige blazer over a plain white top and sits in the same lightweight manual wheelchair with a matte dark-graphite frame, slim black armrests, black seat and back cushion, and silver hand rims.\n\nSubject motion: restrained natural talking-head delivery. She maintains a subtle conversational expression with normal blinking, quiet breathing, minimal head movement, and no posture reset.\n\nTiming: begin speaking naturally at the start. Pace the sentence conversationally so the final spoken word lands near 7.0 seconds. After the final word, close her mouth naturally and hold quiet eye contact with subtle blinking and breathing until the clip ends. Remain in the same continuous take; do not introduce a cut, transition, end card, freeze frame, or artificial end pose.\n\nAudio: one warm adult female voice speaking native German with natural conversational pacing and close smartphone-microphone sound. No music, background voices, or extra speech.\n\nDialogue — speak exactly once and verbatim:\n“Die Herausforderungen reichen von der aufzubringenden Kraft über die Positionierung des Rollstuhls bis hin zur Koordination der Bewegungen.”\n\nNo other spoken words. No English. No on-screen text, captions, subtitles, logos, watermarks, letters, symbols, or gibberish glyphs.",
+      "negative_prompt": "identity drift, face change, facial distortion, age change, hair change, wardrobe change, room change, extra person, wheelchair change, wheelchair deformation, cropped wheelchair, standing, walking, camera movement, camera pan, camera tilt, camera zoom, push-in, dolly, orbit, reframe, posture reset, cut, jump cut, scene transition, wipe transition, end card, freeze frame, generated text, subtitles, captions, music, background voices, extra speech, hands entering frame, repeated dialogue, English speech, logos, watermarks, gibberish text",
+      "state": "completed",
+      "submission_started_at": "2026-07-29T23:39:34.485785+00:00",
+      "operation_id": "projects/project-402e0012-e068-462f-acf/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/d871b795-5f17-41fd-8bd8-3996bdabdd54",
+      "provider_model": "veo-3.1-generate-001",
+      "submitted_at": "2026-07-29T23:39:36.557741+00:00",
+      "last_polled_at": "2026-07-29T23:40:16.462651+00:00",
+      "provider_status": "completed",
+      "completed_at": "2026-07-29T23:40:18.173605+00:00",
+      "video_uri": "gs://project-402e0012-e068-462f-acf-vertex-output/1268901672624220841/sample_0.mp4",
+      "artifact": {
+        "path": "/Users/patabrava/Documents/AI/github/Camilo/AIUGC/output/veo-prompt-ab-2026-07-30/new-prompt.mp4",
+        "sha256": "3302442cade5573c3002fbdee68778f4fe2cb276a0087881d97fcdb3d2dca413",
+        "bytes": 3880737
+      }
+    },
+    "final": {
+      "prompt": "For this generated editorial take only: one continuous, unedited vertical smartphone UGC shot guided by the supplied approved matched reference images. Authentic consumer smartphone footage from a phone propped securely on a desk.\n\nCamera: static fixed 9:16 medium close-up at seated eye level, framed from head to mid-torso. Keep her face large and identity-readable, with at least one wheelchair armrest and part of a large rear wheel or silver hand rim clearly visible. The camera remains completely still from the opening frame through the final frame while only the subject moves.\n\nReference authority: use the two actor references as identity anchors for the same adult woman, preserving her exact facial geometry, apparent age, natural skin texture, facial detail, and hair. Use the room reference as the authority for the exact calm, uncluttered home-office identity, lighting, exposure, color, and natural image texture. She wears a soft-beige blazer over a plain white top and sits in the same lightweight manual wheelchair with a matte dark-graphite frame, slim black armrests, black seat and back cushion, and silver hand rims. Preserve these details consistently throughout this take.\n\nPerformance: the seated woman speaks like a real person in a relaxed conversation. Use accurate native-German lip-sync with natural jaw and lip movement. Add small speech-coupled head movements and occasional micro-nods on stressed words, subtle eyebrow and cheek movement appropriate to the sentence, a warm gaze that mostly meets the lens with slight natural micro-shifts, irregular natural blinking, and quiet chest-and-shoulder breathing. Her movement remains restrained and asymmetrical rather than rhythmic or rehearsed. Her seated posture, wheelchair position, and overall composition remain stable.\n\nTiming: she begins speaking promptly and delivers the complete line once at a natural conversational pace, finishing the final word around 7.0 seconds. Use subtle human timing variation without theatrical pauses. After the final word, her mouth relaxes closed while warm eye contact, quiet breathing, irregular blinking, and small living stillness continue naturally through the final frame.\n\nAudio: one warm adult female voice speaking native German with natural conversational cadence and subtle human timing variation. Clean, dry, close smartphone-microphone sound with quiet home-office room tone.\n\nDialogue: the complete spoken performance is the following line, delivered once exactly as written.\n\nThe woman says: Die Herausforderungen reichen von der aufzubringenden Kraft über die Positionierung des Rollstuhls bis hin zur Koordination der Bewegungen.",
+      "negative_prompt": "identity drift, facial identity change, face change, facial distortion, age change, hair change, wardrobe change, room change, lighting change, composition change, extra person, wheelchair change, wheelchair deformation, wheelchair absent, wheelchair fully obscured, missing armrest, missing rear wheel or hand rim, standing, walking, large gestures, hands entering frame, camera movement, handheld shake, camera pan, camera tilt, camera zoom, push-in, dolly, orbit, reframe, posture reset, internal cut, jump cut, scene transition, wipe transition, end card, freeze frame, held end pose, generated text, subtitles, captions, letters, symbols, logos, watermarks, gibberish text, music, background voices, voiceover, extra speech, added words, repeated dialogue, English speech, robotic voice, text-to-speech cadence, studio reverb, exaggerated mouth sounds, clicks, pops, plastic skin, waxy skin, over-smoothed skin, airbrushed skin, beauty filter, face slimming, doll face, cgi look, 3d render, video-game character, uncanny valley, frozen stare, dead eyes, robotic motion, stiff motion, rhythmic motion, exaggerated acting, mouth warping, teeth artifacts, melting face, lip-sync drift, artificial sharpening, hdr glow, oversaturated color, cinematic studio look",
+      "state": "completed",
+      "submission_started_at": "2026-07-30T06:23:11.414377+00:00",
+      "operation_id": "projects/project-402e0012-e068-462f-acf/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/5bff983d-816f-46a9-b532-6d3958e33a01",
+      "provider_model": "veo-3.1-generate-001",
+      "submitted_at": "2026-07-30T06:23:29.813456+00:00",
+      "last_polled_at": "2026-07-30T06:24:07.939273+00:00",
+      "provider_status": "completed",
+      "completed_at": "2026-07-30T06:24:10.167154+00:00",
+      "video_uri": "gs://project-402e0012-e068-462f-acf-vertex-output/16275657746660852742/sample_0.mp4",
+      "artifact": {
+        "path": "/Users/patabrava/Documents/AI/github/Camilo/AIUGC/output/veo-prompt-ab-2026-07-30/final-prompt.mp4",
+        "sha256": "0c697b74128708d99153673846f97dbf97de5d374f33fbe126e02e97ae1ec389",
+        "bytes": 4312722
+      }
+    }
+  },
+  "completed_at": "2026-07-30T06:24:10.170539+00:00",
+  "updated_at": "2026-07-30T06:23:05.135132+00:00"
+}
