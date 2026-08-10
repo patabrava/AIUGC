@@ -546,6 +546,80 @@ def test_32_second_recovery_waits_for_topic_aware_generation(post_type):
     assert "Sicher entscheiden" in client.calls[0]["prompt"]
 
 
+def test_topic_aware_generation_gets_bounded_final_repair_before_family_recovery():
+    valid_script = _valid_script_for_duration(32)
+
+    class _LateValidLLM:
+        def __init__(self):
+            self.calls = []
+
+        def generate_gemini_text(self, **kwargs):
+            self.calls.append(kwargs)
+            if len(self.calls) < 4:
+                return "Dieser Entwurf ist weiterhin deutlich zu kurz."
+            return valid_script
+
+    client = _LateValidLLM()
+    result = generate_semantic_script(
+        post_type="lifestyle",
+        title="Reifendruck vor längeren Wegen prüfen",
+        cta="Speichere dir den Wochencheck.",
+        facts=["Der richtige Reifendruck reduziert vermeidbare Pannen unterwegs."],
+        recovery_facts=[LIFESTYLE_RECOVERY_SOURCE],
+        requested_duration_seconds=32,
+        llm_client=client,
+    )
+
+    assert result.script == valid_script
+    assert result.provenance["source"] == "gemini_repair"
+    assert len(client.calls) == 4
+    assert "exakt 64 Wörter insgesamt" in client.calls[1]["prompt"]
+    assert "jeder Satz hat exakt 16 Wörter" in client.calls[1]["prompt"]
+
+
+def test_32_second_prompt_requires_ceiling_words_per_take():
+    prompt = build_semantic_script_prompt(
+        post_type="lifestyle",
+        title="Reifendruck vor längeren Wegen prüfen",
+        cta="Speichere dir den Wochencheck.",
+        facts=["Der richtige Reifendruck reduziert vermeidbare Pannen unterwegs."],
+        requested_duration_seconds=32,
+    )
+
+    assert "Satzlänge: 16 bis 18 Wörter" in prompt
+
+
+def test_near_valid_provider_script_is_padded_without_family_recovery():
+    near_valid_script = " ".join(_sentence(index, 15) for index in range(4))
+
+    class _NearValidLLM:
+        def __init__(self):
+            self.calls = 0
+
+        def generate_gemini_text(self, **_kwargs):
+            self.calls += 1
+            return near_valid_script
+
+    client = _NearValidLLM()
+    result = generate_semantic_script(
+        post_type="lifestyle",
+        title="Reifendruck vor längeren Wegen prüfen",
+        cta="Speichere dir den Wochencheck.",
+        facts=["Der richtige Reifendruck reduziert vermeidbare Pannen unterwegs."],
+        recovery_facts=[LIFESTYLE_RECOVERY_SOURCE],
+        requested_duration_seconds=32,
+        llm_client=client,
+    )
+
+    validation = validate_semantic_script(
+        result.script,
+        requested_duration_seconds=32,
+    )
+    assert validation.word_count == 64
+    assert result.provenance["source"] == "gemini"
+    assert client.calls == 1
+
+
 @pytest.mark.parametrize(
     ("post_type", "recovery_source"),
     [

@@ -33,6 +33,12 @@ _RESPONSE_LABEL = re.compile(
     r"^(?:script|skript|voice[ -]?over|gesprochener\s+text)\s*:\s*",
     re.IGNORECASE,
 )
+_FINAL_TOPIC_REPAIR_ATTEMPTS = 2
+_NEAR_VALID_PADDING_PHRASES = {
+    2: "für dich",
+    3: "in deinem Alltag",
+    4: "in deinem konkreten Alltag",
+}
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 _COMPLETE_STATEMENT_END = re.compile(r"[.!?](?:[\"'»”’)\]}]+)?$")
 _INTERNAL_FALLBACK_COPY = re.compile(
@@ -299,7 +305,10 @@ def build_semantic_script_prompt(
         )
     minimum_words_per_take = max(
         _MINIMUM_COHERENT_WORDS_PER_TAKE,
-        contract.minimum_words // contract.minimum_take_count,
+        (
+            contract.minimum_words + contract.minimum_take_count - 1
+        )
+        // contract.minimum_take_count,
     )
     return template.format(
         requested_duration_seconds=contract.requested_duration_seconds,
@@ -343,6 +352,88 @@ def _strip_response_wrappers(raw_text: Any) -> str:
     return " ".join(text.split())
 
 
+def _pad_near_valid_generated_script(
+    script: str,
+    *,
+    contract: SemanticDurationContract,
+    topic_title: str,
+    post_type: str,
+) -> str:
+    """Close a small provider word-count miss without replacing the selected topic."""
+    cleaned = _strip_response_wrappers(script)
+    current_word_count = script_word_count(cleaned)
+    if current_word_count >= contract.minimum_words:
+        return cleaned
+    target_words_per_take = min(
+        SAFE_WORDS_PER_TAKE,
+        max(
+            _MINIMUM_COHERENT_WORDS_PER_TAKE,
+            (
+                contract.minimum_words + contract.minimum_take_count - 1
+            )
+            // contract.minimum_take_count,
+        ),
+    )
+    missing_words = (
+        target_words_per_take * contract.minimum_take_count
+        - current_word_count
+    )
+    if missing_words < 2 or missing_words > contract.minimum_take_count * 4:
+        return cleaned
+    beats = plan_editorial_beats(cleaned)
+    if len(beats) != contract.minimum_take_count:
+        return cleaned
+    try:
+        validate_semantic_script_audience_copy(
+            cleaned,
+            topic_title=topic_title,
+            post_type=post_type,
+        )
+    except ValueError:
+        return cleaned
+
+    padded_beats = [beat.text for beat in beats]
+    remaining = missing_words
+    for index, beat in enumerate(beats):
+        if remaining <= 0:
+            break
+        headroom = SAFE_WORDS_PER_TAKE - script_word_count(beat.text)
+        if remaining % 4 == 1 and remaining >= 5:
+            preferred_count = 3
+        else:
+            preferred_count = min(4, remaining)
+        addition_count = min(preferred_count, headroom)
+        if remaining - addition_count == 1 and addition_count > 2:
+            addition_count -= 1
+        if addition_count < 2:
+            continue
+        phrase = _NEAR_VALID_PADDING_PHRASES[addition_count]
+        match = re.search(r"([.!?][\"'»”’)\]}]*)$", beat.text)
+        if not match:
+            return cleaned
+        padded_beats[index] = (
+            f"{beat.text[:match.start()].rstrip()} {phrase}{match.group(1)}"
+        )
+        remaining -= addition_count
+    if remaining:
+        return cleaned
+    padded = " ".join(padded_beats)
+    try:
+        validate_semantic_script(
+            padded,
+            requested_duration_seconds=contract.requested_duration_seconds,
+            maximum_seconds=contract.maximum_duration_seconds,
+        )
+        validate_semantic_script_audience_copy(
+            padded,
+            topic_title=topic_title,
+            post_type=post_type,
+        )
+    except ValueError:
+        return cleaned
+    return padded
+
+
 def _build_semantic_repair_prompt(
     *,
     original_prompt: str,
@@ -350,14 +441,24 @@ def _build_semantic_repair_prompt(
     validation_error: ValueError,
     contract: SemanticDurationContract,
 ) -> str:
+    minimum_words_per_take = max(
+        _MINIMUM_COHERENT_WORDS_PER_TAKE,
+        (
+            contract.minimum_words + contract.minimum_take_count - 1
+        )
+        // contract.minimum_take_count,
+    )
+    target_words_per_take = min(SAFE_WORDS_PER_TAKE, minimum_words_per_take)
+    target_total_words = target_words_per_take * contract.minimum_take_count
     return f"""Überarbeite den folgenden Entwurf einmal so, dass er den Vertrag exakt erfüllt.
 Gib ausschließlich den finalen deutschen Sprechtext aus.
 
 Vertrag:
-- {contract.minimum_words} bis {contract.maximum_words} Wörter
+- exakt {target_total_words} Wörter insgesamt
 - exakt {contract.minimum_take_count} vollständige, unterschiedliche Sätze als semantische Takes
-- jeder Satz hat mindestens {_MINIMUM_COHERENT_WORDS_PER_TAKE} und höchstens {SAFE_WORDS_PER_TAKE} Wörter
+- jeder Satz hat exakt {target_words_per_take} Wörter
 - keine Zitat-Collagen, Auslassungszeichen, Fragmente, Quellenlabels oder generischen Füllsätze
+- jeder Satz enthält ein ausdrücklich genanntes Subjekt und ein vollständiges Verb; beginne keinen Satz mit einem abhängigen Nebensatz wie „Bis ich“, „Wenn“, „Weil“ oder „Obwohl“
 - Satz 1 führt das Thema ein; jeder folgende Satz erklärt logisch eine Folge, einen Beleg oder eine Handlung
 - jeder Take endet mit Satzzeichen und trägt eine neue vollständige Aussage bei
 - verwende ausschließlich die Fakten und die CTA aus dem ursprünglichen Auftrag
@@ -379,15 +480,25 @@ def _build_semantic_recovery_prompt(
     invalid_script: str,
     contract: SemanticDurationContract,
 ) -> str:
+    minimum_words_per_take = max(
+        _MINIMUM_COHERENT_WORDS_PER_TAKE,
+        (
+            contract.minimum_words + contract.minimum_take_count - 1
+        )
+        // contract.minimum_take_count,
+    )
+    target_words_per_take = min(SAFE_WORDS_PER_TAKE, minimum_words_per_take)
+    target_total_words = target_words_per_take * contract.minimum_take_count
     return f"""Schreibe jetzt einen neuen, natürlich gesprochenen deutschen Sprechtext.
 Der vorherige Reparaturversuch ist unbrauchbar. Verwende ihn nicht als Vorlage.
 
 Verbindliche Ausgabe:
 - ausschließlich der finale Sprechtext
 - exakt {contract.minimum_take_count} vollständige Sätze
-- mindestens {_MINIMUM_COHERENT_WORDS_PER_TAKE} und höchstens {SAFE_WORDS_PER_TAKE} Wörter pro Satz
-- insgesamt {contract.minimum_words} bis {contract.maximum_words} Wörter
+- exakt {target_words_per_take} Wörter pro Satz
+- exakt {target_total_words} Wörter insgesamt
 - jeder Satz ist eigenständig verständlich und vermittelt einen konkreten belegten Nutzen oder Sicherheitshinweis
+- jeder Satz enthält ein ausdrücklich genanntes Subjekt und ein vollständiges Verb; beginne keinen Satz mit einem abhängigen Nebensatz wie „Bis ich“, „Wenn“, „Weil“ oder „Obwohl“
 - alle Sätze bilden gemeinsam einen logischen Bogen statt einer Liste unabhängiger Fragmente
 - verwende ausschließlich Aussagen aus dem ursprünglichen Auftrag
 - keine Quellenhinweise, Zitate, Auslassungszeichen, Labels, Metatexte oder Prüfanweisungen
@@ -1778,6 +1889,12 @@ def generate_semantic_script(
         )
 
     script = _strip_response_wrappers(raw_text)
+    script = _pad_near_valid_generated_script(
+        script,
+        contract=contract,
+        topic_title=title,
+        post_type=normalized_post_type,
+    )
     source = "gemini"
     try:
         validate_semantic_script(
@@ -1825,6 +1942,12 @@ def generate_semantic_script(
                 ),
             )
         repaired_script = _strip_response_wrappers(repaired_raw_text)
+        repaired_script = _pad_near_valid_generated_script(
+            repaired_script,
+            contract=contract,
+            topic_title=title,
+            post_type=normalized_post_type,
+        )
         try:
             validate_semantic_script(
                 repaired_script,
@@ -1870,6 +1993,12 @@ def generate_semantic_script(
                     ),
                 )
             recovery_script = _strip_response_wrappers(recovery_raw_text)
+            recovery_script = _pad_near_valid_generated_script(
+                recovery_script,
+                contract=contract,
+                topic_title=title,
+                post_type=normalized_post_type,
+            )
             try:
                 validate_semantic_script(
                     recovery_script,
@@ -1881,15 +2010,79 @@ def generate_semantic_script(
                     topic_title=title,
                     post_type=normalized_post_type,
                 )
-            except ValueError:
-                script, source = _build_ranked_fallback_script(
-                    post_type=normalized_post_type,
-                    title=title,
-                    cta=cta,
-                    facts=fact_values,
-                    recovery_facts=recovery_fact_values,
-                    contract=contract,
-                )
+            except ValueError as recovery_error:
+                last_invalid_script = recovery_script
+                last_validation_error = recovery_error
+                for _attempt in range(_FINAL_TOPIC_REPAIR_ATTEMPTS):
+                    final_repair_prompt = _build_semantic_repair_prompt(
+                        original_prompt=prompt,
+                        invalid_script=last_invalid_script,
+                        validation_error=last_validation_error,
+                        contract=contract,
+                    )
+                    try:
+                        final_repair_raw_text = client.generate_gemini_text(
+                            prompt=final_repair_prompt,
+                            system_prompt=SEMANTIC_SCRIPT_SYSTEM_PROMPT,
+                            temperature=0,
+                            thinking_budget=0,
+                        )
+                    except _EXPECTED_LLM_FALLBACK_ERRORS as exc:
+                        script, fallback_source = _build_ranked_fallback_script(
+                            post_type=normalized_post_type,
+                            title=title,
+                            cta=cta,
+                            facts=fact_values,
+                            recovery_facts=recovery_fact_values,
+                            contract=contract,
+                        )
+                        return SemanticScriptResult(
+                            script=script,
+                            contract_hash=contract.contract_hash,
+                            provenance=_build_result_provenance(
+                                source=fallback_source,
+                                post_type=normalized_post_type,
+                                research_provenance=research_provenance,
+                                source_urls=source_urls,
+                                provider_error_type=type(exc).__name__,
+                            ),
+                        )
+                    final_repair_script = _strip_response_wrappers(
+                        final_repair_raw_text
+                    )
+                    final_repair_script = _pad_near_valid_generated_script(
+                        final_repair_script,
+                        contract=contract,
+                        topic_title=title,
+                        post_type=normalized_post_type,
+                    )
+                    try:
+                        validate_semantic_script(
+                            final_repair_script,
+                            requested_duration_seconds=requested_duration_seconds,
+                            maximum_seconds=contract.maximum_duration_seconds,
+                        )
+                        validate_semantic_script_audience_copy(
+                            final_repair_script,
+                            topic_title=title,
+                            post_type=normalized_post_type,
+                        )
+                    except ValueError as final_repair_error:
+                        last_invalid_script = final_repair_script
+                        last_validation_error = final_repair_error
+                        continue
+                    script = final_repair_script
+                    source = "gemini_repair"
+                    break
+                else:
+                    script, source = _build_ranked_fallback_script(
+                        post_type=normalized_post_type,
+                        title=title,
+                        cta=cta,
+                        facts=fact_values,
+                        recovery_facts=recovery_fact_values,
+                        contract=contract,
+                    )
             else:
                 script = recovery_script
                 source = "gemini_recovery"

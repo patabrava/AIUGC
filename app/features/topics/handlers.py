@@ -701,6 +701,15 @@ def _semantic_fact_inputs(
         if text and text not in facts and len(facts) < maximum_fact_inputs:
             facts.append(text)
 
+    def append_research_fact(value: Any) -> None:
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                append_research_fact(item)
+            return
+        text = " ".join(str(value or "").split())
+        text = re.sub(r"^\*\*[^*]+:?\*\*:?\s*", "", text).strip()
+        append_fact(text)
+
     # Keep the audited duration-neutral script as the primary source, but retain a
     # bounded set of complete research statements. If provider recovery is needed,
     # those extra statements let the system select coherent duration-sized copy
@@ -717,7 +726,7 @@ def _semantic_fact_inputs(
             append_fact(payload.get(key))
     strict_seed = seed_payload.get("strict_seed")
     if isinstance(strict_seed, dict):
-        append_fact(strict_seed.get("facts"))
+        append_research_fact(strict_seed.get("facts"))
         append_fact(strict_seed.get("source_context"))
     if not facts:
         append_fact(seed_payload.get("canonical_topic"))

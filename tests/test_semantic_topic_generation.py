@@ -792,6 +792,22 @@ def test_semantic_lifestyle_facts_use_full_dialog_script_before_short_rotation()
     assert "Kurzer Themenanker" not in facts[0]
 
 
+def test_semantic_fact_inputs_remove_research_labels_from_spoken_fallback_facts():
+    facts = handlers._semantic_fact_inputs(
+        {"script": "Ein kurzer kanonischer Themenanker."},
+        {
+            "strict_seed": {
+                "facts": [
+                    "**Gesetzliche Grundlage:** Barrierefreie Praxen müssen ihre zugänglichen Wege für neue Termine klar und aktuell beschreiben."
+                ]
+            }
+        },
+    )
+
+    assert facts[1].startswith("Barrierefreie Praxen")
+    assert "**Gesetzliche Grundlage:**" not in facts[1]
+
+
 def test_semantic_post_insert_removes_internal_canonical_tier(monkeypatch):
     captured = {}
 
