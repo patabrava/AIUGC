@@ -743,7 +743,7 @@ def _semantic_research_provenance(
 
 
 def _semantic_seed_payload(post_type: str, candidate: Dict[str, Any]) -> Dict[str, Any]:
-    if post_type == "lifestyle":
+    if post_type == "lifestyle" and candidate.get("dialog_scripts") is not None:
         seed_payload = build_lifestyle_seed_payload(
             topic_data=candidate,
             dialog_scripts=candidate["dialog_scripts"],

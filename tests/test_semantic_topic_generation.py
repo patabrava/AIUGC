@@ -96,6 +96,18 @@ def test_semantic_discovery_generates_each_family_once_from_duration_neutral_inp
 ):
     contract = build_semantic_duration_contract(50)
     candidate = _candidate(post_type)
+    if post_type == "lifestyle":
+        candidate = {
+            **candidate,
+            "id": "family-lifestyle-32",
+            "topic_registry_id": "family-lifestyle-32",
+            "script_id": "script-lifestyle-32",
+            "seed_payload": {
+                "canonical_topic": candidate["title"],
+                "script": candidate["script"],
+            },
+        }
+        candidate.pop("dialog_scripts")
     batch = {
         "id": f"batch-semantic-{post_type}",
         "state": "S1_SETUP",
