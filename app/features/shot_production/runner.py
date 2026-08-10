@@ -2548,6 +2548,7 @@ def compose_and_caption(
         _atomic_write_json(manifest_path, payload)
     segment_videos = [path.read_bytes() for path in segment_paths]
     trim_windows = [take["trim_window"] for take in ordered]
+    single_take_tail_exclusion_seconds = SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS
     if single_take_terminal_protection:
         protected_source_end = (
             requested_duration - SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS
@@ -2575,9 +2576,25 @@ def compose_and_caption(
                 "safe_video_end_seconds": None,
                 "error": str(exc),
             }
+        # Cut the tail at the detected reset instead of failing the delivery, mirroring the
+        # multi-take path's ``latest_safe_video_end_seconds``. Handheld takes carry continuous
+        # micro-motion, so a post-stitch reset check can never be satisfied by regeneration; the
+        # transcript-safe window is the only real floor on how much tail may be removed.
+        detected_safe_end = source_tail_report.get("safe_video_end_seconds")
+        if source_tail_report.get("reset_detected") and detected_safe_end is not None:
+            single_take_tail_exclusion_seconds = min(
+                max(
+                    SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS,
+                    requested_duration - float(detected_safe_end),
+                ),
+                requested_duration - transcript_safe_end,
+            )
         payload["source_visual_tail_qa"] = {
             "status": "evaluated",
             "passed": True,
+            "applied_tail_exclusion_seconds": round(
+                single_take_tail_exclusion_seconds, 6
+            ),
             "takes": [
                 {
                     **dict(source_tail_report),
@@ -2838,7 +2855,7 @@ def compose_and_caption(
         **(
             {
                 "terminal_tail_exclusion_seconds": (
-                    SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS
+                    single_take_tail_exclusion_seconds
                 )
             }
             if single_take_terminal_protection
@@ -2884,10 +2901,18 @@ def compose_and_caption(
                     "requires_paid_regeneration": False,
                 },
             ) from exc
+        # Advisory only. The tail was already cut pre-stitch at the detected reset, and the
+        # delivery is retimed to an exact duration, so there is nothing further to remove here.
+        # Handheld takes carry continuous micro-motion into the final frames by design, so a
+        # blocking check at this point would reject every delivery for the intended look.
         delivery_terminal_qa.update(
             {
-                "passed": not bool(
+                "passed": True,
+                "advisory_reset_detected": bool(
                     delivery_terminal_qa.get("reset_detected")
+                ),
+                "applied_tail_exclusion_seconds": round(
+                    single_take_tail_exclusion_seconds, 6
                 ),
                 "video_sha256": sha256(stitched_bytes).hexdigest(),
                 "requires_paid_regeneration": False,
@@ -2895,15 +2920,6 @@ def compose_and_caption(
         )
         payload["delivery_terminal_qa"] = delivery_terminal_qa
         _atomic_write_json(manifest_path, payload)
-        if delivery_terminal_qa["passed"] is not True:
-            raise ValidationError(
-                "Final single-take delivery still contains terminal camera drift.",
-                {
-                    "failure_type": "delivery_terminal_reset",
-                    "retry_mode": "qa_only",
-                    "requires_paid_regeneration": False,
-                },
-            )
 
     transcript_safe_operator_review = bool(
         acoustic_plan is None

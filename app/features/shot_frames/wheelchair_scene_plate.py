@@ -22,32 +22,38 @@ from app.features.shot_frames.service import ShotFrameReference
 
 
 WHEELCHAIR_VISUAL_CONTRACT = (
-    "The same lightweight manual wheelchair in every image: matte dark-graphite frame, "
-    "slim black armrests, black seat and back cushion, and silver hand rims."
+    "The same lightweight manual wheelchair wherever it is visible: matte dark-graphite frame, "
+    "slim black armrests, black seat and back cushion, and silver hand rims. Selfie framing may "
+    "crop it out of frame entirely."
 )
 FRAMING_CONTRACT = (
-    "Use a static vertical 9:16 medium close-up from head to mid-torso at seated eye-level. "
-    "Keep her face large and identity-readable while at least one armrest and part of a large "
-    "rear wheel or silver hand rim remain clearly visible."
+    "Use a vertical 9:16 arm's-length selfie framing, as if she is holding the phone in her own "
+    "hand. Crop from just above the top of her head to her upper chest so her face fills roughly 40 "
+    "to 45 percent of the frame height and stays identity-readable. The phone sits slightly above "
+    "her eye line and angles down a few degrees, the horizon rolls two to five degrees off level, "
+    "and she sits noticeably off-center rather than perfectly centered. Render it with close "
+    "front-camera perspective at roughly a 24mm equivalent, deep depth of field, and modern "
+    "smartphone HDR auto-tone, so the room behind her stays readable but clearly secondary. The "
+    "wheelchair may fall outside this crop."
 )
 _REFERENCE_ROLES = ("identity_primary", "identity_support", "location")
 _CANDIDATE_VARIATIONS = (
     (
-        "Candidate 1 composition: use the centered baseline view. Keep her shoulders "
-        "square to camera, direct eye contact, and both the near armrest and part of "
-        "one rear wheel clearly readable."
+        "Candidate 1 composition: hold the phone squarely in front of her with a slight "
+        "roll to the left. Keep her shoulders close to square, direct eye contact, and "
+        "her face just left of frame center."
     ),
     (
-        "Candidate 2 composition: move the camera modestly to the actor's left for a "
-        "clearly visible 10-degree right three-quarter view. Keep seated eye-level, "
-        "the same camera distance and face size, direct eye contact, and the near "
-        "armrest plus rear wheel clearly readable."
+        "Candidate 2 composition: hold the phone modestly to the actor's left for a "
+        "clearly visible 10-degree right three-quarter view, with a slight roll to the "
+        "right. Keep the same arm's-length distance and face size, direct eye contact, "
+        "and her face just right of frame center."
     ),
     (
-        "Candidate 3 composition: move the camera modestly to the actor's right for a "
-        "clearly visible 10-degree left three-quarter view. Keep seated eye-level, "
-        "the same camera distance and face size, direct eye contact, and the near "
-        "armrest plus rear wheel clearly readable."
+        "Candidate 3 composition: hold the phone modestly to the actor's right for a "
+        "clearly visible 10-degree left three-quarter view, held a touch higher so the "
+        "downward angle reads more clearly. Keep the same arm's-length distance and face "
+        "size, direct eye contact, and her face just left of frame center."
     ),
 )
 _MAX_DIVERSITY_ATTEMPTS = 3
@@ -288,14 +294,15 @@ def build_canonical_scene_plate_prompt(
         "Replace every visible upper-body garment from those references with the requested outfit below; "
         "its garment type and color must be visibly unmistakable. Do not average her into a new face. "
         "She is seated upright in a manual "
-        "wheelchair. "
+        "wheelchair, which may sit partly or entirely outside this crop. "
         f"{WHEELCHAIR_VISUAL_CONTRACT} {FRAMING_CONTRACT} "
         f"Her upper-body outfit is exactly: {wardrobe}. The location is exactly: {scene}. "
-        "Her hands and wheelchair geometry are physically plausible. Use natural available light and a "
-        "quiet conversational expression immediately before speaking, with her mouth closed. Render no "
-        "other person, text, logo, watermark, mobility device, standing pose, walking pose, beauty "
-        "retouching, poreless skin, glamour lighting, CGI smoothness, face averaging, camera tilt, wide "
-        "shot, full-body shot, or cropped-out wheelchair. "
+        "Her hands and any visible wheelchair geometry are physically plausible. Use natural available "
+        "light and a quiet conversational expression immediately before speaking, with her mouth closed. "
+        "Keep the raw unfiltered front-camera look with natural skin texture preserved and no filters. "
+        "Render no other person, text, logo, watermark, mobility device, standing pose, walking pose, "
+        "beauty retouching, poreless skin, glamour lighting, CGI smoothness, face averaging, wide shot, "
+        "or full-body shot. "
         f"{variation_directive}"
     )
 
@@ -315,16 +322,16 @@ def build_derived_scene_plate_prompt(
         "and 2 and preserve the exact manual wheelchair, seated pose, camera height, camera distance, and "
         "face size from Image 1. Image 1's clothing is not authoritative: replace every visible upper-body "
         "garment with the requested outfit below, making its garment type and color visibly unmistakable. "
-        "Apply only the modest candidate-specific horizontal viewpoint and shoulder "
-        "angle described below; preserve the overall medium-close-up framing contract. "
+        "Apply only the modest candidate-specific horizontal viewpoint, roll, and shoulder "
+        "angle described below; preserve the overall selfie framing contract. "
         f"{WHEELCHAIR_VISUAL_CONTRACT} {FRAMING_CONTRACT} "
         f"Keep the actor-free location exactly: {scene}; and the upper-body outfit exactly: {wardrobe}. "
         "Keep her mouth closed with a quiet conversational expression. Preserve ordinary camera-file skin "
         "texture, visible pores, natural tonal variation, natural under-eye and lip texture, mild facial "
         "asymmetry, and realistic hairline flyaways under ordinary indoor optics and available light. Keep "
-        "hands, wheelchair, and room perspective physically plausible. Render no other person, text, logo, "
-        "watermark, standing pose, walking pose, wide shot, full-body shot, beauty retouching, poreless skin, "
-        "glamour lighting, CGI smoothness, face averaging, camera movement, or cropped-out wheelchair."
+        "hands, any visible wheelchair, and room perspective physically plausible. Render no other person, "
+        "text, logo, watermark, standing pose, walking pose, wide shot, full-body shot, beauty retouching, "
+        "poreless skin, glamour lighting, CGI smoothness, face averaging, or motion blur."
         f" {variation_directive}"
     )
 

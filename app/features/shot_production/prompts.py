@@ -32,7 +32,7 @@ _REQUIRED_NEGATIVE_LOCKS = (
     "tilt",
     "dolly",
     "orbit",
-    "camera movement",
+    "tripod-locked",
     "cut",
     "scene transition",
     "wipe transition",
@@ -68,7 +68,8 @@ EFFECTIVE_NEGATIVE_PROMPT = (
     "body sway, posture reset, large head movement, exaggerated nodding, concluding nod, farewell "
     "expression, completion smile, downward gaze, gaze drop, looking down, exaggerated mouth closure, "
     "pursed-lip end pose, held end pose, frozen stare, robotic motion, stiff motion, mouth warping, "
-    "teeth artifacts, lip-sync drift, camera movement, camera shake, camera pan, camera tilt, camera "
+    "teeth artifacts, lip-sync drift, tripod-locked, gimbal-smooth, motorized camera move, large camera "
+    "shake, wobbly footage, camera pan, camera tilt, camera "
     "zoom, push-in, dolly, orbit, reframe, cut, jump cut, scene transition, wipe transition, end card, "
     "freeze frame, repeated dialogue, extra speech, English speech, music, background voices, subtitles, "
     "captions, generated text, logos, watermarks, gibberish text, plastic skin, waxy skin, over-smoothed "
@@ -105,8 +106,8 @@ def _visual_contract_text(visual_contract: Optional[Mapping[str, Any]]) -> str:
     if not visual_contract:
         return (
             "The supplied source frame is the authority for the subject identity, scene and background, "
-            "composition, wardrobe, wheelchair, lighting, and visual style. Preserve its exact framing "
-            "and visible boundaries throughout the take."
+            "composition, wardrobe, wheelchair, lighting, and visual style. Preserve its framing, crop, "
+            "and visible boundaries throughout the take, apart from the handheld micro-motion."
         )
     required = (
         "scene_description",
@@ -125,8 +126,8 @@ def _visual_contract_text(visual_contract: Optional[Mapping[str, Any]]) -> str:
         )
     return (
         "The supplied source frame is the authority for the subject identity, scene and background, "
-        "composition, wardrobe, wheelchair, lighting, and visual style. Preserve its exact framing "
-        "and visible boundaries throughout the take."
+        "composition, wardrobe, wheelchair, lighting, and visual style. Preserve its framing, crop, "
+        "and visible boundaries throughout the take, apart from the handheld micro-motion."
     )
 
 
@@ -143,15 +144,22 @@ def build_veo_take_prompt(
     return "\n".join(
         (
             f"Cinematography: one continuous, unedited {beat.provider_duration_seconds}-second vertical "
-            "smartphone UGC take, animated from the supplied first frame.",
-            "Camera: static seated eye-level shot at the source frame's exact angle and composition. "
-            "The camera stays completely still.",
+            "smartphone UGC take, animated from the supplied first frame. Raw unfiltered front-camera look "
+            "with modern smartphone HDR auto-tone, preserved natural skin texture, and deep depth of field.",
+            "Camera: handheld arm's-length front-camera framing at the source frame's exact angle and "
+            "composition, held by the woman herself. Continuous low-amplitude handheld micro-motion runs "
+            "through the whole take: small irregular drift, subtle roll, faint breathing rise and fall, and "
+            "occasional tiny arm corrections. Total frame excursion stays under two percent of frame width "
+            "and always drifts back toward the source framing. The composition itself stays fixed while the "
+            "hand holding the phone keeps moving.",
             f"Visual continuity: {_visual_contract_text(visual_contract)}",
             "Subject motion: the seated woman speaks directly to the lens with accurate native-German lip and "
             "jaw movement, a restrained conversational expression, irregular natural blinking, quiet breathing, "
-            "and minimal speech-coupled head movement. Her shoulders, torso, wheelchair, and visible body remain "
-            "stable. Her hands retain the exact visibility and relaxed resting positions established by the "
-            "source frame. She communicates through speech and facial expression while her hands remain at rest.",
+            "and minimal speech-coupled head movement. Her shoulders, torso, seated posture, and visible body "
+            "stay settled in place; the only movement in the frame beyond her speech is the handheld motion of "
+            "the phone itself. Her hands retain the exact visibility and relaxed resting positions established "
+            "by the source frame. She communicates through speech and facial expression while her hands remain "
+            "at rest.",
             "Performance interpretation: the dialogue is spoken advice only. Every reference to hands, support, "
             "wheelchair frames, doors, pulling, pushing, or movement remains speech content rather than a physical "
             "cue. Both hands remain relaxed in their exact source-frame resting positions for the full take.",
@@ -159,8 +167,9 @@ def build_veo_take_prompt(
             f"targeting the final spoken word around {final_word_target:.1f} seconds.",
             "Cut-ready ending: after the final syllable, her speech articulation resolves naturally while she "
             "remains conversationally engaged with the lens, as if the next sentence will follow immediately. "
-            "Preserve the same seated posture, shoulder position, wheelchair position, gaze direction, and resting "
-            "hand positions through the final frame. Only subtle breathing and natural blinking continue. Maintain "
+            "Preserve the same seated posture, shoulder position, gaze direction, and resting "
+            "hand positions through the final frame. Subtle breathing, natural blinking, and the same "
+            "unchanged handheld phone motion carry on through the final frame. Maintain "
             "fluid living presence without a concluding gesture, completion expression, or held end pose.",
             f"Dialogue: “{dialogue}”",
             "Audio: one warm adult female voice speaking native German with a natural conversational cadence and "
