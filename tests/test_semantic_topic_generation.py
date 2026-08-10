@@ -25,6 +25,7 @@ from app.features.topics.semantic_scripts import (
     generate_semantic_script,
     semantic_recovery_title_for_script,
     validate_semantic_script,
+    validate_semantic_script_audience_copy,
 )
 
 
@@ -221,7 +222,9 @@ def test_semantic_discovery_generates_each_family_once_from_duration_neutral_inp
     assert semantic_call["cta"] == candidate["cta"]
     assert semantic_call["facts"][0] == candidate["script"]
     assert len(semantic_call["facts"]) <= 8
-    assert len(semantic_call["recovery_facts"]) == 1
+    assert len(semantic_call["recovery_facts"]) == (
+        4 if post_type in {"value", "lifestyle"} else 1
+    )
     assert "Nora" in semantic_call["actor_context"]
 
     created = created_posts[0]
@@ -863,6 +866,33 @@ def test_database_family_generation_attempts_are_bounded(monkeypatch):
 
     assert result.provenance["source"] == "deterministic_recovery"
     assert len(calls) == handlers._SEMANTIC_DATABASE_TOPIC_ATTEMPTS
+
+
+def test_database_family_recovery_facts_remain_topic_specific():
+    title = "Antrag auf Schwerbehindertenausweis: Voraussetzungen, Fristen, Unterlagen."
+
+    facts = handlers._semantic_candidate_recovery_facts(
+        {
+            "topic_registry_id": "persisted-family",
+            "canonical_topic": title,
+        },
+        "value",
+    )
+    script = " ".join(facts)
+
+    assert len(facts) == 4
+    assert "Schwerbehindertenausweis" in script
+    assert handlers._SEMANTIC_RECOVERY_COPY["value"]["source"] not in script
+    validate_semantic_script(
+        script,
+        requested_duration_seconds=32,
+        maximum_seconds=32,
+    )
+    validate_semantic_script_audience_copy(
+        script,
+        topic_title=title,
+        post_type="value",
+    )
 
 
 def test_semantic_post_insert_removes_internal_canonical_tier(monkeypatch):

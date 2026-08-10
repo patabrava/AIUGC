@@ -103,6 +103,36 @@ _TOPIC_BANK_RESEARCH_LOCK = RLock()
 _LIFESTYLE_COLLECTION_MAX_ATTEMPTS = 1
 _SEMANTIC_TOPIC_INPUT_TIER = 32
 _SEMANTIC_DATABASE_TOPIC_ATTEMPTS = 6
+_SEMANTIC_TOPIC_ANCHOR_STOPWORDS = frozenset(
+    {
+        "als",
+        "auf",
+        "bei",
+        "das",
+        "dein",
+        "deine",
+        "der",
+        "die",
+        "ein",
+        "eine",
+        "für",
+        "im",
+        "in",
+        "ist",
+        "mit",
+        "oder",
+        "so",
+        "und",
+        "von",
+        "warum",
+        "was",
+        "wenn",
+        "wie",
+        "zu",
+        "zum",
+        "zur",
+    }
+)
 
 
 def _attach_publish_captions(
@@ -808,6 +838,53 @@ def _generate_semantic_script_for_candidate(
     return generated
 
 
+def _semantic_candidate_recovery_facts(
+    candidate: Dict[str, Any],
+    post_type: str,
+) -> list[str]:
+    """Keep the final deterministic path anchored to its persisted topic family."""
+    if not candidate.get("topic_registry_id") or candidate.get("semantic_recovery"):
+        return [
+            str(
+                candidate.get("semantic_recovery_source")
+                or _SEMANTIC_RECOVERY_COPY[post_type]["source"]
+            )
+        ]
+
+    topic = str(
+        candidate.get("canonical_topic")
+        or candidate.get("angle")
+        or candidate.get("title")
+        or ""
+    ).strip()
+    tokens = [
+        token
+        for token in re.findall(r"[\wÄÖÜäöüß-]+", topic)
+        if token.casefold() not in _SEMANTIC_TOPIC_ANCHOR_STOPWORDS
+        and len(token.strip("-")) > 2
+    ]
+    anchors = (tokens + ["Alltag", "Planung", "Praxis", "Schritte"])[:4]
+    first, second, third, fourth = anchors
+    return [
+        (
+            f"Beim Thema {first} {second} {third} {fourth} helfen konkrete Fragen dabei, "
+            "Voraussetzungen, Zuständigkeiten und nächste Schritte früh zu klären."
+        ),
+        (
+            f"Vergleiche zu {first} und {second} aktuelle Angaben, notiere offene Punkte "
+            "und bestätige Details bei zuständigen Ansprechpartnern."
+        ),
+        (
+            f"Plane für {second} und {third} ausreichend Zeit, sammle benötigte Unterlagen "
+            "und halte passende Alternativen für Hindernisse bereit."
+        ),
+        (
+            f"Dokumentiere bei {third} und {fourth} deine Ergebnisse, teile verlässliche "
+            "Hinweise und prüfe später den gewählten nächsten Schritt."
+        ),
+    ]
+
+
 def _semantic_family_identity(candidate: Dict[str, Any]) -> str:
     for key in (
         "family_fingerprint",
@@ -1061,12 +1138,7 @@ def _create_semantic_post_from_candidate(
         title=title,
         cta=cta,
         facts=facts,
-        recovery_facts=[
-            str(
-                candidate.get("semantic_recovery_source")
-                or _SEMANTIC_RECOVERY_COPY[post_type]["source"]
-            )
-        ],
+        recovery_facts=_semantic_candidate_recovery_facts(candidate, post_type),
         requested_duration_seconds=contract.requested_duration_seconds,
         actor_context=_semantic_actor_context(batch),
         research_provenance=research_provenance,
