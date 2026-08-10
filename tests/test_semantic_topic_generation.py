@@ -411,10 +411,15 @@ def test_deterministic_recovery_uses_matching_family_metadata(monkeypatch, post_
     )
 
     created = created_posts[0]
-    assert created["topic_title"] == recovery["title"]
-    assert created["topic_cta"] == recovery["cta"]
-    assert created["seed_data"]["canonical_topic"] == recovery["title"]
-    assert created["seed_data"]["cta"] == recovery["cta"]
+    if candidate.get("topic_registry_id"):
+        assert created["topic_title"] == candidate["title"]
+        assert created["topic_cta"] == candidate["cta"]
+        assert created["seed_data"]["canonical_topic"] == candidate["title"]
+    else:
+        assert created["topic_title"] == recovery["title"]
+        assert created["topic_cta"] == recovery["cta"]
+        assert created["seed_data"]["canonical_topic"] == recovery["title"]
+        assert created["seed_data"]["cta"] == recovery["cta"]
 
 
 @pytest.mark.parametrize("post_type", ["value", "lifestyle", "product"])

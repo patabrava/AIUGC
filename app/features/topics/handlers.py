@@ -1171,8 +1171,11 @@ def _create_semantic_post_from_candidate(
         "fallback",
         "deterministic_recovery",
     }
+    projects_shared_fallback = uses_generated_fallback and not candidate.get(
+        "topic_registry_id"
+    )
     if (
-        uses_generated_fallback
+        projects_shared_fallback
         or uses_recovery
     ):
         recovery_copy = _SEMANTIC_RECOVERY_COPY[post_type]
