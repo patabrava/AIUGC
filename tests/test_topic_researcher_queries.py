@@ -1033,7 +1033,7 @@ def test_list_topic_suggestions_prefers_low_use_count_and_older_last_used(monkey
     assert [row["topic_registry_id"] for row in result] == ["topic-2", "topic-3", "topic-1"]
 
 
-def test_list_topic_suggestions_bounds_script_query_to_least_used_active_families(monkeypatch):
+def test_list_topic_suggestions_bounds_script_query_to_audited_duration_rows(monkeypatch):
     from app.features.topics import queries as topic_queries
 
     registry_rows = [
@@ -1085,9 +1085,12 @@ def test_list_topic_suggestions_bounds_script_query_to_least_used_active_familie
         post_type="value",
         check_accessibility=False,
     ) == []
-    assert captured["topic_registry_ids"] == [
-        f"topic-{index:03d}" for index in range(20)
-    ]
+    assert captured["target_length_tier"] == 8
+    assert captured["post_type"] == "value"
+    assert captured["audit_status"] == "pass"
+    assert captured["maximum_rows"] == 50
+    assert captured["select_fields"] == topic_queries._TOPIC_SCRIPT_SELECTION_FIELDS
+    assert captured["prefer_base_relation"] is True
 
 
 def test_list_topic_suggestions_deduplicates_same_topic_family_title(monkeypatch):

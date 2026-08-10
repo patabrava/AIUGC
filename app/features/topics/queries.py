@@ -263,6 +263,29 @@ def _should_rehabilitate_family_status(existing_status: Any, resolved_status: An
 
 _TOPIC_SCRIPT_PAGE_SIZE = 1000
 _TOPIC_SCRIPT_REGISTRY_FILTER_CHUNK_SIZE = 20
+_TOPIC_SCRIPT_SELECTION_FIELDS = ",".join(
+    (
+        "id",
+        "topic_registry_id",
+        "topic_research_dossier_id",
+        "post_type",
+        "title",
+        "script",
+        "target_length_tier",
+        "estimated_duration_s",
+        "source_summary",
+        "primary_source_url",
+        "primary_source_title",
+        "source_urls",
+        "seed_payload",
+        "audit_status",
+        "origin_kind",
+        "use_count",
+        "last_used_at",
+        "created_at",
+        "updated_at",
+    )
+)
 
 
 def _fetch_topic_script_rows(
@@ -272,6 +295,10 @@ def _fetch_topic_script_rows(
     topic_registry_ids: Optional[List[str]] = None,
     topic_research_dossier_id: Optional[str] = None,
     post_type: Optional[str] = None,
+    audit_status: Optional[str] = None,
+    maximum_rows: Optional[int] = None,
+    select_fields: str = "*",
+    prefer_base_relation: bool = False,
 ) -> List[Dict[str, Any]]:
     normalized_registry_ids = list(
         dict.fromkeys(
@@ -287,7 +314,7 @@ def _fetch_topic_script_rows(
     last_error: Optional[Exception] = None
     relations = (
         ("topic_scripts", "v_topic_scripts_resolved")
-        if normalized_registry_ids
+        if normalized_registry_ids or prefer_base_relation
         else ("v_topic_scripts_resolved", "topic_scripts")
     )
     for relation in relations:
@@ -308,7 +335,7 @@ def _fetch_topic_script_rows(
             for registry_id_group in registry_id_groups:
                 start = 0
                 while True:
-                    query = supabase.client.table(relation).select("*")
+                    query = supabase.client.table(relation).select(select_fields)
                     if topic_registry_id is not None:
                         query = query.eq("topic_registry_id", topic_registry_id)
                     elif registry_id_group is not None:
@@ -319,6 +346,12 @@ def _fetch_topic_script_rows(
                         query = query.eq("target_length_tier", target_length_tier)
                     if post_type:
                         query = query.eq("post_type", post_type)
+                    if audit_status:
+                        query = query.eq("audit_status", audit_status)
+                    if maximum_rows is not None:
+                        response = query.limit(maximum_rows).execute()
+                        rows.extend(response.data or [])
+                        break
                     end = start + _TOPIC_SCRIPT_PAGE_SIZE - 1
                     response = query.range(start, end).execute()
                     batch = response.data or []
@@ -818,35 +851,14 @@ def list_topic_suggestions(
 ) -> List[Dict[str, Any]]:
     registry_rows = get_all_topics_from_registry()
     registry_by_id = {str(row.get("id")): row for row in registry_rows}
-    selectable_registry_rows = [
-        normalized
-        for row in registry_rows
-        if (normalized := _normalize_registry_row(row)).get("status") == "active"
-        and (
-            not post_type
-            or not str(normalized.get("post_type") or "").strip()
-            or str(normalized.get("post_type") or "").strip() == post_type
-        )
-        and str(normalized.get("id") or "").strip()
-    ]
-    selectable_registry_rows.sort(
-        key=lambda row: (
-            int(row.get("use_count") or 0),
-            str(row.get("last_used_at") or row.get("created_at") or ""),
-            str(row.get("created_at") or ""),
-            str(row.get("family_fingerprint") or row.get("id") or ""),
-        )
-    )
-    candidate_registry_limit = max(limit * 2, 20)
-    selectable_registry_ids = [
-        str(row.get("id"))
-        for row in selectable_registry_rows[:candidate_registry_limit]
-    ]
     try:
         rows = _fetch_topic_script_rows(
             target_length_tier=target_length_tier,
             post_type=post_type,
-            topic_registry_ids=selectable_registry_ids,
+            audit_status="pass",
+            maximum_rows=max(limit * 5, 50),
+            select_fields=_TOPIC_SCRIPT_SELECTION_FIELDS,
+            prefer_base_relation=True,
         )
         suggestions: List[Dict[str, Any]] = []
         seen_families: set[str] = set()
