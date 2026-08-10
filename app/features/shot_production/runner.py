@@ -2652,6 +2652,7 @@ def compose_and_caption(
         _atomic_write_json(manifest_path, payload)
     acoustic_plan = None
     operator_review_retime_ratio = None
+    operator_review_target_duration = None
     if acoustic_seams:
         source_visual_tail_records = []
         for position, take in enumerate(ordered[:-1]):
@@ -2831,35 +2832,78 @@ def compose_and_caption(
                         {"take_index": int(take["index"])},
                     )
                 trim_windows.append(window)
+            review_content_duration = sum(
+                float(window["end_seconds"])
+                - float(window["start_seconds"])
+                for window in trim_windows
+            )
             if exact_delivery_target is not None:
-                review_content_duration = sum(
-                    float(window["end_seconds"])
-                    - float(window["start_seconds"])
-                    for window in trim_windows
+                operator_review_target_duration = exact_delivery_target
+            elif requested_duration >= 24.0:
+                # Use the same long-form cadence floor as ordinary acoustic
+                # planning, then retime the complete transcript-safe fallback
+                # only as much as needed to reach that approved floor.
+                effective_minimum = round(requested_duration * 0.9, 3)
+                effective_maximum = round(
+                    max(maximum_duration, requested_duration + 1.0),
+                    3,
                 )
+                payload["delivery_resolution"] = {
+                    "source": "long_form_acoustic_cadence_floor",
+                    "requested_seconds": requested_duration,
+                    "approved_minimum_seconds": float(
+                        duration_contract["minimum"]
+                    ),
+                    "effective_minimum_seconds": effective_minimum,
+                    "approved_maximum_seconds": float(
+                        duration_contract["maximum"]
+                    ),
+                    "effective_maximum_seconds": effective_maximum,
+                    "post_word_crossfade_guard_seconds": 0.100,
+                }
+                minimum_duration = effective_minimum
+                maximum_duration = effective_maximum
+                if review_content_duration < effective_minimum:
+                    operator_review_target_duration = effective_minimum
+            if operator_review_target_duration is not None:
                 operator_review_retime_ratio = (
-                    exact_delivery_target / review_content_duration
+                    operator_review_target_duration / review_content_duration
                 )
                 if not (
                     1.0
                     <= operator_review_retime_ratio
                     <= MAX_EXACT_DELIVERY_RETIME_RATIO + 1e-9
                 ):
-                    raise ValidationError(
-                        "Transcript-safe operator review cannot satisfy the exact duration within the cadence bound.",
-                        {
-                            "content_duration_seconds": round(
-                                review_content_duration, 6
-                            ),
-                            "target_duration_seconds": exact_delivery_target,
-                            "required_retime_ratio": round(
-                                operator_review_retime_ratio, 6
-                            ),
-                            "maximum_retime_ratio": (
-                                MAX_EXACT_DELIVERY_RETIME_RATIO
-                            ),
-                        },
+                    timing_details = {
+                        "content_duration_seconds": round(
+                            review_content_duration, 6
+                        ),
+                        "target_duration_seconds": (
+                            operator_review_target_duration
+                        ),
+                        "required_retime_ratio": round(
+                            operator_review_retime_ratio, 6
+                        ),
+                        "maximum_retime_ratio": (
+                            MAX_EXACT_DELIVERY_RETIME_RATIO
+                        ),
+                    }
+                    if requested_duration < 24.0:
+                        raise ValidationError(
+                            "Transcript-safe operator review cannot satisfy the delivery target within the cadence bound.",
+                            timing_details,
+                        )
+                    _append_delivery_review_advisory(
+                        payload,
+                        report_kind="media_duration_qa",
+                        message=(
+                            "The complete captioned review is shorter than the "
+                            "requested duration and is preserved at native cadence."
+                        ),
+                        details=timing_details,
                     )
+                    operator_review_target_duration = None
+                    operator_review_retime_ratio = None
             payload["status"] = "operator_review_composition_planned"
             payload["updated_at"] = _utc_now()
             _atomic_write_json(manifest_path, payload)
@@ -2886,8 +2930,17 @@ def compose_and_caption(
             else None
         ),
         **(
-            {"target_duration_seconds": exact_delivery_target}
-            if exact_delivery_target is not None
+            {
+                "target_duration_seconds": (
+                    exact_delivery_target
+                    if exact_delivery_target is not None
+                    else operator_review_target_duration
+                )
+            }
+            if (
+                exact_delivery_target is not None
+                or operator_review_target_duration is not None
+            )
             else {}
         ),
         **(
@@ -3283,13 +3336,48 @@ def compose_and_caption(
     }
     payload["media_qa"] = media_qa
     if not media_qa["passed"]:
-        payload["status"] = "media_qa_failed"
-        payload["updated_at"] = _utc_now()
-        _atomic_write_json(manifest_path, payload)
-        raise ValidationError(
-            "Captioned final media failed delivery QA.",
-            {"reasons": media_qa["failure_reasons"]},
+        failure_reasons = list(media_qa.get("failure_reasons") or [])
+        duration_only_review_finding = bool(
+            operator_review_delivery
+            and len(ordered) > 1
+            and set(failure_reasons) == {"duration_out_of_range"}
         )
+        if duration_only_review_finding:
+            media_qa.update(
+                {
+                    "provider_passed": False,
+                    "provider_failure_reasons": failure_reasons,
+                    "operator_review_required": True,
+                    "delivery_policy_passed": True,
+                    "accepted_by": (
+                        "automatic_full_video_operator_review_policy"
+                    ),
+                    "paid_retry_required": False,
+                    "passed": True,
+                }
+            )
+            _append_delivery_review_advisory(
+                payload,
+                report_kind="media_duration_qa",
+                message=(
+                    "The complete captioned review is outside the requested "
+                    "duration range. Review it before deciding whether to retry."
+                ),
+                details={
+                    "duration_seconds": media_qa.get("duration_seconds"),
+                    "minimum_seconds": media_qa.get("min_duration_seconds"),
+                    "maximum_seconds": media_qa.get("max_duration_seconds"),
+                },
+            )
+            payload["media_qa"] = media_qa
+        else:
+            payload["status"] = "media_qa_failed"
+            payload["updated_at"] = _utc_now()
+            _atomic_write_json(manifest_path, payload)
+            raise ValidationError(
+                "Captioned final media failed delivery QA.",
+                {"reasons": failure_reasons},
+            )
     payload["status"] = "captioned"
     payload["updated_at"] = _utc_now()
     _atomic_write_json(manifest_path, payload)

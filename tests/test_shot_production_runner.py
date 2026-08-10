@@ -40,6 +40,15 @@ FIFTY_SECOND_SCRIPT = " ".join(
     ]
 )
 
+THIRTY_TWO_SECOND_SCRIPT = " ".join(
+    [
+        "Geprüfte Eingänge helfen Menschen mit Rollstuhl, sichere Wege ohne spontane Umwege zuverlässig im Alltag zu planen.",
+        "Klare Hinweise zu Rampen, Türen und Aufzügen sparen Zeit und reduzieren unnötigen Stress vor jedem Termin.",
+        "Aktuelle Erfahrungen zeigen außerdem, welche Zugänge wirklich funktionieren und wo kurzfristig praktische Unterstützung gebraucht wird.",
+        "Teile deshalb geprüfte Informationen direkt, damit andere ihren Besuch selbstbestimmt vorbereiten und verlässlich durchführen können.",
+    ]
+)
+
 
 def _approved_png(path: Path) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -2721,6 +2730,122 @@ def test_operator_review_delivery_preserves_transcript_safe_windows(tmp_path):
         "punch_in_center",
     ]
     assert saved["delivery_visual_qa"]["passed"] is True
+
+
+@pytest.mark.parametrize(
+    (
+        "final_window_start",
+        "probe_duration",
+        "expected_target",
+        "expects_duration_advisory",
+    ),
+    [
+        (0.31, "28.8", 28.8, False),
+        (3.31, "24.24", None, True),
+    ],
+)
+def test_long_form_operator_review_always_delivers_complete_captioned_stitch(
+    tmp_path,
+    final_window_start,
+    probe_duration,
+    expected_target,
+    expects_duration_advisory,
+):
+    from app.features.shot_production.runner import (
+        _canonical_sha256,
+        _request_contract_payload,
+        compose_and_caption,
+    )
+
+    manifest_path = _manifest_with_raw_takes(
+        tmp_path,
+        script=THIRTY_TWO_SECOND_SCRIPT,
+        target_length_tier=32,
+    )
+    payload = _read(manifest_path)
+    assert len(payload["takes"]) == 4
+    observed_windows = [6.75, 7.63, 7.71, 5.55]
+    for position, take in enumerate(payload["takes"]):
+        take["duration_seconds"] = 6 if position == 3 else 8
+        take["status"] = "transcribed"
+        take["transcript_qa"] = {
+            "passed": True,
+            "first_word_start_seconds": 0.16,
+            "final_word_end_seconds": observed_windows[position] - 0.25,
+        }
+        take["trim_window"] = {
+            "start_seconds": final_window_start if position == 3 else 0.0,
+            "end_seconds": observed_windows[position],
+            "source": "deepgram_word_window",
+        }
+    payload["script"]["planned_provider_durations"] = [8, 8, 8, 6]
+    payload["visual_qa"] = {"passed": True}
+    payload["voice_qa"] = {"passed": True}
+    payload["request_contract_sha256"] = _canonical_sha256(
+        _request_contract_payload(payload)
+    )
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+    stitch_calls = []
+
+    def fail_plan(_evidence, **_kwargs):
+        raise ValidationError(
+            "No transcript-safe acoustic seam candidate exists.",
+            {"seam_index": 2, "recommended_retry_take_indexes": [3]},
+        )
+
+    def stitch_fn(**kwargs):
+        stitch_calls.append(kwargs)
+        return b"complete-long-form-review", {
+            "stitch_segment_count": 4,
+            "stitch_fps": 24.0,
+            "stitch_audio_video_duration_delta_s": 0.0,
+        }
+
+    def caption_fn(**_kwargs):
+        output = manifest_path.parent / "review-captioned.mp4"
+        output.write_bytes(b"review-captioned")
+        return str(output)
+
+    compose_and_caption(
+        manifest_path,
+        _DeepgramByCall([THIRTY_TWO_SECOND_SCRIPT]),
+        acoustic_seams=True,
+        analyze_audio_fn=lambda _path: (),
+        plan_acoustic_fn=fail_plan,
+        stitch_fn=stitch_fn,
+        caption_fn=caption_fn,
+        probe_fn=lambda _path: _valid_final_probe(probe_duration),
+        visual_seam_evaluator=lambda *_args, **_kwargs: {
+            "passed": True,
+            "seams": [],
+            "failed_seam_indexes": [],
+        },
+        visual_seam_sheet_fn=lambda *_args, **_kwargs: {"frames": []},
+        operator_review_delivery=True,
+    )
+
+    saved = _read(manifest_path)
+    assert saved["status"] == "captioned"
+    assert saved["composition_mode"] == "transcript_safe_operator_review"
+    assert saved["delivery_resolution"]["effective_minimum_seconds"] == 28.8
+    if expected_target is not None:
+        assert stitch_calls[0]["target_duration_seconds"] == expected_target
+        assert stitch_calls[0]["delivery_retime_ratio"] == pytest.approx(
+            28.8 / (6.75 + 7.63 + 7.65 + 5.55 - final_window_start)
+        )
+        assert stitch_calls[0]["delivery_retime_ratio"] <= 1.1
+    else:
+        assert "target_duration_seconds" not in stitch_calls[0]
+        assert "delivery_retime_ratio" not in stitch_calls[0]
+        assert saved["media_qa"]["passed"] is True
+        assert saved["media_qa"]["provider_passed"] is False
+        assert saved["media_qa"]["paid_retry_required"] is False
+    duration_advisories = [
+        item
+        for item in saved.get("delivery_review_advisories") or []
+        if item.get("stage") == "media_duration_qa"
+    ]
+    assert bool(duration_advisories) is expects_duration_advisory
 
 
 def test_operator_review_policy_preserves_failed_gate_evidence():
