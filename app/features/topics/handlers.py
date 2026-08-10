@@ -1999,7 +1999,7 @@ def _discover_semantic_topics_for_batch_sync(batch: Dict[str, Any]) -> Dict[str,
             continue
         stored_suggestions = list_topic_suggestions(
             target_length_tier=_SEMANTIC_TOPIC_INPUT_TIER,
-            limit=max(count * 20, 50),
+            limit=max(count * 5, 10),
             post_type=post_type,
             check_accessibility=False,
             duration_neutral=True,

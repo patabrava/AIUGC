@@ -1033,6 +1033,63 @@ def test_list_topic_suggestions_prefers_low_use_count_and_older_last_used(monkey
     assert [row["topic_registry_id"] for row in result] == ["topic-2", "topic-3", "topic-1"]
 
 
+def test_list_topic_suggestions_bounds_script_query_to_least_used_active_families(monkeypatch):
+    from app.features.topics import queries as topic_queries
+
+    registry_rows = [
+        {
+            "id": f"topic-{index:03d}",
+            "title": f"Thema {index:03d}",
+            "script": f"Script {index:03d}",
+            "use_count": index,
+            "post_type": "value",
+            "status": "active",
+            "family_fingerprint": f"thema-{index:03d}",
+        }
+        for index in range(80)
+    ]
+    registry_rows.extend(
+        [
+            {
+                "id": "inactive-topic",
+                "title": "Inaktiv",
+                "script": "Inaktiv",
+                "use_count": 0,
+                "post_type": "value",
+                "status": "quarantined",
+                "family_fingerprint": "inaktiv",
+            },
+            {
+                "id": "lifestyle-topic",
+                "title": "Lifestyle",
+                "script": "Lifestyle",
+                "use_count": 0,
+                "post_type": "lifestyle",
+                "status": "active",
+                "family_fingerprint": "lifestyle",
+            },
+        ]
+    )
+    captured = {}
+
+    def fake_fetch(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(topic_queries, "get_all_topics_from_registry", lambda: registry_rows)
+    monkeypatch.setattr(topic_queries, "_fetch_topic_script_rows", fake_fetch)
+
+    assert topic_queries.list_topic_suggestions(
+        target_length_tier=8,
+        limit=2,
+        post_type="value",
+        check_accessibility=False,
+    ) == []
+    assert captured["topic_registry_ids"] == [
+        f"topic-{index:03d}" for index in range(20)
+    ]
+
+
 def test_list_topic_suggestions_deduplicates_same_topic_family_title(monkeypatch):
     from app.features.topics import queries as topic_queries
 

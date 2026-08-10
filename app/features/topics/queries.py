@@ -262,38 +262,70 @@ def _should_rehabilitate_family_status(existing_status: Any, resolved_status: An
 
 
 _TOPIC_SCRIPT_PAGE_SIZE = 1000
+_TOPIC_SCRIPT_REGISTRY_FILTER_CHUNK_SIZE = 20
 
 
 def _fetch_topic_script_rows(
     *,
     target_length_tier: Optional[int] = None,
     topic_registry_id: Optional[str] = None,
+    topic_registry_ids: Optional[List[str]] = None,
     topic_research_dossier_id: Optional[str] = None,
     post_type: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
+    normalized_registry_ids = list(
+        dict.fromkeys(
+            str(value).strip()
+            for value in (topic_registry_ids or [])
+            if str(value).strip()
+        )
+    )
+    if topic_registry_ids is not None and not normalized_registry_ids:
+        return []
+
     supabase = _get_supabase_adapter()
     last_error: Optional[Exception] = None
-    for relation in ("v_topic_scripts_resolved", "topic_scripts"):
+    relations = (
+        ("topic_scripts", "v_topic_scripts_resolved")
+        if normalized_registry_ids
+        else ("v_topic_scripts_resolved", "topic_scripts")
+    )
+    for relation in relations:
         try:
             rows: List[Dict[str, Any]] = []
-            start = 0
-            while True:
-                query = supabase.client.table(relation).select("*")
-                if topic_registry_id is not None:
-                    query = query.eq("topic_registry_id", topic_registry_id)
-                if topic_research_dossier_id is not None:
-                    query = query.eq("topic_research_dossier_id", topic_research_dossier_id)
-                if target_length_tier is not None:
-                    query = query.eq("target_length_tier", target_length_tier)
-                if post_type:
-                    query = query.eq("post_type", post_type)
-                end = start + _TOPIC_SCRIPT_PAGE_SIZE - 1
-                response = query.range(start, end).execute()
-                batch = response.data or []
-                rows.extend(batch)
-                if len(batch) < _TOPIC_SCRIPT_PAGE_SIZE:
-                    break
-                start += _TOPIC_SCRIPT_PAGE_SIZE
+            registry_id_groups: List[Optional[List[str]]] = [None]
+            if normalized_registry_ids:
+                registry_id_groups = [
+                    normalized_registry_ids[
+                        index : index + _TOPIC_SCRIPT_REGISTRY_FILTER_CHUNK_SIZE
+                    ]
+                    for index in range(
+                        0,
+                        len(normalized_registry_ids),
+                        _TOPIC_SCRIPT_REGISTRY_FILTER_CHUNK_SIZE,
+                    )
+                ]
+            for registry_id_group in registry_id_groups:
+                start = 0
+                while True:
+                    query = supabase.client.table(relation).select("*")
+                    if topic_registry_id is not None:
+                        query = query.eq("topic_registry_id", topic_registry_id)
+                    elif registry_id_group is not None:
+                        query = query.in_("topic_registry_id", registry_id_group)
+                    if topic_research_dossier_id is not None:
+                        query = query.eq("topic_research_dossier_id", topic_research_dossier_id)
+                    if target_length_tier is not None:
+                        query = query.eq("target_length_tier", target_length_tier)
+                    if post_type:
+                        query = query.eq("post_type", post_type)
+                    end = start + _TOPIC_SCRIPT_PAGE_SIZE - 1
+                    response = query.range(start, end).execute()
+                    batch = response.data or []
+                    rows.extend(batch)
+                    if len(batch) < _TOPIC_SCRIPT_PAGE_SIZE:
+                        break
+                    start += _TOPIC_SCRIPT_PAGE_SIZE
             return [_normalize_script_row(row) for row in rows]
         except Exception as exc:
             last_error = exc
@@ -786,10 +818,35 @@ def list_topic_suggestions(
 ) -> List[Dict[str, Any]]:
     registry_rows = get_all_topics_from_registry()
     registry_by_id = {str(row.get("id")): row for row in registry_rows}
+    selectable_registry_rows = [
+        normalized
+        for row in registry_rows
+        if (normalized := _normalize_registry_row(row)).get("status") == "active"
+        and (
+            not post_type
+            or not str(normalized.get("post_type") or "").strip()
+            or str(normalized.get("post_type") or "").strip() == post_type
+        )
+        and str(normalized.get("id") or "").strip()
+    ]
+    selectable_registry_rows.sort(
+        key=lambda row: (
+            int(row.get("use_count") or 0),
+            str(row.get("last_used_at") or row.get("created_at") or ""),
+            str(row.get("created_at") or ""),
+            str(row.get("family_fingerprint") or row.get("id") or ""),
+        )
+    )
+    candidate_registry_limit = max(limit * 2, 20)
+    selectable_registry_ids = [
+        str(row.get("id"))
+        for row in selectable_registry_rows[:candidate_registry_limit]
+    ]
     try:
         rows = _fetch_topic_script_rows(
             target_length_tier=target_length_tier,
             post_type=post_type,
+            topic_registry_ids=selectable_registry_ids,
         )
         suggestions: List[Dict[str, Any]] = []
         seen_families: set[str] = set()
