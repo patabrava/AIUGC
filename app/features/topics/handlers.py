@@ -102,6 +102,7 @@ _TOPIC_BANK_RESEARCH_TASKS: Dict[str, Thread] = {}
 _TOPIC_BANK_RESEARCH_LOCK = RLock()
 _LIFESTYLE_COLLECTION_MAX_ATTEMPTS = 1
 _SEMANTIC_TOPIC_INPUT_TIER = 32
+_SEMANTIC_DATABASE_TOPIC_ATTEMPTS = 6
 
 
 def _attach_publish_captions(
@@ -771,6 +772,42 @@ def _semantic_seed_payload(post_type: str, candidate: Dict[str, Any]) -> Dict[st
     return seed_payload
 
 
+def _generate_semantic_script_for_candidate(
+    candidate: Dict[str, Any],
+    **generation_kwargs: Any,
+):
+    """Give persisted topic families bounded independent chances before recovery."""
+    attempts = (
+        _SEMANTIC_DATABASE_TOPIC_ATTEMPTS
+        if candidate.get("topic_registry_id") and not candidate.get("semantic_recovery")
+        else 1
+    )
+    post_type = str(generation_kwargs.get("post_type") or "").strip()
+    recovery_sources = tuple(
+        source
+        for source in (
+            str(candidate.get("semantic_recovery_source") or "").strip(),
+            str(_SEMANTIC_RECOVERY_COPY.get(post_type, {}).get("source") or "").strip(),
+        )
+        if source
+    )
+    generated = None
+    for _attempt in range(attempts):
+        generated = generate_semantic_script(**generation_kwargs)
+        uses_fallback = generated.provenance.get("source") in {
+            "fallback",
+            "deterministic_recovery",
+        }
+        overlaps_recovery = any(
+            classify_script_overlap(generated.script, source)
+            or _semantic_script_uses_recovery_source(generated.script, source)
+            for source in recovery_sources
+        )
+        if not uses_fallback and not overlaps_recovery:
+            return generated
+    return generated
+
+
 def _semantic_family_identity(candidate: Dict[str, Any]) -> str:
     for key in (
         "family_fingerprint",
@@ -1018,7 +1055,8 @@ def _create_semantic_post_from_candidate(
     title = str(candidate.get("title") or seed_payload.get("canonical_topic") or "").strip()
     cta = str(candidate.get("cta") or seed_payload.get("cta") or title).strip()
     research_provenance = _semantic_research_provenance(candidate)
-    generated = generate_semantic_script(
+    generated = _generate_semantic_script_for_candidate(
+        candidate,
         post_type=post_type,
         title=title,
         cta=cta,

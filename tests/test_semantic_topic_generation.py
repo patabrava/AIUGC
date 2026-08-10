@@ -808,6 +808,63 @@ def test_semantic_fact_inputs_remove_research_labels_from_spoken_fallback_facts(
     assert "**Gesetzliche Grundlage:**" not in facts[1]
 
 
+def test_database_family_gets_bounded_topic_preserving_generation_attempts(monkeypatch):
+    sources = iter(
+        ("deterministic_recovery", "fallback", "gemini_repair")
+    )
+    calls = []
+
+    def fake_generate_semantic_script(**kwargs):
+        calls.append(kwargs)
+        return SemanticScriptResult(
+            script=_seven_take_script(),
+            contract_hash="contract",
+            provenance={"source": next(sources)},
+        )
+
+    monkeypatch.setattr(
+        handlers,
+        "generate_semantic_script",
+        fake_generate_semantic_script,
+    )
+
+    result = handlers._generate_semantic_script_for_candidate(
+        {"topic_registry_id": "persisted-family"},
+        post_type="lifestyle",
+        title="Eigenständiges Datenbankthema",
+    )
+
+    assert result.provenance["source"] == "gemini_repair"
+    assert len(calls) == 3
+
+
+def test_database_family_generation_attempts_are_bounded(monkeypatch):
+    calls = []
+
+    def fake_generate_semantic_script(**kwargs):
+        calls.append(kwargs)
+        return SemanticScriptResult(
+            script=_seven_take_script(),
+            contract_hash="contract",
+            provenance={"source": "deterministic_recovery"},
+        )
+
+    monkeypatch.setattr(
+        handlers,
+        "generate_semantic_script",
+        fake_generate_semantic_script,
+    )
+
+    result = handlers._generate_semantic_script_for_candidate(
+        {"topic_registry_id": "persisted-family"},
+        post_type="value",
+        title="Eigenständiges Datenbankthema",
+    )
+
+    assert result.provenance["source"] == "deterministic_recovery"
+    assert len(calls) == handlers._SEMANTIC_DATABASE_TOPIC_ATTEMPTS
+
+
 def test_semantic_post_insert_removes_internal_canonical_tier(monkeypatch):
     captured = {}
 
