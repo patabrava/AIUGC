@@ -75,6 +75,8 @@ def _build_prompt_writer_brief(
         "the supplied location past her shoulder is all the background this frame needs. The phone sits above her eye "
         "line and angles down a few degrees, the horizon is visibly tilted three to six degrees off level, and she "
         "sits well off-center. "
+        "She has turned her whole body to face the phone: her shoulders are square to the lens and her nose points "
+        "straight at it, so the frame reads as her own selfie rather than a photograph someone else took of her. "
         "She faces the phone camera with a quiet, conversational expression immediately before speaking. "
         "The frame should feel like real creator footage captured at home: direct, slightly imperfect, unpolished, and "
         "physically plausible, with ordinary daylight and enough depth of field to retain the room layout. "

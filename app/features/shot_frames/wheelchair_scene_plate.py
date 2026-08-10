@@ -28,7 +28,10 @@ WHEELCHAIR_VISUAL_CONTRACT = (
 )
 FRAMING_CONTRACT = (
     "Use a vertical 9:16 arm's-length selfie framing, as if she is holding the phone in her own "
-    "hand just above her eye line. Crop tight: the top edge of the frame sits just above her hair, "
+    "hand just above her eye line. She has turned her whole body to face the phone: her shoulders "
+    "are square to the lens and her nose points straight at it, so the frame reads as her own "
+    "selfie rather than a photograph someone else took of her. The room sits behind her at "
+    "whatever angle it happens to fall. Crop tight: the top edge of the frame sits just above her hair, "
     "and the bottom edge cuts straight across her chest below the armpits. Her head alone fills "
     "about 40 to 45 percent of the frame height, so her face reads large and identity-readable. "
     "This tight crop takes priority over showing the room: a single corner of the location past "
@@ -41,23 +44,21 @@ FRAMING_CONTRACT = (
 _REFERENCE_ROLES = ("identity_primary", "identity_support", "location")
 _CANDIDATE_VARIATIONS = (
     (
-        "Candidate 1 composition: hold the phone squarely in front of her, rolled about "
-        "four degrees counter-clockwise so the horizon is visibly tilted. Keep her "
-        "shoulders close to square, direct eye contact, and her head clearly left of "
-        "frame center."
+        "Candidate 1 composition: she faces the phone straight on with her shoulders "
+        "square to the lens, the phone rolled about four degrees counter-clockwise so "
+        "the horizon is visibly tilted. Her head sits clearly left of frame center."
     ),
     (
-        "Candidate 2 composition: hold the phone modestly to the actor's left for a "
-        "clearly visible 10-degree right three-quarter view, rolled about five degrees "
-        "clockwise. Keep the same arm's-length distance and head size, direct eye "
-        "contact, and her head clearly right of frame center."
+        "Candidate 2 composition: she faces the phone straight on with her shoulders "
+        "square to the lens, the phone rolled about five degrees clockwise and held a "
+        "little lower so the downward angle is slight. Her head sits clearly right of "
+        "frame center, with a small natural head tilt to her right."
     ),
     (
-        "Candidate 3 composition: hold the phone modestly to the actor's right for a "
-        "clearly visible 10-degree left three-quarter view, raised higher so the "
-        "downward angle is obvious, rolled about three degrees counter-clockwise. Keep "
-        "the same arm's-length distance and head size, direct eye contact, and her head "
-        "clearly left of frame center."
+        "Candidate 3 composition: she faces the phone straight on with her shoulders "
+        "square to the lens, the phone rolled about three degrees counter-clockwise and "
+        "raised higher so the downward angle is obvious. Her head sits clearly left of "
+        "frame center, with a small natural head tilt to her left."
     ),
 )
 _MAX_DIVERSITY_ATTEMPTS = 3
@@ -326,8 +327,9 @@ def build_derived_scene_plate_prompt(
         "and 2 and preserve the exact manual wheelchair, seated pose, camera height, camera distance, and "
         "face size from Image 1. Image 1's clothing is not authoritative: replace every visible upper-body "
         "garment with the requested outfit below, making its garment type and color visibly unmistakable. "
-        "Apply only the modest candidate-specific horizontal viewpoint, roll, and shoulder "
-        "angle described below; preserve the overall selfie framing contract. "
+        "Apply only the modest candidate-specific roll, phone height, and off-center placement "
+        "described below, keeping her square to the lens; preserve the overall selfie framing "
+        "contract. "
         f"{WHEELCHAIR_VISUAL_CONTRACT} {FRAMING_CONTRACT} "
         f"Keep the actor-free location exactly: {scene}; and the upper-body outfit exactly: {wardrobe}. "
         "Keep her mouth closed with a quiet conversational expression. Preserve ordinary camera-file skin "
@@ -352,9 +354,10 @@ def _variation_directive(*, index: int, attempt: int) -> str:
         return directive
     return (
         f"{directive} DIVERSITY RECOVERY ATTEMPT {attempt}: the prior render was "
-        "perceptually indistinguishable from another option. Make the specified "
-        "left/right camera offset and shoulder angle unmistakably visible while "
-        "preserving actor identity, wheelchair, outfit, room, face size, and crop."
+        "perceptually indistinguishable from another option. Make the specified roll, "
+        "phone height, and off-center placement unmistakably visible while keeping her "
+        "square to the lens and preserving actor identity, wheelchair, outfit, room, "
+        "face size, and crop."
     )
 
 
