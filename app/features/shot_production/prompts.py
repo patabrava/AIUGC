@@ -107,7 +107,7 @@ def _visual_contract_text(visual_contract: Optional[Mapping[str, Any]]) -> str:
         return (
             "The supplied source frame is the authority for the subject identity, scene and background, "
             "composition, wardrobe, wheelchair, lighting, and visual style. Preserve its framing, crop, "
-            "and visible boundaries throughout the take, apart from the handheld micro-motion."
+            "subject scale, and visible boundaries throughout the take, apart from the handheld micro-motion."
         )
     required = (
         "scene_description",
@@ -127,7 +127,7 @@ def _visual_contract_text(visual_contract: Optional[Mapping[str, Any]]) -> str:
     return (
         "The supplied source frame is the authority for the subject identity, scene and background, "
         "composition, wardrobe, wheelchair, lighting, and visual style. Preserve its framing, crop, "
-        "and visible boundaries throughout the take, apart from the handheld micro-motion."
+        "subject scale, and visible boundaries throughout the take, apart from the handheld micro-motion."
     )
 
 
@@ -147,11 +147,14 @@ def build_veo_take_prompt(
             "smartphone UGC take, animated from the supplied first frame. Raw unfiltered front-camera look "
             "with modern smartphone HDR auto-tone, preserved natural skin texture, and deep depth of field.",
             "Camera: handheld arm's-length front-camera framing at the source frame's exact angle and "
-            "composition, held by the woman herself. Continuous low-amplitude handheld micro-motion runs "
-            "through the whole take: small irregular drift, subtle roll, faint breathing rise and fall, and "
-            "occasional tiny arm corrections. Total frame excursion stays under two percent of frame width "
-            "and always drifts back toward the source framing. The composition itself stays fixed while the "
-            "hand holding the phone keeps moving.",
+            "composition, held by the woman herself. Her arm stays locked at one fixed length for the "
+            "entire take, so the phone holds a constant distance from her face: her head fills exactly "
+            "the same fraction of the frame in the first and final frames, and every background object "
+            "keeps exactly the same on-screen size from start to finish. Continuous low-amplitude "
+            "handheld micro-motion runs through the whole take: small irregular sideways drift, subtle "
+            "roll, faint breathing rise and fall, and occasional tiny wrist corrections. That motion is "
+            "sideways and rotational only, stays under two percent of frame width, and always drifts "
+            "back toward the source framing.",
             f"Visual continuity: {_visual_contract_text(visual_contract)}",
             "Subject motion: the seated woman speaks directly to the lens with accurate native-German lip and "
             "jaw movement, a restrained conversational expression, irregular natural blinking, quiet breathing, "
@@ -167,10 +170,11 @@ def build_veo_take_prompt(
             f"targeting the final spoken word around {final_word_target:.1f} seconds.",
             "Cut-ready ending: after the final syllable, her speech articulation resolves naturally while she "
             "remains conversationally engaged with the lens, as if the next sentence will follow immediately. "
-            "Preserve the same seated posture, shoulder position, gaze direction, and resting "
-            "hand positions through the final frame. Subtle breathing, natural blinking, and the same "
-            "unchanged handheld phone motion carry on through the final frame. Maintain "
-            "fluid living presence without a concluding gesture, completion expression, or held end pose.",
+            "Preserve the same seated posture, shoulder position, gaze direction, subject scale, and resting "
+            "hand positions through the final frame, with her arm still at the same fixed length. Subtle "
+            "breathing, natural blinking, and the same unchanged handheld phone motion carry on through the "
+            "final frame. Maintain fluid living presence without a concluding gesture, completion "
+            "expression, or held end pose.",
             f"Dialogue: “{dialogue}”",
             "Audio: one warm adult female voice speaking native German with a natural conversational cadence and "
             "consistent vocal identity. Clean close smartphone-microphone sound with quiet natural ambience "

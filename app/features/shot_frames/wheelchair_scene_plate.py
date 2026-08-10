@@ -28,32 +28,36 @@ WHEELCHAIR_VISUAL_CONTRACT = (
 )
 FRAMING_CONTRACT = (
     "Use a vertical 9:16 arm's-length selfie framing, as if she is holding the phone in her own "
-    "hand. Crop from just above the top of her head to her upper chest so her face fills roughly 40 "
-    "to 45 percent of the frame height and stays identity-readable. The phone sits slightly above "
-    "her eye line and angles down a few degrees, the horizon rolls two to five degrees off level, "
-    "and she sits noticeably off-center rather than perfectly centered. Render it with close "
-    "front-camera perspective at roughly a 24mm equivalent, deep depth of field, and modern "
-    "smartphone HDR auto-tone, so the room behind her stays readable but clearly secondary. The "
-    "wheelchair may fall outside this crop."
+    "hand just above her eye line. Crop tight: the top edge of the frame sits just above her hair, "
+    "and the bottom edge cuts straight across her chest below the armpits. Her head alone fills "
+    "about 40 to 45 percent of the frame height, so her face reads large and identity-readable. "
+    "This tight crop takes priority over showing the room: a single corner of the location past "
+    "her shoulder is all the background this frame needs. The phone angles down a few degrees, the "
+    "horizon is visibly tilted three to six degrees off level, and she sits well off-center rather "
+    "than centered. Render it with close front-camera perspective at roughly a 24mm equivalent, "
+    "deep depth of field, and modern smartphone HDR auto-tone. The wheelchair may fall outside "
+    "this crop."
 )
 _REFERENCE_ROLES = ("identity_primary", "identity_support", "location")
 _CANDIDATE_VARIATIONS = (
     (
-        "Candidate 1 composition: hold the phone squarely in front of her with a slight "
-        "roll to the left. Keep her shoulders close to square, direct eye contact, and "
-        "her face just left of frame center."
+        "Candidate 1 composition: hold the phone squarely in front of her, rolled about "
+        "four degrees counter-clockwise so the horizon is visibly tilted. Keep her "
+        "shoulders close to square, direct eye contact, and her head clearly left of "
+        "frame center."
     ),
     (
         "Candidate 2 composition: hold the phone modestly to the actor's left for a "
-        "clearly visible 10-degree right three-quarter view, with a slight roll to the "
-        "right. Keep the same arm's-length distance and face size, direct eye contact, "
-        "and her face just right of frame center."
+        "clearly visible 10-degree right three-quarter view, rolled about five degrees "
+        "clockwise. Keep the same arm's-length distance and head size, direct eye "
+        "contact, and her head clearly right of frame center."
     ),
     (
         "Candidate 3 composition: hold the phone modestly to the actor's right for a "
-        "clearly visible 10-degree left three-quarter view, held a touch higher so the "
-        "downward angle reads more clearly. Keep the same arm's-length distance and face "
-        "size, direct eye contact, and her face just left of frame center."
+        "clearly visible 10-degree left three-quarter view, raised higher so the "
+        "downward angle is obvious, rolled about three degrees counter-clockwise. Keep "
+        "the same arm's-length distance and head size, direct eye contact, and her head "
+        "clearly left of frame center."
     ),
 )
 _MAX_DIVERSITY_ATTEMPTS = 3
