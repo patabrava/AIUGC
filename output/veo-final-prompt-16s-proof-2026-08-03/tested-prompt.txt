@@ -1,0 +1,15 @@
+Cinematography: One continuous, unedited eight-second vertical smartphone UGC take. Static seated eye-level camera. The supplied source frame is the authority for the subject, scene, composition, wardrobe, wheelchair, lighting, and visual style. Preserve its exact framing and visible boundaries. The camera stays completely still.
+
+Subject motion: The seated woman speaks directly to the lens with accurate native-German lip and jaw movement, a restrained conversational expression, irregular natural blinking, quiet breathing, and minimal speech-coupled head movement. Her shoulders, torso, wheelchair, and visible body remain stable. Her hands retain the exact visibility and relaxed resting positions established by the source frame. She communicates through speech and facial expression while her hands remain at rest.
+
+Timing: She begins speaking promptly and delivers the dialogue once at a natural conversational pace, targeting the final spoken word around 6.5 seconds.
+
+Cut-ready ending: After the final syllable, her speech articulation resolves naturally while she remains conversationally engaged with the lens, as if the next sentence will follow immediately. Preserve the same seated posture, shoulder position, wheelchair position, gaze direction, and resting hand positions through the final frame. Only subtle breathing and natural blinking continue. Maintain fluid living presence without a concluding gesture, completion expression, or held end pose.
+
+Dialogue: “{DIALOGUE}”
+
+Audio: One warm adult female voice speaking native German with a natural conversational cadence and consistent vocal identity. Clean close smartphone-microphone sound with quiet home-office room tone. The dialogue is the complete spoken performance.
+
+NEGATIVE PROMPT
+
+identity drift, face change, facial distortion, age change, hair change, wardrobe change, room change, lighting change, extra person, wheelchair change, wheelchair deformation, disconnected wheelchair components, body deformation, malformed hands, extra fingers, fused fingers, hand gesture, demonstrative hand action, door-opening mime, hand-position change, hands lifting, hands leaving resting position, hands entering frame, post-dialogue gesture, post-dialogue hand movement, terminal hand motion, post-dialogue action, body sway, posture reset, large head movement, exaggerated nodding, concluding nod, farewell expression, completion smile, downward gaze, gaze drop, looking down, exaggerated mouth closure, pursed-lip end pose, held end pose, frozen stare, robotic motion, stiff motion, mouth warping, teeth artifacts, lip-sync drift, camera movement, camera shake, camera pan, camera tilt, camera zoom, camera push-in, camera dolly, camera orbit, reframing, cut, jump cut, scene transition, wipe transition, end card, freeze frame, repeated dialogue, extra speech, English speech, music, background voices, subtitles, captions, generated text, logos, watermarks, gibberish text, plastic skin, waxy skin, over-smoothed skin, beauty filter, CGI look, 3D render

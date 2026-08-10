@@ -32,7 +32,8 @@ from app.features.topics.response_parsers import (
     parse_prompt2_response,
     parse_topic_research_response,
 )
-from app.features.topics.schemas import DialogScripts, ResearchAgentBatch, ResearchAgentItem, ResearchDossier, SeedData, TopicData
+from app.features.topics.schemas import DialogScripts, ResearchAgentBatch, ResearchAgentItem, ResearchDossier, ResearchSeoBrief, SeedData, TopicData
+from app.features.topics.seo_catalog import get_enabled_seo_brief
 from app.features.topics.topic_validation import (
     _clean_fact_pool,
     detect_metadata_bleed,
@@ -321,6 +322,9 @@ def generate_topic_research_dossier(
         raw_response=raw_response,
         llm_factory=llm_factory,
     )
+    seo_brief = get_enabled_seo_brief(seed_topic)
+    if seo_brief:
+        dossier = dossier.model_copy(update={"seo_brief": ResearchSeoBrief.model_validate(seo_brief)})
     try:
         from app.features.topics.queries import create_topic_research_dossier, create_topic_research_run, update_topic_research_run
 

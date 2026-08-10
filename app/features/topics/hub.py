@@ -20,6 +20,7 @@ from app.core.errors import FlowForgeException, ThirdPartyError, ValidationError
 from app.features.topics.bank_warmup import run_single_seed_topic_warmup
 from app.features.topics.deduplication import calculate_topic_similarity
 from app.features.topics.prompts import get_topic_bank, pick_topic_bank_topics
+from app.features.topics.seo_catalog import get_catalog_status, get_enabled_seo_brief
 from app.features.topics.queries import (
     create_topic_research_run,
     get_all_topics_from_registry,
@@ -52,6 +53,7 @@ def _topic_bank_rows() -> List[Dict[str, Any]]:
         title = str(raw_topic).strip()
         if not title:
             continue
+        seo_brief = get_enabled_seo_brief(title)
         topics.append(
             {
                 "id": f"topic-bank-{index}",
@@ -60,7 +62,8 @@ def _topic_bank_rows() -> List[Dict[str, Any]]:
                 "rotation": title,
                 "cta": "",
                 "post_type": "bank",
-                "source": "topic_bank.yaml",
+                "source": "seo_keyword_catalog" if seo_brief and seo_brief.get("source_kind") == "catalog" else "topic_bank.yaml",
+                "seo_brief": seo_brief,
                 "script_count": 0,
             }
         )
@@ -419,6 +422,7 @@ def build_launch_hub_payload(request) -> Dict[str, Any]:
         "basic_topic_count": len(_topic_bank_rows()),
         "generated_topic_count": len(generated_topics),
         "active_runs": active_runs,
+        "seo_catalog_status": get_catalog_status(),
     }
 
 
@@ -641,6 +645,7 @@ def build_topic_hub_payload(request) -> Dict[str, Any]:
         "runs": runs,
         "active_runs": active_runs,
         "completed_runs": completed_runs,
+        "seo_catalog_status": get_catalog_status(),
     }
 
 
@@ -893,6 +898,7 @@ def _build_lane_dossier(research_dossier: Dict[str, Any], lane_candidate: Dict[s
         ),
         "lane_candidates": [lane],
         "lane_candidate": lane,
+        "seo_brief": research_dossier.get("seo_brief"),
     }
 
 

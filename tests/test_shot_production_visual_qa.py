@@ -89,7 +89,7 @@ def test_visual_qa_returns_frozen_typed_report_and_sends_master_before_contact_s
     assert "same manual wheelchair" in prompt
     assert "delivered-tail" in prompt
     assert "pan, tilt, dolly, orbit" in prompt
-    assert "remains visible" in prompt
+    assert "partly or entirely outside the frame" in prompt
     assert "cropped out" in prompt
     assert "standing or walking" in prompt
     assert "framing" in prompt
@@ -99,7 +99,9 @@ def test_visual_qa_returns_frozen_typed_report_and_sends_master_before_contact_s
     assert "lower third" in prompt
     assert "small fixed crop differences" in prompt
     assert "natural speaking head movement" in prompt
-    assert "continuous camera zoom" in prompt
+    assert "low-amplitude handheld micro-motion" in prompt
+    assert "accumulates in one direction" in prompt
+    assert "continuous zoom" in prompt
     assert "scene-continuity comparison only" in prompt
     assert "JSON only" in prompt
     with pytest.raises(FrozenInstanceError):
@@ -123,7 +125,7 @@ def test_visual_qa_blocks_when_same_manual_wheelchair_is_not_visible_and_consist
     assert report.passed is False
     prompt = llm.calls[0]["prompt"]
     assert "same manual wheelchair" in prompt
-    assert "remains visible" in prompt
+    assert "visible and its design changes" in prompt
     assert "standing" in prompt
     assert "walking" in prompt
     assert "cropped" in prompt

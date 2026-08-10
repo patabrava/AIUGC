@@ -277,7 +277,14 @@ def test_compile_veo_take_requests_locks_first_frame_and_maps_beats_deterministi
         assert "mouth rests closed" not in request.prompt.lower()
         assert "the dialogue is the complete spoken performance" in request.prompt.lower()
         assert f"Dialogue: “{beat.text}”" in request.prompt
-        assert "camera stays completely still" in request.prompt.lower()
+        assert "handheld arm's-length front-camera framing" in request.prompt.lower()
+        assert "handheld micro-motion runs" in request.prompt.lower()
+        assert "under two percent of frame width" in request.prompt.lower()
+        assert "arm stays locked at one fixed length" in request.prompt.lower()
+        assert "same on-screen size from start to finish" in request.prompt.lower()
+        assert "sideways and rotational only" in request.prompt.lower()
+        assert "handheld phone motion carry on through the final frame" in request.prompt.lower()
+        assert "stays completely still" not in request.prompt.lower()
         assert "do not" not in request.prompt.lower()
         assert "no " not in request.prompt.lower()
         assert "hold the unchanged frame" not in request.prompt.lower()
@@ -309,7 +316,8 @@ def test_compile_veo_take_requests_locks_first_frame_and_maps_beats_deterministi
         "tilt",
         "dolly",
         "orbit",
-        "camera movement",
+        "tripod-locked",
+        "gimbal-smooth",
         "cut",
         "scene transition",
         "wipe transition",

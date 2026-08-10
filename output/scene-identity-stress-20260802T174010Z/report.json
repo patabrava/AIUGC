@@ -1,0 +1,189 @@
+{
+  "created_at": "2026-08-02T17:49:10.322058+00:00",
+  "settings": {
+    "image_model": "gemini-3.1-flash-image",
+    "image_size": "2K",
+    "identity_model": "gemini-2.5-flash",
+    "minimum_confidence": 0.9
+  },
+  "results": [
+    {
+      "set_index": 1,
+      "candidate_index": 1,
+      "path": "output/scene-identity-stress-20260802T174010Z/set-1-candidate-1.jpg",
+      "sha256": "de42193eac0112ef4a7bca7431bdc1a49dadae197c57de960a917b541cc975f2",
+      "byte_length": 2743919,
+      "provider_model": "gemini-3.1-flash-image",
+      "composite_layout": false,
+      "passed": true,
+      "confidence": 0.95,
+      "blocking_reasons": [],
+      "observed_differences": [
+        "pose_change",
+        "expression_change",
+        "wardrobe_change",
+        "background_change",
+        "camera_distance_change",
+        "presence_of_wheelchair"
+      ],
+      "component_results": {
+        "same_person": true,
+        "facial_geometry_consistent": true,
+        "apparent_age_consistent": true,
+        "hairline_and_hair_consistent": true,
+        "skin_texture_natural": true,
+        "not_beautified_or_stylized": true,
+        "no_face_artifacts": true
+      }
+    },
+    {
+      "set_index": 1,
+      "candidate_index": 2,
+      "path": "output/scene-identity-stress-20260802T174010Z/set-1-candidate-2.jpg",
+      "sha256": "456472289a383e602dc4bf645823e6f65238f645492b531fb35162e57954a541",
+      "byte_length": 2495449,
+      "provider_model": "gemini-3.1-flash-image",
+      "composite_layout": false,
+      "passed": true,
+      "confidence": 0.95,
+      "blocking_reasons": [],
+      "observed_differences": [
+        "lighting_changes",
+        "expression_changes",
+        "pose_changes",
+        "wardrobe_changes",
+        "background_changes",
+        "camera_distance_changes",
+        "wheelchair_present"
+      ],
+      "component_results": {
+        "same_person": true,
+        "facial_geometry_consistent": true,
+        "apparent_age_consistent": true,
+        "hairline_and_hair_consistent": true,
+        "skin_texture_natural": true,
+        "not_beautified_or_stylized": true,
+        "no_face_artifacts": true
+      }
+    },
+    {
+      "set_index": 1,
+      "candidate_index": 3,
+      "path": "output/scene-identity-stress-20260802T174010Z/set-1-candidate-3.jpg",
+      "sha256": "e788087aec240a44c34fb551c242cf34456145cfaad193db35ccabf66d3b5f00",
+      "byte_length": 2685887,
+      "provider_model": "gemini-3.1-flash-image",
+      "composite_layout": false,
+      "passed": true,
+      "confidence": 0.95,
+      "blocking_reasons": [],
+      "observed_differences": [
+        "lighting changes",
+        "expression changes",
+        "pose changes",
+        "wardrobe changes",
+        "background changes",
+        "camera distance changes",
+        "seated in a wheelchair"
+      ],
+      "component_results": {
+        "same_person": true,
+        "facial_geometry_consistent": true,
+        "apparent_age_consistent": true,
+        "hairline_and_hair_consistent": true,
+        "skin_texture_natural": true,
+        "not_beautified_or_stylized": true,
+        "no_face_artifacts": true
+      }
+    },
+    {
+      "set_index": 2,
+      "candidate_index": 1,
+      "path": "output/scene-identity-stress-20260802T174010Z/set-2-candidate-1.jpg",
+      "sha256": "2fea60dccea322779da4a8225554a18ded7336b8e21217cabca1f04e490b4eec",
+      "byte_length": 2301500,
+      "provider_model": "gemini-3.1-flash-image",
+      "composite_layout": false,
+      "passed": true,
+      "confidence": 0.95,
+      "blocking_reasons": [],
+      "observed_differences": [
+        "pose_change",
+        "expression_change",
+        "wardrobe_change",
+        "background_change",
+        "lighting_change",
+        "seated_in_wheelchair"
+      ],
+      "component_results": {
+        "same_person": true,
+        "facial_geometry_consistent": true,
+        "apparent_age_consistent": true,
+        "hairline_and_hair_consistent": true,
+        "skin_texture_natural": true,
+        "not_beautified_or_stylized": true,
+        "no_face_artifacts": true
+      }
+    },
+    {
+      "set_index": 2,
+      "candidate_index": 2,
+      "path": "output/scene-identity-stress-20260802T174010Z/set-2-candidate-2.jpg",
+      "sha256": "77b402420b3b684228a99ef14696dc1942c3ffb41d85e5c0abcb8b18e00f30ea",
+      "byte_length": 2568531,
+      "provider_model": "gemini-3.1-flash-image",
+      "composite_layout": false,
+      "passed": false,
+      "confidence": 0.6,
+      "blocking_reasons": [
+        "synthetic_smoothing"
+      ],
+      "observed_differences": [
+        "lighting_change",
+        "expression_change",
+        "pose_change",
+        "wardrobe_change",
+        "background_change",
+        "wheelchair_present"
+      ],
+      "component_results": {
+        "same_person": true,
+        "facial_geometry_consistent": true,
+        "apparent_age_consistent": true,
+        "hairline_and_hair_consistent": true,
+        "skin_texture_natural": false,
+        "not_beautified_or_stylized": false,
+        "no_face_artifacts": true
+      }
+    },
+    {
+      "set_index": 2,
+      "candidate_index": 3,
+      "path": "output/scene-identity-stress-20260802T174010Z/set-2-candidate-3.jpg",
+      "sha256": "9b957d8689aba724964ae2385df3f7cd38b4ab630e23427094eb1c9ecdd5d0d1",
+      "byte_length": 2517110,
+      "provider_model": "gemini-3.1-flash-image",
+      "composite_layout": false,
+      "passed": true,
+      "confidence": 0.95,
+      "blocking_reasons": [],
+      "observed_differences": [
+        "lighting_change",
+        "expression_change",
+        "pose_change",
+        "wardrobe_change",
+        "background_change",
+        "wheelchair_present"
+      ],
+      "component_results": {
+        "same_person": true,
+        "facial_geometry_consistent": true,
+        "apparent_age_consistent": true,
+        "hairline_and_hair_consistent": true,
+        "skin_texture_natural": true,
+        "not_beautified_or_stylized": true,
+        "no_face_artifacts": true
+      }
+    }
+  ]
+}

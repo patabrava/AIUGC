@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from app.core.logging import get_logger
 from app.features.topics.queries import get_all_topics_from_registry, get_researched_topic_texts
 from app.features.topics.deduplication import tokenize, jaccard_similarity
+from app.features.topics.seo_catalog import get_seo_seed_candidates, seo_catalog_enabled
 
 logger = get_logger(__name__)
 
@@ -167,6 +168,71 @@ def _build_fallback_seeds(existing_titles: List[str], count: int, niche: str) ->
     return fallback[:count]
 
 
+def _select_seeds_with_seo(
+    *,
+    max_topics: int,
+    niche: str,
+) -> Tuple[List[str], str]:
+    """Select from SEO first while retaining every established recovery phase."""
+    seo_seeds = filter_unresearched_seeds(get_seo_seed_candidates())
+    yaml_seeds = filter_unresearched_seeds(load_seed_topics_from_yaml())
+    initial: List[str] = []
+    seen: set[str] = set()
+    for seed in seo_seeds + yaml_seeds:
+        signature = " ".join(sorted(tokenize(seed))) or seed.lower().strip()
+        if signature and signature not in seen:
+            seen.add(signature)
+            initial.append(seed)
+
+    if len(initial) >= max_topics:
+        return initial[:max_topics], "seo_catalog"
+
+    seeds = list(initial)
+    remaining = max_topics - len(seeds)
+    llm_added = 0
+    if remaining > 0:
+        existing_titles = _get_existing_research_titles()
+        llm_seeds: List[str] = []
+        for attempt in range(MAX_LLM_SEED_ATTEMPTS):
+            try:
+                llm_seeds = _generate_llm_seeds(existing_titles + seeds, remaining, niche)
+                if llm_seeds:
+                    break
+            except Exception as exc:
+                logger.warning(
+                    "topic_seed_llm_generation_failed",
+                    attempt=attempt + 1,
+                    max_attempts=MAX_LLM_SEED_ATTEMPTS,
+                    error=str(exc),
+                )
+            if attempt + 1 < MAX_LLM_SEED_ATTEMPTS:
+                time.sleep(LLM_SEED_BACKOFF_SECONDS * (attempt + 1))
+
+        llm_filtered = filter_unresearched_seeds(llm_seeds)
+        for seed in llm_filtered:
+            if len(seeds) >= max_topics:
+                break
+            signature = " ".join(sorted(tokenize(seed))) or seed.lower().strip()
+            if signature and signature not in seen:
+                seen.add(signature)
+                seeds.append(seed)
+                llm_added += 1
+
+        if len(seeds) < max_topics:
+            fallback = _build_fallback_seeds(existing_titles + seeds, max_topics - len(seeds), niche)
+            for seed in filter_unresearched_seeds(fallback):
+                if len(seeds) >= max_topics:
+                    break
+                signature = " ".join(sorted(tokenize(seed))) or seed.lower().strip()
+                if signature and signature not in seen:
+                    seen.add(signature)
+                    seeds.append(seed)
+
+    if not seeds:
+        return [], "fallback_bank"
+    return seeds[:max_topics], "mixed" if llm_added else "seo_catalog"
+
+
 def select_seeds(
     max_topics: int = 5,
     niche: str = DEFAULT_NICHE,
@@ -175,6 +241,9 @@ def select_seeds(
 
     Returns (seeds, source) where source is 'yaml_bank', 'llm_generated', or 'mixed'.
     """
+    if seo_catalog_enabled():
+        return _select_seeds_with_seo(max_topics=max_topics, niche=niche)
+
     # Phase 1: YAML bank
     yaml_seeds = load_seed_topics_from_yaml()
     unresearched = filter_unresearched_seeds(yaml_seeds)

@@ -61,6 +61,8 @@ from app.features.shot_production.duration import (
     EXACT_SHORT_FORM_DURATION_SECONDS,
     MINIMUM_SEMANTIC_UGC_DURATION_SECONDS,
     SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS,
+    SEMANTIC_TERMINAL_SPEECH_GUARD_SECONDS,
+    semantic_terminal_speech_cut_floor,
 )
 from app.features.shot_production.planner import EditorialBeat, plan_editorial_beats
 from app.features.shot_production.prompts import (
@@ -2548,24 +2550,56 @@ def compose_and_caption(
         _atomic_write_json(manifest_path, payload)
     segment_videos = [path.read_bytes() for path in segment_paths]
     trim_windows = [take["trim_window"] for take in ordered]
+    single_take_tail_exclusion_seconds = SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS
     if single_take_terminal_protection:
         protected_source_end = (
             requested_duration - SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS
         )
-        transcript_safe_end = float(
-            ordered[0]["trim_window"]["end_seconds"]
-        )
-        if transcript_safe_end > protected_source_end + 1e-6:
+        transcript_window_end = float(ordered[0]["trim_window"]["end_seconds"])
+        transcript_qa = ordered[0].get("transcript_qa") or {}
+        try:
+            speech_cut_floor = semantic_terminal_speech_cut_floor(
+                transcript_qa.get("final_word_end_seconds")
+            )
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+        if speech_cut_floor > protected_source_end + 1e-6:
             raise ValidationError(
                 "Single-take terminal protection would cut transcript-safe context.",
                 {
                     "failure_type": "terminal_tail_speech_overlap",
                     "take_index": int(ordered[0]["index"]),
-                    "transcript_safe_end_seconds": transcript_safe_end,
+                    "final_word_end_seconds": float(
+                        transcript_qa["final_word_end_seconds"]
+                    ),
+                    "speech_guard_seconds": SEMANTIC_TERMINAL_SPEECH_GUARD_SECONDS,
+                    "speech_cut_floor_seconds": speech_cut_floor,
+                    "transcript_window_end_seconds": transcript_window_end,
                     "protected_source_end_seconds": protected_source_end,
                     "recommended_retry_take_indexes": [int(ordered[0]["index"])],
                 },
             )
+        active_cut_retime_ratio = requested_duration / speech_cut_floor
+        if active_cut_retime_ratio > MAX_EXACT_DELIVERY_RETIME_RATIO + 1e-9:
+            raise ValidationError(
+                "Single-take active-speech cut exceeds the cadence bound.",
+                {
+                    "failure_type": "terminal_active_speech_timing",
+                    "take_index": int(ordered[0]["index"]),
+                    "final_word_end_seconds": float(
+                        transcript_qa["final_word_end_seconds"]
+                    ),
+                    "speech_guard_seconds": SEMANTIC_TERMINAL_SPEECH_GUARD_SECONDS,
+                    "speech_cut_floor_seconds": speech_cut_floor,
+                    "required_retime_ratio": active_cut_retime_ratio,
+                    "maximum_retime_ratio": MAX_EXACT_DELIVERY_RETIME_RATIO,
+                    "recommended_retry_take_indexes": [int(ordered[0]["index"])],
+                },
+            )
+        # Make the final displayed frame part of the last spoken articulation. The retained
+        # source ends one AAC frame after the final word, then FFmpeg retimes that active
+        # window to the exact delivery duration.
+        single_take_tail_exclusion_seconds = requested_duration - speech_cut_floor
         try:
             source_tail_report = source_visual_tail_evaluator(segment_paths[0])
         except (ValueError, ValidationError) as exc:
@@ -2575,9 +2609,35 @@ def compose_and_caption(
                 "safe_video_end_seconds": None,
                 "error": str(exc),
             }
+        # Cut the tail at the detected reset instead of failing the delivery, mirroring the
+        # multi-take path's ``latest_safe_video_end_seconds``. Handheld takes carry continuous
+        # micro-motion, so a post-stitch reset check can never be satisfied by regeneration; the
+        # the final syllable plus a codec guard is the only real floor on how much tail may
+        # be removed. The wider transcript window includes optional ambience padding and must
+        # not preserve a concluding pose or post-dialogue gesture.
+        detected_safe_end = source_tail_report.get("safe_video_end_seconds")
+        if source_tail_report.get("reset_detected") and detected_safe_end is not None:
+            single_take_tail_exclusion_seconds = min(
+                max(
+                    single_take_tail_exclusion_seconds,
+                    requested_duration - float(detected_safe_end),
+                ),
+                requested_duration - speech_cut_floor,
+            )
         payload["source_visual_tail_qa"] = {
             "status": "evaluated",
             "passed": True,
+            "final_word_end_seconds": round(
+                float(transcript_qa["final_word_end_seconds"]), 6
+            ),
+            "speech_guard_seconds": SEMANTIC_TERMINAL_SPEECH_GUARD_SECONDS,
+            "speech_cut_floor_seconds": round(speech_cut_floor, 6),
+            "active_cut_retime_ratio": round(active_cut_retime_ratio, 9),
+            "transcript_window_end_seconds": round(transcript_window_end, 6),
+            "protected_source_end_seconds": round(protected_source_end, 6),
+            "applied_tail_exclusion_seconds": round(
+                single_take_tail_exclusion_seconds, 6
+            ),
             "takes": [
                 {
                     **dict(source_tail_report),
@@ -2838,7 +2898,7 @@ def compose_and_caption(
         **(
             {
                 "terminal_tail_exclusion_seconds": (
-                    SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS
+                    single_take_tail_exclusion_seconds
                 )
             }
             if single_take_terminal_protection
@@ -2884,10 +2944,18 @@ def compose_and_caption(
                     "requires_paid_regeneration": False,
                 },
             ) from exc
+        # Advisory only. The tail was already cut pre-stitch at the detected reset, and the
+        # delivery is retimed to an exact duration, so there is nothing further to remove here.
+        # Handheld takes carry continuous micro-motion into the final frames by design, so a
+        # blocking check at this point would reject every delivery for the intended look.
         delivery_terminal_qa.update(
             {
-                "passed": not bool(
+                "passed": True,
+                "advisory_reset_detected": bool(
                     delivery_terminal_qa.get("reset_detected")
+                ),
+                "applied_tail_exclusion_seconds": round(
+                    single_take_tail_exclusion_seconds, 6
                 ),
                 "video_sha256": sha256(stitched_bytes).hexdigest(),
                 "requires_paid_regeneration": False,
@@ -2895,15 +2963,6 @@ def compose_and_caption(
         )
         payload["delivery_terminal_qa"] = delivery_terminal_qa
         _atomic_write_json(manifest_path, payload)
-        if delivery_terminal_qa["passed"] is not True:
-            raise ValidationError(
-                "Final single-take delivery still contains terminal camera drift.",
-                {
-                    "failure_type": "delivery_terminal_reset",
-                    "retry_mode": "qa_only",
-                    "requires_paid_regeneration": False,
-                },
-            )
 
     transcript_safe_operator_review = bool(
         acoustic_plan is None

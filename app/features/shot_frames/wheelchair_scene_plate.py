@@ -22,32 +22,43 @@ from app.features.shot_frames.service import ShotFrameReference
 
 
 WHEELCHAIR_VISUAL_CONTRACT = (
-    "The same lightweight manual wheelchair in every image: matte dark-graphite frame, "
-    "slim black armrests, black seat and back cushion, and silver hand rims."
+    "The same lightweight manual wheelchair wherever it is visible: matte dark-graphite frame, "
+    "slim black armrests, black seat and back cushion, and silver hand rims. Selfie framing may "
+    "crop it out of frame entirely."
 )
 FRAMING_CONTRACT = (
-    "Use a static vertical 9:16 medium close-up from head to mid-torso at seated eye-level. "
-    "Keep her face large and identity-readable while at least one armrest and part of a large "
-    "rear wheel or silver hand rim remain clearly visible."
+    "Use a vertical 9:16 arm's-length selfie framing, as if she is holding the phone in her own "
+    "hand just above her eye line. She has turned her whole body to face the phone: her shoulders "
+    "are square to the lens and her nose points straight at it, so the frame reads as her own "
+    "selfie rather than a photograph someone else took of her. The room sits behind her at "
+    "whatever angle it happens to fall. Crop tight: the top edge of the frame sits just above her hair, "
+    "and the bottom edge cuts straight across her chest below the armpits. Her head alone fills "
+    "about 40 to 45 percent of the frame height, so her face reads large and identity-readable. "
+    "This tight crop takes priority over showing the room: a single corner of the location past "
+    "her shoulder is all the background this frame needs. The phone angles down a few degrees, the "
+    "horizon is visibly tilted three to six degrees off level, and she sits well off-center rather "
+    "than centered. Render it with close front-camera perspective at roughly a 24mm equivalent, "
+    "deep depth of field, and modern smartphone HDR auto-tone. The wheelchair may fall outside "
+    "this crop."
 )
 _REFERENCE_ROLES = ("identity_primary", "identity_support", "location")
 _CANDIDATE_VARIATIONS = (
     (
-        "Candidate 1 composition: use the centered baseline view. Keep her shoulders "
-        "square to camera, direct eye contact, and both the near armrest and part of "
-        "one rear wheel clearly readable."
+        "Candidate 1 composition: she faces the phone straight on with her shoulders "
+        "square to the lens, the phone rolled about four degrees counter-clockwise so "
+        "the horizon is visibly tilted. Her head sits clearly left of frame center."
     ),
     (
-        "Candidate 2 composition: move the camera modestly to the actor's left for a "
-        "clearly visible 10-degree right three-quarter view. Keep seated eye-level, "
-        "the same camera distance and face size, direct eye contact, and the near "
-        "armrest plus rear wheel clearly readable."
+        "Candidate 2 composition: she faces the phone straight on with her shoulders "
+        "square to the lens, the phone rolled about five degrees clockwise and held a "
+        "little lower so the downward angle is slight. Her head sits clearly right of "
+        "frame center, with a small natural head tilt to her right."
     ),
     (
-        "Candidate 3 composition: move the camera modestly to the actor's right for a "
-        "clearly visible 10-degree left three-quarter view. Keep seated eye-level, "
-        "the same camera distance and face size, direct eye contact, and the near "
-        "armrest plus rear wheel clearly readable."
+        "Candidate 3 composition: she faces the phone straight on with her shoulders "
+        "square to the lens, the phone rolled about three degrees counter-clockwise and "
+        "raised higher so the downward angle is obvious. Her head sits clearly left of "
+        "frame center, with a small natural head tilt to her left."
     ),
 )
 _MAX_DIVERSITY_ATTEMPTS = 3
@@ -288,14 +299,15 @@ def build_canonical_scene_plate_prompt(
         "Replace every visible upper-body garment from those references with the requested outfit below; "
         "its garment type and color must be visibly unmistakable. Do not average her into a new face. "
         "She is seated upright in a manual "
-        "wheelchair. "
+        "wheelchair, which may sit partly or entirely outside this crop. "
         f"{WHEELCHAIR_VISUAL_CONTRACT} {FRAMING_CONTRACT} "
         f"Her upper-body outfit is exactly: {wardrobe}. The location is exactly: {scene}. "
-        "Her hands and wheelchair geometry are physically plausible. Use natural available light and a "
-        "quiet conversational expression immediately before speaking, with her mouth closed. Render no "
-        "other person, text, logo, watermark, mobility device, standing pose, walking pose, beauty "
-        "retouching, poreless skin, glamour lighting, CGI smoothness, face averaging, camera tilt, wide "
-        "shot, full-body shot, or cropped-out wheelchair. "
+        "Her hands and any visible wheelchair geometry are physically plausible. Use natural available "
+        "light and a quiet conversational expression immediately before speaking, with her mouth closed. "
+        "Keep the raw unfiltered front-camera look with natural skin texture preserved and no filters. "
+        "Render no other person, text, logo, watermark, mobility device, standing pose, walking pose, "
+        "beauty retouching, poreless skin, glamour lighting, CGI smoothness, face averaging, wide shot, "
+        "or full-body shot. "
         f"{variation_directive}"
     )
 
@@ -315,16 +327,17 @@ def build_derived_scene_plate_prompt(
         "and 2 and preserve the exact manual wheelchair, seated pose, camera height, camera distance, and "
         "face size from Image 1. Image 1's clothing is not authoritative: replace every visible upper-body "
         "garment with the requested outfit below, making its garment type and color visibly unmistakable. "
-        "Apply only the modest candidate-specific horizontal viewpoint and shoulder "
-        "angle described below; preserve the overall medium-close-up framing contract. "
+        "Apply only the modest candidate-specific roll, phone height, and off-center placement "
+        "described below, keeping her square to the lens; preserve the overall selfie framing "
+        "contract. "
         f"{WHEELCHAIR_VISUAL_CONTRACT} {FRAMING_CONTRACT} "
         f"Keep the actor-free location exactly: {scene}; and the upper-body outfit exactly: {wardrobe}. "
         "Keep her mouth closed with a quiet conversational expression. Preserve ordinary camera-file skin "
         "texture, visible pores, natural tonal variation, natural under-eye and lip texture, mild facial "
         "asymmetry, and realistic hairline flyaways under ordinary indoor optics and available light. Keep "
-        "hands, wheelchair, and room perspective physically plausible. Render no other person, text, logo, "
-        "watermark, standing pose, walking pose, wide shot, full-body shot, beauty retouching, poreless skin, "
-        "glamour lighting, CGI smoothness, face averaging, camera movement, or cropped-out wheelchair."
+        "hands, any visible wheelchair, and room perspective physically plausible. Render no other person, "
+        "text, logo, watermark, standing pose, walking pose, wide shot, full-body shot, beauty retouching, "
+        "poreless skin, glamour lighting, CGI smoothness, face averaging, or motion blur."
         f" {variation_directive}"
     )
 
@@ -341,9 +354,10 @@ def _variation_directive(*, index: int, attempt: int) -> str:
         return directive
     return (
         f"{directive} DIVERSITY RECOVERY ATTEMPT {attempt}: the prior render was "
-        "perceptually indistinguishable from another option. Make the specified "
-        "left/right camera offset and shoulder angle unmistakably visible while "
-        "preserving actor identity, wheelchair, outfit, room, face size, and crop."
+        "perceptually indistinguishable from another option. Make the specified roll, "
+        "phone height, and off-center placement unmistakably visible while keeping her "
+        "square to the lens and preserving actor identity, wheelchair, outfit, room, "
+        "face size, and crop."
     )
 
 

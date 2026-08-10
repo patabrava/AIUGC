@@ -1,0 +1,1594 @@
+{
+  "schema_version": 1,
+  "source": {
+    "file": "docs/Lippelift_erweiterte Themen & Keywords_Mobilitätseinschränkungen.xlsx",
+    "provider": "unknown",
+    "metrics_as_of": "unknown",
+    "imported_at": "2026-08-07",
+    "full_sheet_rows": 131,
+    "curated_sheet_rows": 54
+  },
+  "entries": [
+    {
+      "keyword": "schwerbehindertenausweis",
+      "cluster": "Treppenlift-Wissen & Förderung",
+      "search_volume": 90500,
+      "search_intent": "Information",
+      "cpc_eur": 1.34,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 48,
+          "cluster": "Treppenlift-Wissen & Förderung",
+          "title": "Schwerbehindertenausweis: Vorteile und Antrag erklärt",
+          "note": "Riesiges, klar altersneutrales Thema, weil Behinderung jedes Alter betrifft. Sarah zeigt konkrete Alltagsvorteile."
+        },
+        {
+          "source_row": 52,
+          "cluster": "Treppenlift-Wissen & Förderung",
+          "title": "Schwerbehindertenausweis: Vorteile und Antrag erklärt",
+          "note": "Riesiges, klar altersneutrales Thema, weil Behinderung jedes Alter betrifft. Sarah zeigt konkrete Alltagsvorteile."
+        }
+      ]
+    },
+    {
+      "keyword": "pflegegrad 2",
+      "cluster": "Senioren",
+      "search_volume": 74000,
+      "search_intent": "Information",
+      "cpc_eur": 0.62,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 40,
+          "cluster": "Senioren",
+          "title": "Pflegegrade im Überblick: Voraussetzungen und Unterschiede",
+          "note": "Pillar-Artikel für die Senioren-Zielgruppe. Erklärt alle fünf Pflegegrade und verlinkt auf Detailthemen."
+        },
+        {
+          "source_row": 45,
+          "cluster": "Senioren",
+          "title": "Pflegegrade im Überblick: Voraussetzungen und Unterschiede",
+          "note": "Pillar-Artikel für die Senioren-Zielgruppe. Erklärt alle fünf Pflegegrade und verlinkt auf Detailthemen."
+        }
+      ]
+    },
+    {
+      "keyword": "rollator",
+      "cluster": "Hilfsmittel im Alltag",
+      "search_volume": 74000,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 0.7,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 18,
+          "cluster": "Hilfsmittel im Alltag",
+          "title": "Rollator finden: Modelle, Unterschiede und Tipps",
+          "note": "Größtes Volumen im Hilfsmittel-Feld. Sarah stellt verschiedene Rollatoren vor und ordnet sie nach Einsatz ein."
+        },
+        {
+          "source_row": 23,
+          "cluster": "Hilfsmittel im Alltag",
+          "title": "Rollator finden: Modelle, Unterschiede und Tipps",
+          "note": "Größtes Volumen im Hilfsmittel-Feld. Sarah führt verschiedene Rollatoren vor und bewertet ehrlich."
+        }
+      ]
+    },
+    {
+      "keyword": "gehhilfe",
+      "cluster": "Hilfsmittel im Alltag",
+      "search_volume": 8100,
+      "search_intent": "Information",
+      "cpc_eur": 0.3,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 19,
+          "cluster": "Hilfsmittel im Alltag",
+          "title": "Gehhilfen im Vergleich: Welche passt zu welcher Situation?",
+          "note": "Sarah stellt Gehstock, Unterarmgehstütze und Co. vor und erklärt, wann welche Hilfe passt."
+        },
+        {
+          "source_row": 24,
+          "cluster": "Hilfsmittel im Alltag",
+          "title": "Gehhilfen im Vergleich: Welche passt zu welcher Situation?",
+          "note": "Sarah probiert Gehstock, Unterarmgehstütze und Co. aus und ordnet sie nach Einsatz, nicht nach Alter."
+        }
+      ]
+    },
+    {
+      "keyword": "querschnittslähmung",
+      "cluster": "Leben mit Behinderung",
+      "search_volume": 8100,
+      "search_intent": "Information",
+      "cpc_eur": 4.05,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 26,
+          "cluster": "Leben mit Behinderung",
+          "title": "Querschnittslähmung: Alltag, Hilfen und neue Routinen",
+          "note": "Sarah erzählt aus eigener Erfahrung, wie sie ihren Alltag organisiert."
+        },
+        {
+          "source_row": 29,
+          "cluster": "Leben mit Erkrankung",
+          "title": "Querschnittslähmung: Alltag, Hilfen und neue Routinen",
+          "note": "Altersneutrales Reichweiten-Thema. Sarah erzählt, wie Betroffene ihren Alltag organisieren."
+        }
+      ]
+    },
+    {
+      "keyword": "schwindelgefühl",
+      "cluster": "Senioren",
+      "search_volume": 8100,
+      "search_intent": "Information",
+      "cpc_eur": 0.52,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 41,
+          "cluster": "Senioren",
+          "title": "Schwindel im Alter: Ursachen erkennen und vorbeugen",
+          "note": "Nahbares Video-Thema. Sarah erzählt aus Betroffenensicht und ergänzt einfache Übungen."
+        },
+        {
+          "source_row": 46,
+          "cluster": "Senioren",
+          "title": "Schwindel im Alter: Ursachen erkennen und vorbeugen",
+          "note": "Nahbares Video-Thema. Sarah erzählt aus Betroffenensicht und ergänzt einfache Übungen."
+        }
+      ]
+    },
+    {
+      "keyword": "spastik",
+      "cluster": "Leben mit Behinderung",
+      "search_volume": 6600,
+      "search_intent": "Information",
+      "cpc_eur": 1.51,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 27,
+          "cluster": "Leben mit Behinderung",
+          "title": "Spastik verstehen: Was im Körper passiert und was entlastet",
+          "note": "Erklärvideo aus Betroffenensicht, ruhig und ohne Fachchinesisch."
+        },
+        {
+          "source_row": 30,
+          "cluster": "Leben mit Erkrankung",
+          "title": "Spastik verstehen: Was im Körper passiert und was entlastet",
+          "note": "Betrifft oft junge Menschen. Erklärvideo plus Übungen, die Sarah ruhig vormacht."
+        }
+      ]
+    },
+    {
+      "keyword": "sturzprophylaxe",
+      "cluster": "Senioren",
+      "search_volume": 6600,
+      "search_intent": "Information",
+      "cpc_eur": 2.11,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 42,
+          "cluster": "Senioren",
+          "title": "Sturzprophylaxe: Einfache Übungen gegen das Sturzrisiko",
+          "note": "Starkes Senioren-Thema mit hohem Video-Potenzial. Sarah macht die Übungen vor."
+        },
+        {
+          "source_row": 47,
+          "cluster": "Senioren",
+          "title": "Sturzprophylaxe: Einfache Übungen gegen das Sturzrisiko",
+          "note": "Starkes Senioren-Thema mit hohem Video-Potenzial. Sarah macht die Übungen vor."
+        }
+      ]
+    },
+    {
+      "keyword": "treppenlift alternative",
+      "cluster": "Treppenlift-Wissen & Förderung",
+      "search_volume": 2400,
+      "search_intent": "Information",
+      "cpc_eur": 7.56,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 49,
+          "cluster": "Treppenlift-Wissen & Förderung",
+          "title": "Alternativen zum Treppenlift: Diese Optionen gibt es",
+          "note": "Informativer Marken-Anker ohne harten Verkauf. Verlinkt dezent auf die Produktseiten."
+        },
+        {
+          "source_row": 53,
+          "cluster": "Treppenlift-Wissen & Förderung",
+          "title": "Alternativen zum Treppenlift: Diese Optionen gibt es",
+          "note": "Informativer Marken-Anker ohne harten Verkauf. Verlinkt dezent auf die Produktseiten."
+        }
+      ]
+    },
+    {
+      "keyword": "barrierefrei wohnen",
+      "cluster": "Barrierefrei wohnen & umbauen",
+      "search_volume": 1300,
+      "search_intent": "Information",
+      "cpc_eur": 1.11,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 11,
+          "cluster": "Barrierefrei wohnen & umbauen",
+          "title": "Barrierefrei wohnen: So planen Sie Schritt für Schritt",
+          "note": "Pillar-Artikel. Verlinken Sie von hier auf Bad, Rampe und Förderung."
+        },
+        {
+          "source_row": 15,
+          "cluster": "Barrierefrei wohnen & umbauen",
+          "title": "Barrierefrei wohnen: So planen Sie Schritt für Schritt",
+          "note": "Pillar-Artikel. Verlinken Sie von hier auf Bad, Rampe und Förderung."
+        }
+      ]
+    },
+    {
+      "keyword": "rollstuhl gebraucht kaufen",
+      "cluster": "Rollstuhl & Alltag",
+      "search_volume": 1300,
+      "search_intent": "Transaktion",
+      "cpc_eur": 0.33,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 32,
+          "cluster": "Rollstuhl & Alltag",
+          "title": "Rollstuhl gebraucht kaufen: Checkliste vor dem Kauf",
+          "note": "Praktischer Ratgeber mit hohem Video-Potenzial. Sarah prüft ein Gebrauchtmodell live."
+        },
+        {
+          "source_row": 35,
+          "cluster": "Rollstuhl & Alltag",
+          "title": "Rollstuhl gebraucht kaufen: Checkliste vor dem Kauf",
+          "note": "Praktischer Ratgeber mit hohem Video-Potenzial. Sarah prüft ein Gebrauchtmodell live."
+        }
+      ]
+    },
+    {
+      "keyword": "behindertengerechtes bad",
+      "cluster": "Barrierefrei wohnen & umbauen",
+      "search_volume": 1000,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 2.25,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 10,
+          "cluster": "Barrierefrei wohnen & umbauen",
+          "title": "Behindertengerechtes Bad: Lösungen und Zuschüsse",
+          "note": "Altersneutrales Umbauthema. Sarah zeigt ein umgebautes Bad und erklärt die Förderwege."
+        },
+        {
+          "source_row": 14,
+          "cluster": "Barrierefrei wohnen & umbauen",
+          "title": "Behindertengerechtes Bad: Lösungen und Zuschüsse",
+          "note": "Altersneutrales Umbauthema. Sarah zeigt ein umgebautes Bad und erklärt die Förderwege."
+        }
+      ]
+    },
+    {
+      "keyword": "pflegegeld",
+      "cluster": "Senioren",
+      "search_volume": 135000,
+      "search_intent": "Information",
+      "cpc_eur": 0.54,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 43,
+          "cluster": "Senioren",
+          "title": "Pflegegeld: Höhe, Voraussetzungen und Antrag erklärt",
+          "note": "Größtes Volumen der ganzen Liste. Starker Pillar für die Senioren-Zielgruppe."
+        }
+      ]
+    },
+    {
+      "keyword": "behindertenparkplatz",
+      "cluster": "Barrierefrei unterwegs & Reisen",
+      "search_volume": 90500,
+      "search_intent": "Information",
+      "cpc_eur": 0.44,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 7,
+          "cluster": "Barrierefrei unterwegs & Reisen",
+          "title": "Behindertenparkplatz: Voraussetzungen, Ausweis und Rechte",
+          "note": "Riesiges Volumen. Sarah erklärt den Ausweis und räumt mit Missverständnissen auf."
+        }
+      ]
+    },
+    {
+      "keyword": "beckenbodentraining",
+      "cluster": "Rollstuhl-Fitness & Bewegung",
+      "search_volume": 49500,
+      "search_intent": "Information",
+      "cpc_eur": 1.01,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 39,
+          "cluster": "Rollstuhl-Fitness & Bewegung",
+          "title": "Beckenbodentraining im Sitzen: Übungen für mehr Stabilität",
+          "note": "Sehr großes Thema. Sarah macht die Übungen sitzend vor."
+        }
+      ]
+    },
+    {
+      "keyword": "verhinderungspflege",
+      "cluster": "Senioren",
+      "search_volume": 49500,
+      "search_intent": "Information",
+      "cpc_eur": 1.06,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 44,
+          "cluster": "Senioren",
+          "title": "Verhinderungspflege: So entlasten Sie pflegende Angehörige",
+          "note": "Praktischer Ratgeber mit hoher Nachfrage. Verlinkt auf Pflegegeld und Kurzzeitpflege."
+        }
+      ]
+    },
+    {
+      "keyword": "inklusion",
+      "cluster": "Leben mit Behinderung",
+      "search_volume": 22200,
+      "search_intent": "Information",
+      "cpc_eur": 3.48,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 28,
+          "cluster": "Leben mit Behinderung",
+          "title": "Inklusion im Alltag: Wo wir stehen und was sich ändern muss",
+          "note": "Reichweitenstarkes Thema. Sarah bezieht klar Position und teilt eigene Erlebnisse."
+        }
+      ]
+    },
+    {
+      "keyword": "toilettensitzerhöhung",
+      "cluster": "Hilfsmittel im Alltag",
+      "search_volume": 18100,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 0.29,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 20,
+          "cluster": "Hilfsmittel im Alltag",
+          "title": "Toilettensitzerhöhung: Modelle und Zuschüsse im Überblick",
+          "note": "Hohes Volumen, klar altersneutral. Sarah zeigt die Montage in wenigen Minuten."
+        }
+      ]
+    },
+    {
+      "keyword": "hausnotruf",
+      "cluster": "Hilfsmittel im Alltag",
+      "search_volume": 14800,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 2.56,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 21,
+          "cluster": "Hilfsmittel im Alltag",
+          "title": "Hausnotruf: So funktioniert er und wer die Kosten trägt",
+          "note": "Sarah erklärt die Technik und den Antrag bei der Pflegekasse."
+        }
+      ]
+    },
+    {
+      "keyword": "wiedereingliederung",
+      "cluster": "Arbeitsplatz & Wiedereingliederung",
+      "search_volume": 14800,
+      "search_intent": "Information",
+      "cpc_eur": 0.76,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 2,
+          "cluster": "Arbeitsplatz & Wiedereingliederung",
+          "title": "Wiedereingliederung nach Unfall oder Krankheit: So gelingt der Weg zurück in den Job",
+          "note": "Zentrales, altersneutrales Thema. Sarah erzählt aus Betroffenensicht, wie der Wiedereinstieg Schritt für Schritt gelingt."
+        }
+      ]
+    },
+    {
+      "keyword": "badewannenlift",
+      "cluster": "Hilfsmittel im Alltag",
+      "search_volume": 9900,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 0.55,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 22,
+          "cluster": "Hilfsmittel im Alltag",
+          "title": "Badewannenlift: Wieder sicher und allein baden",
+          "note": "Sarah führt einen Lift vor und zeigt, für wen er passt."
+        }
+      ]
+    },
+    {
+      "keyword": "treppenlift kosten",
+      "cluster": "Treppenlift-Wissen & Förderung",
+      "search_volume": 9900,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 20.06,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 50,
+          "cluster": "Treppenlift-Wissen & Förderung",
+          "title": "Was kostet ein Treppenlift? Preise und Einflussfaktoren",
+          "note": "Kommerzieller Anker mit hohem Volumen. Verlinkt auf Produktseiten und Förderung."
+        }
+      ]
+    },
+    {
+      "keyword": "pflegehilfsmittel",
+      "cluster": "Treppenlift-Wissen & Förderung",
+      "search_volume": 8100,
+      "search_intent": "Information",
+      "cpc_eur": 8.41,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 51,
+          "cluster": "Treppenlift-Wissen & Förderung",
+          "title": "Pflegehilfsmittel: Was die Pflegekasse zahlt",
+          "note": "Erklärt Anspruch und Antrag. Verlinkt auf Rollator, Haltegriffe und Co."
+        }
+      ]
+    },
+    {
+      "keyword": "nachteilsausgleich",
+      "cluster": "Arbeitsplatz & Wiedereingliederung",
+      "search_volume": 6600,
+      "search_intent": "Information",
+      "cpc_eur": 1.44,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 3,
+          "cluster": "Arbeitsplatz & Wiedereingliederung",
+          "title": "Nachteilsausgleich im Job: Diese Ansprüche haben Sie mit Behinderung",
+          "note": "Praktischer Rechte-Ratgeber. Verlinken Sie auf Schwerbehindertenausweis und Zusatzurlaub."
+        }
+      ]
+    },
+    {
+      "keyword": "theraband übungen",
+      "cluster": "Rollstuhl-Fitness & Bewegung",
+      "search_volume": 6600,
+      "search_intent": "Information",
+      "cpc_eur": 0.27,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 36,
+          "cluster": "Rollstuhl-Fitness & Bewegung",
+          "title": "Theraband-Übungen für den Oberkörper: Kraft aus dem Sitzen",
+          "note": "Sarah macht jede Übung im Rollstuhl vor. Funktioniert für alle, die im Sitzen trainieren."
+        }
+      ]
+    },
+    {
+      "keyword": "betriebliches eingliederungsmanagement",
+      "cluster": "Arbeitsplatz & Wiedereingliederung",
+      "search_volume": 4400,
+      "search_intent": "Information",
+      "cpc_eur": 1.38,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 4,
+          "cluster": "Arbeitsplatz & Wiedereingliederung",
+          "title": "BEM einfach erklärt: Ihre Rechte beim betrieblichen Eingliederungsmanagement",
+          "note": "Klärt einen Prozess, den viele nicht kennen. Sarah übersetzt die Fachbegriffe in klare Sprache."
+        }
+      ]
+    },
+    {
+      "keyword": "rollstuhl wie breit",
+      "cluster": "Rollstuhl & Alltag",
+      "search_volume": 4400,
+      "search_intent": "Information",
+      "cpc_eur": 0.49,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 34,
+          "cluster": "Rollstuhl & Alltag",
+          "title": "Rollstuhlmaße: So viel Platz brauchen Türen und Flure",
+          "note": "Praktischer Planungsartikel. Verlinken Sie auf barrierefreies Wohnen und Rampen."
+        }
+      ]
+    },
+    {
+      "keyword": "ergonomischer arbeitsplatz",
+      "cluster": "Arbeitsplatz & Wiedereingliederung",
+      "search_volume": 3600,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 2.74,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 5,
+          "cluster": "Arbeitsplatz & Wiedereingliederung",
+          "title": "Ergonomischer Arbeitsplatz: In jedem Alter rückenschonend arbeiten",
+          "note": "Trifft Berufstätige jeden Alters. Sarah zeigt konkrete Anpassungen am Schreibtisch."
+        }
+      ]
+    },
+    {
+      "keyword": "gleichgewichtsübungen",
+      "cluster": "Bewegung & Training",
+      "search_volume": 3600,
+      "search_intent": "Information",
+      "cpc_eur": null,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 16,
+          "cluster": "Bewegung & Training",
+          "title": "Gleichgewichtsübungen für mehr Standsicherheit",
+          "note": "Funktioniert für jedes Alter. Sarah macht jede Übung vor, der Text liefert Anleitung und Hintergrund."
+        }
+      ]
+    },
+    {
+      "keyword": "aktivrollstuhl",
+      "cluster": "Rollstuhl & Alltag",
+      "search_volume": 2900,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 0.35,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 31,
+          "cluster": "Rollstuhl & Alltag",
+          "title": "Aktivrollstuhl: Worauf es bei Auswahl und Einstellung ankommt",
+          "note": "Sarah zeigt an ihrem eigenen Rollstuhl, was Sitz, Gewicht und Radstand ausmachen."
+        }
+      ]
+    },
+    {
+      "keyword": "bodengleiche dusche",
+      "cluster": "Barrierefrei wohnen & umbauen",
+      "search_volume": 2400,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 0.77,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 12,
+          "cluster": "Barrierefrei wohnen & umbauen",
+          "title": "Bodengleiche Dusche: Planung, Kosten und Zuschüsse",
+          "note": "Sarah zeigt eine umgebaute Dusche und erklärt die Förderwege."
+        }
+      ]
+    },
+    {
+      "keyword": "knieschmerzen beim treppensteigen",
+      "cluster": "Treppensteigen & Gelenke",
+      "search_volume": 2400,
+      "search_intent": "Information",
+      "cpc_eur": null,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 54,
+          "cluster": "Treppensteigen & Gelenke",
+          "title": "Knieschmerzen beim Treppensteigen: Ursachen und was hilft",
+          "note": "Starkes junges Thema. Sarah zeigt aus eigener Sicht, wie eine Knieverletzung den Alltag ausbremst, und ergänzt einfache Entlastungstipps."
+        }
+      ]
+    },
+    {
+      "keyword": "behindertentoilette",
+      "cluster": "Barrierefrei unterwegs & Reisen",
+      "search_volume": 1900,
+      "search_intent": "Information",
+      "cpc_eur": 0.63,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 9,
+          "cluster": "Barrierefrei unterwegs & Reisen",
+          "title": "Barrierefreie Toiletten unterwegs finden: Apps und Tipps",
+          "note": "Praktischer Alltagshelfer. Sarah zeigt, welche Apps wirklich taugen."
+        }
+      ]
+    },
+    {
+      "keyword": "hüftarthrose übungen",
+      "cluster": "Bewegung & Training",
+      "search_volume": 1900,
+      "search_intent": "Information",
+      "cpc_eur": null,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 17,
+          "cluster": "Bewegung & Training",
+          "title": "Hüftarthrose: Übungen, die beweglich halten",
+          "note": "Sarah zeigt jede Übung, der Text erklärt Wirkung und Vorsichtsmaßnahmen."
+        }
+      ]
+    },
+    {
+      "keyword": "was bedeutet barrierefrei",
+      "cluster": "Barrierefrei wohnen & umbauen",
+      "search_volume": 1900,
+      "search_intent": "Information",
+      "cpc_eur": 2.51,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 13,
+          "cluster": "Barrierefrei wohnen & umbauen",
+          "title": "Barrierefrei, rollstuhlgerecht, altersgerecht: die Unterschiede",
+          "note": "Klärt Begriffe, die oft verwechselt werden. Guter Einstieg in den Cluster."
+        }
+      ]
+    },
+    {
+      "keyword": "treppensteigen mit krücken",
+      "cluster": "Treppensteigen & Gelenke",
+      "search_volume": 1600,
+      "search_intent": "Information",
+      "cpc_eur": null,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 55,
+          "cluster": "Treppensteigen & Gelenke",
+          "title": "Mit Krücken Treppen steigen: Technik, die wirklich sicher ist",
+          "note": "Passt nach Sport- oder Bänderverletzung. Sarah führt die Technik Stufe für Stufe vor und belegt direkt, dass auch Jüngere betroffen sind."
+        }
+      ]
+    },
+    {
+      "keyword": "leidensgerechter arbeitsplatz",
+      "cluster": "Arbeitsplatz & Wiedereingliederung",
+      "search_volume": 1000,
+      "search_intent": "Information",
+      "cpc_eur": 0,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 6,
+          "cluster": "Arbeitsplatz & Wiedereingliederung",
+          "title": "Leidensgerechter Arbeitsplatz: Wann Ihr Arbeitgeber anpassen muss",
+          "note": "Verbindet Einschränkung und Beruf direkt. Sarah zeigt Beispiele aus der Praxis."
+        }
+      ]
+    },
+    {
+      "keyword": "rollstuhlbasketball",
+      "cluster": "Rollstuhl-Fitness & Bewegung",
+      "search_volume": 720,
+      "search_intent": "Information",
+      "cpc_eur": 0,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 37,
+          "cluster": "Rollstuhl-Fitness & Bewegung",
+          "title": "Rollstuhlbasketball und Co.: Sport, der Spaß macht",
+          "note": "Sarah stellt Para-Sportarten vor und zeigt, wie der Einstieg gelingt."
+        }
+      ]
+    },
+    {
+      "keyword": "leben mit behinderung",
+      "cluster": "Leben mit Behinderung",
+      "search_volume": 590,
+      "search_intent": "Information",
+      "cpc_eur": 18.03,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 25,
+          "cluster": "Leben mit Behinderung",
+          "title": "Leben mit Behinderung: Sarahs Alltag ehrlich erzählt",
+          "note": "Der Persona-Pillar. Sarah gibt aus erster Hand Einblick und schafft Nähe zur Community."
+        }
+      ]
+    },
+    {
+      "keyword": "rollstuhlgerechtes auto",
+      "cluster": "Rollstuhl & Alltag",
+      "search_volume": 590,
+      "search_intent": "Information",
+      "cpc_eur": 0.37,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 33,
+          "cluster": "Rollstuhl & Alltag",
+          "title": "Auto und Rollstuhl: So klappt der Transfer im Alltag",
+          "note": "Sarah zeigt, wie sie ein- und aussteigt und den Rollstuhl verstaut."
+        }
+      ]
+    },
+    {
+      "keyword": "barrierefrei reisen",
+      "cluster": "Barrierefrei unterwegs & Reisen",
+      "search_volume": 390,
+      "search_intent": "Information",
+      "cpc_eur": 0.87,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 8,
+          "cluster": "Barrierefrei unterwegs & Reisen",
+          "title": "Barrierefrei reisen: So planen Sie den Urlaub im Rollstuhl",
+          "note": "Sarah teilt Reisetipps aus eigener Erfahrung, von Buchung bis Anreise."
+        }
+      ]
+    },
+    {
+      "keyword": "oberkörper workout",
+      "cluster": "Rollstuhl-Fitness & Bewegung",
+      "search_volume": 390,
+      "search_intent": "Information",
+      "cpc_eur": 1.81,
+      "competition": null,
+      "curated_rows": [
+        {
+          "source_row": 38,
+          "cluster": "Rollstuhl-Fitness & Bewegung",
+          "title": "Workout im Sitzen: Fit ohne aufzustehen",
+          "note": "Kurze Routine für zuhause. Sarah zeigt Tempo und Technik."
+        }
+      ]
+    },
+    {
+      "keyword": "höhenverstellbarer schreibtisch",
+      "cluster": "Arbeitsplatz & Wiedereingliederung",
+      "search_volume": 74000,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 3.96,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "pflegegrad 3",
+      "cluster": "Senioren",
+      "search_volume": 60500,
+      "search_intent": "Information",
+      "cpc_eur": 0.49,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "betreutes wohnen",
+      "cluster": "Senioren",
+      "search_volume": 18100,
+      "search_intent": "Information",
+      "cpc_eur": 1.65,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "krücken",
+      "cluster": "Hilfsmittel im Alltag",
+      "search_volume": 18100,
+      "search_intent": "Information",
+      "cpc_eur": 0.21,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "kurzzeitpflege",
+      "cluster": "Senioren",
+      "search_volume": 18100,
+      "search_intent": "Information",
+      "cpc_eur": 0.85,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "pflegegrad beantragen",
+      "cluster": "Senioren",
+      "search_volume": 18100,
+      "search_intent": "Transaktion",
+      "cpc_eur": 3.2,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "rollator kaufen",
+      "cluster": "Hilfsmittel im Alltag",
+      "search_volume": 18100,
+      "search_intent": "Transaktion",
+      "cpc_eur": 0.74,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "muskelaufbau",
+      "cluster": "Rollstuhl-Fitness & Bewegung",
+      "search_volume": 14800,
+      "search_intent": "Information",
+      "cpc_eur": 1.24,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "rückenübungen",
+      "cluster": "Rollstuhl-Fitness & Bewegung",
+      "search_volume": 14800,
+      "search_intent": "Information",
+      "cpc_eur": 0.59,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "pflegegrad-rechner",
+      "cluster": "Senioren",
+      "search_volume": 12100,
+      "search_intent": "Information",
+      "cpc_eur": 0.87,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "tagespflege",
+      "cluster": "Senioren",
+      "search_volume": 12100,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 1.95,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "dehnübungen",
+      "cluster": "Rollstuhl-Fitness & Bewegung",
+      "search_volume": 9900,
+      "search_intent": "Information",
+      "cpc_eur": 0.63,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "faszientraining",
+      "cluster": "Rollstuhl-Fitness & Bewegung",
+      "search_volume": 9900,
+      "search_intent": "Information",
+      "cpc_eur": 0.58,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "gehstock",
+      "cluster": "Hilfsmittel im Alltag",
+      "search_volume": 9900,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 0.3,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "rollstuhl zu kaufen",
+      "cluster": "Rollstuhl & Alltag",
+      "search_volume": 9900,
+      "search_intent": "Transaktion",
+      "cpc_eur": 0.7,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "rollstuhlrampe",
+      "cluster": "Rollstuhl & Alltag",
+      "search_volume": 9900,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 0.83,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "aufstehhilfe",
+      "cluster": "Hilfsmittel im Alltag",
+      "search_volume": 8100,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 0.46,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "barrierefreiheit",
+      "cluster": "Barrierefrei unterwegs & Reisen",
+      "search_volume": 8100,
+      "search_intent": "Information",
+      "cpc_eur": 5.82,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "elektromobil",
+      "cluster": "Hilfsmittel im Alltag",
+      "search_volume": 8100,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 0.56,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "seniorenmobil",
+      "cluster": "Hilfsmittel im Alltag",
+      "search_volume": 8100,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 0.75,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "schwerbehindertenausweis vorteile",
+      "cluster": "Treppenlift-Wissen & Förderung",
+      "search_volume": 6600,
+      "search_intent": "Information",
+      "cpc_eur": 0.73,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "seniorenheime in meiner nähe",
+      "cluster": "Senioren",
+      "search_volume": 6600,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 0.68,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "unterarmgehstützen",
+      "cluster": "Hilfsmittel im Alltag",
+      "search_volume": 5400,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 0.24,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "betreuung senioren",
+      "cluster": "Senioren",
+      "search_volume": 4400,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 3.2,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "integrationsamt",
+      "cluster": "Arbeitsplatz & Wiedereingliederung",
+      "search_volume": 4400,
+      "search_intent": "Information",
+      "cpc_eur": 2.4,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "treppenlift gebraucht",
+      "cluster": "Treppenlift-Wissen & Förderung",
+      "search_volume": 4400,
+      "search_intent": "Transaktion",
+      "cpc_eur": 19.56,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "wiedereingliederung nach krankheit",
+      "cluster": "Arbeitsplatz & Wiedereingliederung",
+      "search_volume": 4400,
+      "search_intent": "Information",
+      "cpc_eur": 0.59,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "gdb 50",
+      "cluster": "Treppenlift-Wissen & Förderung",
+      "search_volume": 3600,
+      "search_intent": "Information",
+      "cpc_eur": 1.03,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "gehbock",
+      "cluster": "Hilfsmittel im Alltag",
+      "search_volume": 3600,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 0.24,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "rollator gebraucht",
+      "cluster": "Hilfsmittel im Alltag",
+      "search_volume": 3600,
+      "search_intent": "Transaktion",
+      "cpc_eur": 0.21,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "barrierefrei wc",
+      "cluster": "Barrierefrei wohnen & umbauen",
+      "search_volume": 2900,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 0.99,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "grad der behinderung tabelle pdf",
+      "cluster": "Treppenlift-Wissen & Förderung",
+      "search_volume": 2900,
+      "search_intent": "Information",
+      "cpc_eur": 1.66,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "rollator testsieger",
+      "cluster": "Hilfsmittel im Alltag",
+      "search_volume": 2900,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 0.47,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "schwerbehindertenvertretung",
+      "cluster": "Arbeitsplatz & Wiedereingliederung",
+      "search_volume": 2900,
+      "search_intent": "Information",
+      "cpc_eur": 0.96,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "stehschreibtisch",
+      "cluster": "Arbeitsplatz & Wiedereingliederung",
+      "search_volume": 2900,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 4.18,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "teilhabe",
+      "cluster": "Leben mit Behinderung",
+      "search_volume": 2900,
+      "search_intent": "Information",
+      "cpc_eur": 18.33,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "teilhabe am arbeitsleben",
+      "cluster": "Arbeitsplatz & Wiedereingliederung",
+      "search_volume": 2900,
+      "search_intent": "Information",
+      "cpc_eur": 1.05,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "tragbarer treppenlift",
+      "cluster": "Treppenlift-Wissen & Förderung",
+      "search_volume": 2900,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 1.4,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "betreutes wohnen kosten",
+      "cluster": "Senioren",
+      "search_volume": 2400,
+      "search_intent": "Information",
+      "cpc_eur": 1.17,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "wiedereingliederung hamburger modell",
+      "cluster": "Arbeitsplatz & Wiedereingliederung",
+      "search_volume": 2400,
+      "search_intent": "Information",
+      "cpc_eur": 0.57,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "behindertenausweis parken",
+      "cluster": "Barrierefrei unterwegs & Reisen",
+      "search_volume": 1900,
+      "search_intent": "Information",
+      "cpc_eur": 0.27,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "beinprothese",
+      "cluster": "Leben mit Behinderung",
+      "search_volume": 1900,
+      "search_intent": "Information",
+      "cpc_eur": 0.99,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "homelift",
+      "cluster": "Treppenlift-Wissen & Förderung",
+      "search_volume": 1900,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 8.92,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "rollator krankenkasse",
+      "cluster": "Hilfsmittel im Alltag",
+      "search_volume": 1900,
+      "search_intent": "Information",
+      "cpc_eur": 0.39,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "treppensteighilfe",
+      "cluster": "Hilfsmittel im Alltag",
+      "search_volume": 1900,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 0.9,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "barrierefreie wohnung",
+      "cluster": "Barrierefrei wohnen & umbauen",
+      "search_volume": 1600,
+      "search_intent": "Information",
+      "cpc_eur": 1.24,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "plattformlift",
+      "cluster": "Treppenlift-Wissen & Förderung",
+      "search_volume": 1600,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 7.62,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "rollstuhlfahrer",
+      "cluster": "Rollstuhl & Alltag",
+      "search_volume": 1600,
+      "search_intent": "Information",
+      "cpc_eur": 0.71,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "stufenweise wiedereingliederung",
+      "cluster": "Arbeitsplatz & Wiedereingliederung",
+      "search_volume": 1600,
+      "search_intent": "Information",
+      "cpc_eur": 0.68,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "wiedereingliederung ablauf",
+      "cluster": "Arbeitsplatz & Wiedereingliederung",
+      "search_volume": 1600,
+      "search_intent": "Information",
+      "cpc_eur": 0.58,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "berufliche reha",
+      "cluster": "Arbeitsplatz & Wiedereingliederung",
+      "search_volume": 1300,
+      "search_intent": "Information",
+      "cpc_eur": 1.42,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "gehstock mit sitz",
+      "cluster": "Hilfsmittel im Alltag",
+      "search_volume": 1300,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 0.24,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "kündigungsschutz schwerbehinderung",
+      "cluster": "Arbeitsplatz & Wiedereingliederung",
+      "search_volume": 1300,
+      "search_intent": "Information",
+      "cpc_eur": 1.3,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "mobility training",
+      "cluster": "Rollstuhl-Fitness & Bewegung",
+      "search_volume": 1300,
+      "search_intent": "Information",
+      "cpc_eur": 1.17,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "treppen mit rollstuhl",
+      "cluster": "Rollstuhl & Alltag",
+      "search_volume": 1300,
+      "search_intent": "Information",
+      "cpc_eur": 0.93,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "treppenlift für rollstuhl",
+      "cluster": "Treppenlift-Wissen & Förderung",
+      "search_volume": 1300,
+      "search_intent": "Transaktion",
+      "cpc_eur": 14.81,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "vergesslichkeit im alter",
+      "cluster": "Senioren",
+      "search_volume": 1300,
+      "search_intent": "Information",
+      "cpc_eur": 0.95,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "zusatzurlaub schwerbehinderung",
+      "cluster": "Arbeitsplatz & Wiedereingliederung",
+      "search_volume": 1300,
+      "search_intent": "Information",
+      "cpc_eur": 2.04,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "altersgerechtes wohnen",
+      "cluster": "Senioren",
+      "search_volume": 1000,
+      "search_intent": "Information",
+      "cpc_eur": 1.09,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "barrierefreie dusche",
+      "cluster": "Barrierefrei wohnen & umbauen",
+      "search_volume": 1000,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 1.73,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "elektrorollstuhl gebraucht",
+      "cluster": "Rollstuhl & Alltag",
+      "search_volume": 1000,
+      "search_intent": "Transaktion",
+      "cpc_eur": 0.56,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "inklusionsamt",
+      "cluster": "Arbeitsplatz & Wiedereingliederung",
+      "search_volume": 1000,
+      "search_intent": "Information",
+      "cpc_eur": 6.39,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "rollstuhl elektrisch krankenkasse",
+      "cluster": "Rollstuhl & Alltag",
+      "search_volume": 1000,
+      "search_intent": "Information",
+      "cpc_eur": 2.01,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "was ist ein treppenlift",
+      "cluster": "Treppenlift-Wissen & Förderung",
+      "search_volume": 1000,
+      "search_intent": "Information",
+      "cpc_eur": 9.54,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "zuschuss barrierefreier umbau",
+      "cluster": "Barrierefrei wohnen & umbauen",
+      "search_volume": 1000,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 1.05,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "einsamkeit im alter",
+      "cluster": "Senioren",
+      "search_volume": 880,
+      "search_intent": "Information",
+      "cpc_eur": 2.95,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "greifhilfe",
+      "cluster": "Hilfsmittel im Alltag",
+      "search_volume": 880,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 0.45,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "koordinationstraining",
+      "cluster": "Rollstuhl-Fitness & Bewegung",
+      "search_volume": 880,
+      "search_intent": "Information",
+      "cpc_eur": 1.45,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "rampe für rollstuhl steigung",
+      "cluster": "Rollstuhl & Alltag",
+      "search_volume": 880,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 0.58,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "sitzgymnastik",
+      "cluster": "Rollstuhl-Fitness & Bewegung",
+      "search_volume": 720,
+      "search_intent": "Information",
+      "cpc_eur": 0.24,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "haltegriffe",
+      "cluster": "Barrierefrei wohnen & umbauen",
+      "search_volume": 590,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 0.36,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "leben mit ms",
+      "cluster": "Leben mit Behinderung",
+      "search_volume": 590,
+      "search_intent": "Information",
+      "cpc_eur": 0.79,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "rückenschonend arbeiten",
+      "cluster": "Arbeitsplatz & Wiedereingliederung",
+      "search_volume": 590,
+      "search_intent": "Information",
+      "cpc_eur": 0.54,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "wohnraumanpassung",
+      "cluster": "Barrierefrei wohnen & umbauen",
+      "search_volume": 590,
+      "search_intent": "Information",
+      "cpc_eur": 4.01,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "barrierefreier urlaub",
+      "cluster": "Barrierefrei unterwegs & Reisen",
+      "search_volume": 480,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 1,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "beweglichkeit verbessern",
+      "cluster": "Rollstuhl-Fitness & Bewegung",
+      "search_volume": 480,
+      "search_intent": "Information",
+      "cpc_eur": 1.1,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "elektrorollstuhl krankenkasse",
+      "cluster": "Rollstuhl & Alltag",
+      "search_volume": 480,
+      "search_intent": "Information",
+      "cpc_eur": 2.5,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "rollstuhl transport",
+      "cluster": "Rollstuhl & Alltag",
+      "search_volume": 480,
+      "search_intent": "Information",
+      "cpc_eur": 1.64,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "rollstuhlgerechte wohnung",
+      "cluster": "Rollstuhl & Alltag",
+      "search_volume": 480,
+      "search_intent": "Information",
+      "cpc_eur": 1.74,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "treppenlift zuschuss",
+      "cluster": "Treppenlift-Wissen & Förderung",
+      "search_volume": 480,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 8.74,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "faltrollstuhl",
+      "cluster": "Rollstuhl & Alltag",
+      "search_volume": 390,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 0.49,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "barrierefreie küche",
+      "cluster": "Barrierefrei wohnen & umbauen",
+      "search_volume": 320,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 2.77,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "kfw barrierefrei",
+      "cluster": "Barrierefrei wohnen & umbauen",
+      "search_volume": 260,
+      "search_intent": "Information",
+      "cpc_eur": 0.26,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "senkrechtlift",
+      "cluster": "Treppenlift-Wissen & Förderung",
+      "search_volume": 260,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 7.12,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "sitzlift",
+      "cluster": "Treppenlift-Wissen & Förderung",
+      "search_volume": 260,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 14.32,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "rampe selber bauen",
+      "cluster": "Barrierefrei wohnen & umbauen",
+      "search_volume": 210,
+      "search_intent": "Information",
+      "cpc_eur": 0.25,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "türschwelle entfernen",
+      "cluster": "Barrierefrei wohnen & umbauen",
+      "search_volume": 210,
+      "search_intent": "Information",
+      "cpc_eur": 0,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "behindertengerecht umbauen",
+      "cluster": "Barrierefrei wohnen & umbauen",
+      "search_volume": 170,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 4.25,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "para sport",
+      "cluster": "Rollstuhl-Fitness & Bewegung",
+      "search_volume": 170,
+      "search_intent": "Information",
+      "cpc_eur": 0,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "rollstuhlgerechtes hotel",
+      "cluster": "Barrierefrei unterwegs & Reisen",
+      "search_volume": 110,
+      "search_intent": "Vergleich/kommerziell",
+      "cpc_eur": 0.62,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "rollstuhlsport",
+      "cluster": "Rollstuhl-Fitness & Bewegung",
+      "search_volume": 110,
+      "search_intent": "Information",
+      "cpc_eur": 0,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "oberkörpertraining",
+      "cluster": "Rollstuhl-Fitness & Bewegung",
+      "search_volume": 90,
+      "search_intent": "Information",
+      "cpc_eur": 0.96,
+      "competition": null,
+      "curated_rows": []
+    },
+    {
+      "keyword": "training im sitzen",
+      "cluster": "Rollstuhl-Fitness & Bewegung",
+      "search_volume": 50,
+      "search_intent": "Information",
+      "cpc_eur": 1.6,
+      "competition": null,
+      "curated_rows": []
+    }
+  ]
+}

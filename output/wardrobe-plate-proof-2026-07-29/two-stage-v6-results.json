@@ -1,0 +1,38 @@
+{
+  "wall_clock_seconds": 20.74,
+  "results": [
+    {
+      "slug": "coral-living-room",
+      "wardrobe": "a plain coral-red heavyweight cotton crew-neck T-shirt with natural sleeve folds and a slightly stretched collar",
+      "scene": "the exact supplied quiet modern living room with warm off-white walls, beige curtain, oak side table, and soft left-side window daylight",
+      "elapsed_seconds": 17.33,
+      "path": "/Users/patabrava/Documents/AI/github/Camilo/AIUGC/output/wardrobe-plate-proof-2026-07-29/coral-living-room-two-stage-v6.jpg",
+      "mime_type": "image/jpeg",
+      "model": "gemini-3.1-flash-image",
+      "bytes": 646462,
+      "url": "https://pub-7036b4dec03b49e5bacaab577befbbbf.r2.dev/Lippe%20Lift%20Studio/images/wardrobe-plate-proof/2026-07-29/coral-living-room-two-stage-v6.jpg"
+    },
+    {
+      "slug": "navy-bathroom",
+      "wardrobe": "a matte navy-blue linen button-front shirt with a modest collar, visible weave, small wrinkles, and sleeves rolled once",
+      "scene": "the exact supplied accessible bathroom with ordinary pale tile, practical fixtures, and believable cool window daylight",
+      "elapsed_seconds": 17.04,
+      "path": "/Users/patabrava/Documents/AI/github/Camilo/AIUGC/output/wardrobe-plate-proof-2026-07-29/navy-bathroom-two-stage-v6.jpg",
+      "mime_type": "image/jpeg",
+      "model": "gemini-3.1-flash-image",
+      "bytes": 632239,
+      "url": "https://pub-7036b4dec03b49e5bacaab577befbbbf.r2.dev/Lippe%20Lift%20Studio/images/wardrobe-plate-proof/2026-07-29/navy-bathroom-two-stage-v6.jpg"
+    },
+    {
+      "slug": "green-garden",
+      "wardrobe": "a forest-green fine-knit cardigan over a plain off-white cotton top, with visible knit fibers, seam tension, and natural folds",
+      "scene": "the exact supplied garden patio with muted greenery, ordinary outdoor furniture, and soft overcast daylight",
+      "elapsed_seconds": 19.47,
+      "path": "/Users/patabrava/Documents/AI/github/Camilo/AIUGC/output/wardrobe-plate-proof-2026-07-29/green-garden-two-stage-v6.jpg",
+      "mime_type": "image/jpeg",
+      "model": "gemini-3.1-flash-image",
+      "bytes": 747313,
+      "url": "https://pub-7036b4dec03b49e5bacaab577befbbbf.r2.dev/Lippe%20Lift%20Studio/images/wardrobe-plate-proof/2026-07-29/green-garden-two-stage-v6.jpg"
+    }
+  ]
+}

@@ -28,19 +28,23 @@ Image 2 is the labeled multi-frame contact sheet extracted from the generated ta
 
 Compare only the supplied references and judge whether they preserve the exact wardrobe and location/background
 shown in the approved scene plate, the same manual wheelchair, stable UGC framing, and no visual artifacts.
-Actor identity is evaluated separately against the immutable original actor references. The same manual wheelchair
-remains visible and consistent in every labeled frame. Set wheelchair_consistent=false if the wheelchair changes,
-disappears, is cropped out, or the actor appears
-standing or walking. Inspect every labeled frame carefully, especially the lower third. Set no_artifacts=false if any
+Actor identity is evaluated separately against the immutable original actor references. These takes use a tight
+arm's-length selfie crop, so the manual wheelchair is often partly or entirely outside the frame; that is expected
+and is not a defect. Set wheelchair_consistent=false only if the wheelchair is visible and its design changes
+between frames, or if the actor appears standing or walking. Do not set it false merely because the wheelchair is
+cropped out or not visible. Inspect every labeled frame carefully, especially the lower third. Set no_artifacts=false if any
 raw frame contains baked-in captions, subtitles, logos, watermarks, letters, symbols, malformed glyphs, or gibberish
 text; identify the take and frame label in blocking_reasons. The contact-sheet labels above each frame are QA metadata
 and are not artifacts inside the video.
 
 For framing_stable, allow small fixed crop differences between takes plus natural speaking head movement, blinking,
-and expression changes. Treat each delivered-tail frame as the final eligible frame that can appear in the delivery
-and compare it closely with the preceding final-word frame. Fail framing for a material composition change,
-continuous camera zoom, or any pan, tilt, dolly, orbit, push-in, pull-back, or reframe within a take, especially
-between final-word and delivered-tail. Report every observed difference, including natural expression or pose changes.
+and expression changes. These takes are shot handheld at arm's length on purpose, so also allow continuous
+low-amplitude handheld micro-motion: small irregular drift, slight roll, and tiny arm corrections that shift the
+frame by a couple of percent without changing the composition. Treat each delivered-tail frame as the final eligible
+frame that can appear in the delivery and compare it closely with the preceding final-word frame. Fail framing only
+for a material composition change or a deliberate camera move: a sustained directional pan, tilt, dolly, orbit,
+push-in, pull-back, continuous zoom, or reframe that accumulates in one direction rather than drifting and
+returning. Report every observed difference, including natural expression or pose changes.
 This is scene-continuity comparison only.
 
 Return JSON only, without Markdown or commentary, using exactly this shape:

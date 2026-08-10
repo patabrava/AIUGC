@@ -984,7 +984,36 @@ def test_worker_delivers_single_paid_eight_second_take_when_qa_is_advisory():
     assert stages.advisory_caption_calls
 
 
-def test_worker_requires_one_localized_retry_when_advisory_terminal_window_cuts_speech():
+@pytest.mark.parametrize(
+    ("message", "details", "expected_action", "failure_type"),
+    [
+        (
+            "Advisory terminal protection would cut transcript-safe context.",
+            {
+                "transcript_safe_end_seconds": 7.87,
+                "protected_source_end_seconds": 7.5,
+            },
+            "terminal_speech_overlap_retry_required",
+            "terminal_tail_speech_overlap",
+        ),
+        (
+            "Advisory active-speech cut exceeds the cadence bound.",
+            {
+                "speech_cut_floor_seconds": 7.02,
+                "required_retime_ratio": 1.1396,
+                "maximum_retime_ratio": 1.1,
+            },
+            "terminal_active_speech_retry_required",
+            "terminal_active_speech_timing",
+        ),
+    ],
+)
+def test_worker_requires_one_localized_retry_for_unsafe_terminal_speech_timing(
+    message,
+    details,
+    expected_action,
+    failure_type,
+):
     repo = FakeRepo(stage="identity_qa", take_count=1)
     raw_hash = "d" * 64
     repo.takes[0].update(
@@ -996,13 +1025,7 @@ def test_worker_requires_one_localized_retry_when_advisory_terminal_window_cuts_
     class TerminalSpeechOverlapStages(FakeStages):
         def caption_advisory_single_take(self, *, run, takes):
             self.advisory_caption_calls.append((deepcopy(run), deepcopy(takes)))
-            raise StateTransitionError(
-                "Advisory terminal protection would cut transcript-safe context.",
-                {
-                    "transcript_safe_end_seconds": 7.87,
-                    "protected_source_end_seconds": 7.5,
-                },
-            )
+            raise StateTransitionError(message, details)
 
     stages = TerminalSpeechOverlapStages(
         {
@@ -1020,19 +1043,16 @@ def test_worker_requires_one_localized_retry_when_advisory_terminal_window_cuts_
 
     result = worker.tick("run-1")
 
-    assert result.action == "terminal_speech_overlap_retry_required"
+    assert result.action == expected_action
     assert result.stage == "retry_approval_required"
     retry = next(event for event in repo.events if event[0] == "retry_required")
     assert retry[1] == (0,)
     assert retry[2]["qa_failure"] == {
         "stage": "acoustic_qa",
-        "message": "Advisory terminal protection would cut transcript-safe context.",
-        "details": {
-            "transcript_safe_end_seconds": 7.87,
-            "protected_source_end_seconds": 7.5,
-        },
+        "message": message,
+        "details": details,
         "failed_take_indexes": [0],
-        "failure_type": "terminal_tail_speech_overlap",
+        "failure_type": failure_type,
         "retry_mode": "localized_paid_take",
     }
     assert "Retry only the take" in retry[2]["guidance"]
@@ -1136,13 +1156,16 @@ def test_advisory_caption_delivery_reuses_single_take_terminal_protection(
                             "full_text": "Hallo Welt",
                             "words": [
                                 {"word": "Hallo", "start": 0.5, "end": 1.0},
-                                {"word": "Welt", "start": 1.1, "end": 7.1},
+                                {"word": "Welt", "start": 1.1, "end": 7.3},
                             ],
                         },
-                        "transcript_qa": {"passed": True},
+                        "transcript_qa": {
+                            "passed": True,
+                            "final_word_end_seconds": 7.3,
+                        },
                         "trim_window": {
                             "start_seconds": 0.4,
-                            "end_seconds": 7.2,
+                            "end_seconds": 7.55,
                             "source": "deepgram_word_window",
                         },
                     }
@@ -1156,12 +1179,20 @@ def test_advisory_caption_delivery_reuses_single_take_terminal_protection(
 
     def stitch_fn(**kwargs):
         stitch_calls.append(kwargs)
+        retained_duration = (
+            float(kwargs["target_duration_seconds"])
+            - float(kwargs["terminal_tail_exclusion_seconds"])
+        )
         return (
             b"terminal-protected-video",
             {
                 "stitch_end_pan_protection_applied": True,
-                "stitch_end_pan_tail_exclusion_s": 0.5,
-                "stitch_end_pan_retime_ratio": 8.0 / 7.5,
+                "stitch_end_pan_tail_exclusion_s": kwargs[
+                    "terminal_tail_exclusion_seconds"
+                ],
+                "stitch_end_pan_retime_ratio": (
+                    float(kwargs["target_duration_seconds"]) / retained_duration
+                ),
             },
         )
 
@@ -1239,11 +1270,14 @@ def test_advisory_caption_delivery_reuses_single_take_terminal_protection(
 
     assert stitch_calls[0]["trim_windows"] is None
     assert stitch_calls[0]["target_duration_seconds"] == 8.0
-    assert stitch_calls[0]["terminal_tail_exclusion_seconds"] == 0.5
+    expected_tail_exclusion = 8.0 - 7.3 - (1024.0 / 48000.0)
+    assert stitch_calls[0]["terminal_tail_exclusion_seconds"] == pytest.approx(
+        expected_tail_exclusion
+    )
     assert terminal_paths == ["raw.mp4", "stitched-advisory.mp4"]
     assert caption_calls[0]["video_path"].endswith("stitched-advisory.mp4")
     assert caption_calls[0]["transcript"].words[-1].end == pytest.approx(
-        7.1 * (8.0 / 7.5)
+        7.3 * (8.0 / (8.0 - expected_tail_exclusion))
     )
     saved = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert saved["delivery_terminal_qa"]["passed"] is True
@@ -1567,6 +1601,33 @@ def test_identity_advisory_becomes_an_explicit_downstream_visual_gate():
     assert report["manual_review_accepted"] is True
     assert report["accepted_by"] == "paid_generated_take_qa_advisory"
     assert report["observed_differences"] == ["face geometry changed"]
+    assert report["blocking_reasons"] == []
+    assert payload["status"] == "visual_qa_passed"
+
+
+def test_identity_service_advisory_creates_a_downstream_visual_gate():
+    from workers.semantic_video_worker import ProductionStageRunner
+
+    payload = {"status": "voice_qa_passed"}
+
+    ProductionStageRunner._apply_downstream_qa_advisory(  # noqa: SLF001
+        payload,
+        {
+            "required": True,
+            "stage": "identity_qa",
+            "failed_take_indexes": [0, 1],
+            "message": "Gemini generateContent failed",
+        },
+    )
+
+    report = payload["visual_qa"]
+    assert report["passed"] is True
+    assert report["provider_passed"] is False
+    assert report["provider_blocking_reasons"] == [
+        "Gemini generateContent failed"
+    ]
+    assert report["manual_review_accepted"] is True
+    assert report["accepted_by"] == "paid_generated_take_qa_advisory"
     assert report["blocking_reasons"] == []
     assert payload["status"] == "visual_qa_passed"
 
