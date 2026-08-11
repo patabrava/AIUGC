@@ -855,6 +855,25 @@ def test_blog_dossier_lookup_follows_persisted_research_title(monkeypatch):
     assert result == dossier
 
 
+def test_blog_dossier_lookup_retries_transient_statement_timeout(monkeypatch):
+    dossier = {"id": "dossier-retry", "normalized_payload": {"topic": "Retry topic"}}
+    attempts = {"count": 0}
+
+    def _fake_lookup_once(_post):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise Exception(
+                "{'code': '57014', 'message': 'canceling statement due to statement timeout'}"
+            )
+        return dossier
+
+    monkeypatch.setattr(blog_runtime, "_lookup_dossier_once", _fake_lookup_once)
+    monkeypatch.setattr(blog_runtime.time, "sleep", lambda _delay: None)
+
+    assert blog_runtime._lookup_dossier({"topic_title": "Retry topic"}) == dossier
+    assert attempts["count"] == 2
+
+
 def test_update_blog_status_fails_closed_for_scheduled_legacy_status_constraint(monkeypatch):
     class _FakeResponse:
         def __init__(self, data):

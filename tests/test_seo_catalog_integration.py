@@ -333,6 +333,32 @@ def test_blog_fits_overlong_seo_metadata_deterministically():
     assert not fitted_description.endswith((" ", ",", ".", ";", ":", "-"))
 
 
+def test_blog_final_repair_salvages_mechanical_structure_and_seo_placement():
+    payload = _blog_payload()
+    payload.update(
+        {
+            "name": "Preise richtig einordnen",
+            "slug": "preise-richtig-einordnen",
+            "intro_heading": "Einordnung",
+            "introduction_paragraphs": ["Die Einbausituation entscheidet über den Aufwand."],
+            "preview_text": "Treppenlift Planung verständlich erklärt. " * 8,
+            "meta_title": "Preise richtig einordnen",
+            "meta_description": "Planung und Einbau verständlich erklärt.",
+        }
+    )
+    for section in payload["sections"]:
+        section["heading"] = ""
+
+    repaired = blog_runtime._repair_blog_contract(payload, _seo_brief())
+
+    assert blog_runtime._collect_blog_contract_issues(repaired, _seo_brief()) == []
+    assert len(repaired["preview_text"]) <= 220
+    assert len(repaired["meta_title"]) <= 65
+    assert len(repaired["meta_description"]) <= 160
+    assert all(section["heading"] for section in repaired["sections"])
+    assert "[[LINK:funding|" in str(repaired)
+
+
 def test_blog_renderer_links_only_allowlisted_ids_and_escapes_html():
     links = _seo_brief()["internal_links"]
     html = render_body_html(

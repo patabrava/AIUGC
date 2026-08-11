@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -221,6 +222,99 @@ def _contains_primary_keyword(value: Any, primary_keyword: str) -> bool:
         )
         for primary in primary_tokens
     )
+
+
+def _slugify_seo_text(value: Any) -> str:
+    folded = (
+        _compact_line(value)
+        .lower()
+        .replace("ä", "ae")
+        .replace("ö", "oe")
+        .replace("ü", "ue")
+        .replace("ß", "ss")
+    )
+    return re.sub(r"[^a-z0-9]+", "-", folded).strip("-")
+
+
+def _heading_from_content(value: Any, fallback: str) -> str:
+    text = _compact_line(value)
+    if not text:
+        return fallback
+    first_sentence = re.split(r"(?<=[.!?])\s+", text, maxsplit=1)[0]
+    return _fit_seo_metadata(first_sentence, 160)
+
+
+def _with_primary_keyword(value: Any, primary: str, limit: int) -> str:
+    text = _compact_line(value)
+    if not primary or _contains_primary_keyword(text, primary):
+        return _fit_seo_metadata(text, limit)
+    combined = f"{primary.capitalize()}: {text}" if text else primary.capitalize()
+    return _fit_seo_metadata(combined, limit)
+
+
+def _repair_blog_contract(parsed: Dict[str, Any], seo_brief: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Salvage a semantically complete final model response deterministically."""
+    parsed["preview_text"] = _fit_seo_metadata(parsed.get("preview_text"), 220)
+    parsed["meta_title"] = _fit_seo_metadata(parsed.get("meta_title"), 65)
+    parsed["meta_description"] = _fit_seo_metadata(parsed.get("meta_description"), 160)
+
+    intro_paragraphs = parsed.get("introduction_paragraphs") or []
+    conclusion_paragraphs = parsed.get("conclusion_paragraphs") or []
+    sections = parsed.get("sections") or []
+    if not _compact_line(parsed.get("intro_heading")) and intro_paragraphs:
+        parsed["intro_heading"] = _heading_from_content(intro_paragraphs[0], "Einordnung zum Thema")
+    if not _compact_line(parsed.get("conclusion_heading")) and conclusion_paragraphs:
+        parsed["conclusion_heading"] = _heading_from_content(conclusion_paragraphs[0], "Das Wichtigste zum Schluss")
+    for index, section in enumerate(sections, start=1):
+        if _compact_line((section or {}).get("heading")):
+            continue
+        paragraphs = (section or {}).get("paragraphs") or []
+        bullets = (section or {}).get("bullets") or []
+        source = (paragraphs or bullets or [""])[0]
+        section["heading"] = _heading_from_content(source, f"Wichtiger Aspekt {index}")
+
+    summary_bullets = [
+        _compact_line(item) for item in (parsed.get("summary_bullets") or []) if _compact_line(item)
+    ][:6]
+    for section in sections:
+        if len(summary_bullets) >= 3:
+            break
+        paragraphs = (section or {}).get("paragraphs") or []
+        if paragraphs:
+            candidate = _fit_seo_metadata(paragraphs[0], 180)
+            if candidate and candidate not in summary_bullets:
+                summary_bullets.append(candidate)
+    parsed["summary_bullets"] = summary_bullets
+
+    primary = _compact_line((seo_brief or {}).get("primary_keyword"))
+    if primary:
+        parsed["name"] = _with_primary_keyword(parsed.get("name"), primary, 300)
+        parsed["meta_title"] = _with_primary_keyword(parsed.get("meta_title"), primary, 65)
+        parsed["meta_description"] = _with_primary_keyword(parsed.get("meta_description"), primary, 160)
+        if intro_paragraphs:
+            intro_paragraphs[0] = _with_primary_keyword(intro_paragraphs[0], primary, 2_000)
+        if not _contains_primary_keyword(parsed.get("slug"), primary):
+            primary_slug = _slugify_seo_text(primary)
+            existing_slug = _slugify_seo_text(parsed.get("slug"))
+            parsed["slug"] = f"{primary_slug}-{existing_slug}".strip("-")[:200].rstrip("-")
+        headings = [parsed.get("intro_heading"), parsed.get("conclusion_heading")] + [
+            (section or {}).get("heading") for section in sections
+        ]
+        if not any(_contains_primary_keyword(heading, primary) for heading in headings):
+            parsed["intro_heading"] = _with_primary_keyword(parsed.get("intro_heading"), primary, 200)
+
+    allowed_links = (seo_brief or {}).get("internal_links") or []
+    serialized = json.dumps(parsed, ensure_ascii=False)
+    if allowed_links and not re.search(r"\[\[LINK:[a-z0-9_-]+\|", serialized, re.IGNORECASE):
+        link = allowed_links[0]
+        sentence = f"Weiterführende Informationen bietet [[LINK:{link['id']}|{link['title']}]]."
+        target_paragraphs = ((sections[0] or {}).get("paragraphs") or []) if sections else []
+        if target_paragraphs:
+            target_paragraphs[0] = f"{_compact_line(target_paragraphs[0])} {sentence}"
+        elif intro_paragraphs:
+            intro_paragraphs[0] = f"{_compact_line(intro_paragraphs[0])} {sentence}"
+
+    return parsed
 
 
 def _collect_blog_contract_issues(
@@ -474,7 +568,7 @@ def _build_error_content(post: Dict[str, Any], error: str) -> Dict[str, Any]:
     }
 
 
-def _lookup_dossier(post: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _lookup_dossier_once(post: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Find the research dossier for a post via topic_registry."""
     seed_data = post.get("seed_data") or {}
     topic_titles = []
@@ -518,6 +612,28 @@ def _lookup_dossier(post: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if response.data:
             return response.data[0]
 
+    return None
+
+
+def _lookup_dossier(post: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    last_error: Optional[Exception] = None
+    for attempt, delay in enumerate((0.0, 0.25, 0.75), start=1):
+        if delay:
+            time.sleep(delay)
+        try:
+            return _lookup_dossier_once(post)
+        except Exception as exc:
+            error_text = str(exc).casefold()
+            if "57014" not in error_text and "statement timeout" not in error_text:
+                raise
+            last_error = exc
+            logger.warning(
+                "blog_dossier_transient_read_retry",
+                attempt=attempt,
+                error=str(exc),
+            )
+    if last_error is not None:
+        raise last_error
     return None
 
 
@@ -568,6 +684,9 @@ def generate_blog_draft(post_id: str) -> Dict[str, Any]:
             parsed["meta_description"] = _fit_seo_metadata(parsed.get("meta_description"), 160)
 
             contract_issues = _collect_blog_contract_issues(parsed, seo_brief)
+            if contract_issues and attempt == 3:
+                parsed = _repair_blog_contract(parsed, seo_brief)
+                contract_issues = _collect_blog_contract_issues(parsed, seo_brief)
             if contract_issues:
                 logger.warning(
                     "blog_generation_contract_retry",
