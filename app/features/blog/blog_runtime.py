@@ -189,6 +189,15 @@ def _limit_text(value: Any, limit: int) -> str:
     return f"{clipped}…"
 
 
+def _fit_seo_metadata(value: Any, limit: int) -> str:
+    """Fit generated SEO metadata without spending another model retry."""
+    text = _compact_line(value)
+    if len(text) <= limit:
+        return text
+    clipped = text[: limit + 1].rsplit(" ", 1)[0].rstrip(" ,.;:-")
+    return clipped or text[:limit].rstrip(" ,.;:-")
+
+
 def _seo_tokens(value: Any) -> set[str]:
     folded = (
         _compact_line(value)
@@ -555,6 +564,8 @@ def generate_blog_draft(post_id: str) -> Dict[str, Any]:
             )
             parsed = _parse_labeled_blog_text(raw_text, dossier_payload)
             parsed["image_prompt"] = parsed.get("image_prompt") or _build_blog_image_prompt(parsed, dossier_payload)
+            parsed["meta_title"] = _fit_seo_metadata(parsed.get("meta_title"), 65)
+            parsed["meta_description"] = _fit_seo_metadata(parsed.get("meta_description"), 160)
 
             contract_issues = _collect_blog_contract_issues(parsed, seo_brief)
             if contract_issues:

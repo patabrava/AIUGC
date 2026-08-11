@@ -318,6 +318,21 @@ def test_blog_keyword_validation_accepts_german_slug_transliteration():
     assert blog_runtime._contains_primary_keyword("tuersensorik-fuer-automatik-tueren", "Türsensorik")
 
 
+def test_blog_fits_overlong_seo_metadata_deterministically():
+    meta_title = "Treppenlift Kosten: " + "gründlich erklärt " * 6
+    meta_description = "Treppenlift Kosten: " + "Planung, Förderung und Einbau verständlich erklärt. " * 5
+
+    fitted_title = blog_runtime._fit_seo_metadata(meta_title, 65)
+    fitted_description = blog_runtime._fit_seo_metadata(meta_description, 160)
+
+    assert len(fitted_title) <= 65
+    assert len(fitted_description) <= 160
+    assert fitted_title.startswith("Treppenlift Kosten")
+    assert fitted_description.startswith("Treppenlift Kosten")
+    assert not fitted_title.endswith((" ", ",", ".", ";", ":", "-"))
+    assert not fitted_description.endswith((" ", ",", ".", ";", ":", "-"))
+
+
 def test_blog_renderer_links_only_allowlisted_ids_and_escapes_html():
     links = _seo_brief()["internal_links"]
     html = render_body_html(
