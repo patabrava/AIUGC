@@ -5,13 +5,13 @@
 {% set duration = batch_view.semantic_video.duration_contract %}
 {% set script_sources = post.caption_source_links or [] %}
 
-<article id="post-{{ post.id }}" class="rounded-2xl border border-[#006AAB]/15 bg-white p-4 sm:p-5">
+<article id="post-{{ post.id }}" data-script-review-status="{{ review_status }}" class="rounded-2xl border border-[#006AAB]/15 bg-white p-4 sm:p-5">
     <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
             <p class="text-xs font-bold uppercase tracking-[0.14em] text-[#006AAB]">{{ post.post_type | default('Unassigned', true) }} post · Script</p>
             <h4 class="mt-1 text-lg font-bold text-[#1C2740]">{{ seed.get('canonical_topic') or post.topic_title }}</h4>
         </div>
-        <span class="rounded-full px-3 py-1 text-xs font-bold {% if review_status == 'approved' %}bg-emerald-100 text-emerald-800{% elif removed %}bg-slate-100 text-slate-700{% else %}bg-amber-100 text-amber-800{% endif %}">
+        <span data-script-review-badge class="rounded-full px-3 py-1 text-xs font-bold {% if review_status == 'approved' %}bg-emerald-100 text-emerald-800{% elif removed %}bg-slate-100 text-slate-700{% else %}bg-amber-100 text-amber-800{% endif %}">
             {% if review_status == 'approved' %}Approved{% elif removed %}Removed{% else %}Needs review{% endif %}
         </span>
     </div>
@@ -53,7 +53,7 @@
         class="mt-4 space-y-3"
         hx-put="/posts/{{ post.id }}/script"
         hx-swap="none"
-        hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+        hx-on::after-request="window.handleScriptSaveResponse(event, '{{ post.id }}')"
     >
         <label for="script-text-{{ post.id }}" class="block text-sm font-bold text-[#1C2740]">Spoken script</label>
         <textarea
@@ -72,14 +72,16 @@
             <button type="submit" class="brand-focus rounded-xl border border-[#006AAB] px-4 py-2 text-sm font-bold text-[#006AAB]">
                 Save changes
             </button>
+            <span data-script-save-status role="status" aria-live="polite" class="self-center text-xs font-semibold text-emerald-700"></span>
             {% if review_status != 'approved' %}
             <button
+                data-script-approve
                 type="button"
                 hx-put="/posts/{{ post.id }}/script-review"
                 hx-vals='{"action":"approved"}'
                 hx-include="#script-form-{{ post.id }}"
                 hx-swap="none"
-                hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
+                hx-on::after-request="window.handleScriptReviewResponse(event, '{{ post.id }}')"
                 class="brand-button-primary brand-focus rounded-xl px-4 py-2 text-sm font-bold text-white"
             >
                 Approve script

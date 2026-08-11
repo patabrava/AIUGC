@@ -37,7 +37,6 @@ from app.features.characters.scene_reference import get_scene_bible
 from app.features.shot_production.planner import plan_editorial_beats
 from app.features.topics.semantic_scripts import validate_semantic_script
 from app.features.posts.schemas import UpdatePromptRequest
-from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
 from app.core.states import BatchState
 logger = get_logger(__name__)
 
@@ -121,11 +120,11 @@ def _advance_batch_when_scripts_are_reviewed(
         approved_count=approved_count,
         new_state=BatchState.S4_SCRIPTED.value,
     )
-    return reconcile_batch_video_pipeline_state(
-        batch_id=batch_id,
-        correlation_id=f"script_review_{batch_id}",
-        supabase_client=supabase_client,
-    )
+    # This transition has just persisted S4 and every active post was read above.
+    # Re-reading the batch and all posts cannot advance it further because script
+    # approval deliberately clears video_prompt_json. Return the committed state
+    # directly and leave later workflow actions to reconcile subsequent stages.
+    return BatchState.S4_SCRIPTED.value
 
 
 def _should_use_legacy_32_visuals(post: dict) -> bool:
@@ -294,12 +293,13 @@ def _apply_script_text_update(
     submitted_semantic_wardrobe_description: Optional[str] = None,
     supabase_client,
     require_valid_duration: bool = False,
+    review_status: str = "pending",
 ) -> dict:
     batch_settings = _load_batch_script_settings(post["batch_id"], supabase_client)
     batch_creation_mode = batch_settings["creation_mode"]
     is_semantic_batch = is_semantic_ugc_mode(batch_creation_mode)
     seed_data["script"] = script_text
-    seed_data["script_review_status"] = "pending"
+    seed_data["script_review_status"] = review_status
     seed_data.pop("video_excluded", None)
 
     is_manual_batch = is_manual_creation_mode(batch_creation_mode) or seed_data.get("manual_draft") is True
@@ -405,22 +405,33 @@ def _apply_script_text_update(
         seed_data["target_length_tier"] = int(target_length_tier)
         seed_data["script_duration_contract"] = contract
 
-    supabase_client.table("posts").update(
-        {"seed_data": seed_data, "video_prompt_json": None}
-    ).eq("id", post["id"]).execute()
-    if resolved_post_type:
-        try:
-            supabase_client.table("posts").update({"post_type": resolved_post_type}).eq("id", post["id"]).execute()
-        except APIError as exc:
-            error_text = str(exc)
-            if exc.code == "PGRST204" or "posts_post_type_check" in error_text or "check" in error_text.lower():
-                logger.warning(
-                    "manual_post_type_column_update_fallback",
-                    post_id=post.get("id"),
-                    error=error_text,
-                )
-            else:
-                raise
+    update_payload = {"seed_data": seed_data, "video_prompt_json": None}
+    post_type_changed = is_manual_batch and resolved_post_type != stored_post_type
+    if post_type_changed:
+        update_payload["post_type"] = resolved_post_type
+
+    try:
+        supabase_client.table("posts").update(update_payload).eq("id", post["id"]).execute()
+    except APIError as exc:
+        # Some older deployments still constrain posts.post_type. Preserve the
+        # free-form manual value in seed_data while keeping the common path to a
+        # single database write.
+        error_text = str(exc)
+        if post_type_changed and (
+            exc.code == "PGRST204"
+            or "posts_post_type_check" in error_text
+            or "check" in error_text.lower()
+        ):
+            logger.warning(
+                "manual_post_type_column_update_fallback",
+                post_id=post.get("id"),
+                error=error_text,
+            )
+            supabase_client.table("posts").update(
+                {"seed_data": seed_data, "video_prompt_json": None}
+            ).eq("id", post["id"]).execute()
+        else:
+            raise
     return seed_data
 
 
@@ -566,6 +577,7 @@ async def update_post_script_review(post_id: str, request: Request):
 
         supabase = get_supabase().client
         post, seed_data = _load_post_seed_data(post_id, supabase)
+        script_update_persisted = False
 
         if action == "approved":
             if submitted_script_text:
@@ -580,7 +592,9 @@ async def update_post_script_review(post_id: str, request: Request):
                     ),
                     supabase_client=supabase,
                     require_valid_duration=True,
+                    review_status="approved",
                 )
+                script_update_persisted = True
             if not (seed_data.get("script") or "").strip():
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -605,7 +619,8 @@ async def update_post_script_review(post_id: str, request: Request):
             # Keep the existing non-null video_status; removal is expressed via seed_data flags.
             update_payload["video_status"] = post.get("video_status") or "pending"
 
-        supabase.table("posts").update(update_payload).eq("id", post_id).execute()
+        if not script_update_persisted:
+            supabase.table("posts").update(update_payload).eq("id", post_id).execute()
 
         batch_state = None
         if action in {"approved", "removed"} and post.get("batch_id"):

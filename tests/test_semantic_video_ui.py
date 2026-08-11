@@ -1268,10 +1268,37 @@ def test_semantic_script_review_exposes_blog_generation_and_script_sources():
 
     assert "Script sources" in html
     assert "Official accessibility guidance" in html
+    assert "window.handleScriptSaveResponse" in html
+    assert "window.handleScriptReviewResponse" in html
     assert 'href="https://source.example/accessibility"' in html
     assert "Blog post" in html
     assert "/blog/posts/post-value/blog-toggle" in html
     assert "Enable blog post generation" in html
+
+
+def test_blog_draft_controls_wait_for_script_approval():
+    html = Environment(loader=FileSystemLoader("templates")).get_template(
+        "batches/detail/_blog_panel.html"
+    ).render(
+        batch={"id": "batch-1"},
+        batch_view={
+            "visible_posts": [
+                {
+                    "id": "post-pending",
+                    "post_type": "value",
+                    "topic_title": "Pending script",
+                    "seed_data": {"script_review_status": "pending"},
+                    "blog_enabled": True,
+                    "blog_status": "pending",
+                    "blog_content": {},
+                }
+            ]
+        },
+    )
+
+    assert "Approve script first" in html
+    assert "isScriptApproved(post)" in html
+    assert "markScriptReview($event.detail)" in html
 
 
 @pytest.mark.parametrize("creation_mode", ["semantic_ugc", "manual_semantic_ugc"])

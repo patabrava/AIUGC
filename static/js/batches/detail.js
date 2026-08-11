@@ -184,6 +184,63 @@
         return `Request failed (${response.status})`;
     };
 
+    function scriptCard(postId) {
+        return document.getElementById(`post-${postId}`);
+    }
+
+    function showScriptSaveStatus(card, message) {
+        const status = card?.querySelector('[data-script-save-status]');
+        if (!status) return;
+        status.textContent = message;
+        window.setTimeout(() => {
+            if (status.textContent === message) status.textContent = '';
+        }, 3000);
+    }
+
+    window.handleScriptSaveResponse = function (event, postId) {
+        if (!event.detail?.successful) return;
+        const card = scriptCard(postId);
+        // Editing an already-approved script resets review to pending and needs
+        // the server-rendered approval control restored. Pending drafts can stay
+        // in place and avoid the expensive full batch-detail reconstruction.
+        if (card?.dataset?.scriptReviewStatus === 'approved') {
+            window.location.reload();
+            return;
+        }
+        showScriptSaveStatus(card, 'Saved');
+    };
+
+    window.handleScriptReviewResponse = function (event, postId) {
+        if (!event.detail?.successful) return;
+        let data = {};
+        try {
+            data = JSON.parse(event.detail.xhr?.responseText || '{}')?.data || {};
+        } catch (_error) {
+            window.location.reload();
+            return;
+        }
+        // The final review changes the whole workflow from Scripts to Scene.
+        if (data.batch_state === 'S4_SCRIPTED') {
+            window.location.reload();
+            return;
+        }
+
+        const card = scriptCard(postId);
+        if (!card) return;
+        card.dataset.scriptReviewStatus = 'approved';
+        const badge = card.querySelector('[data-script-review-badge]');
+        if (badge) {
+            badge.textContent = 'Approved';
+            badge.classList.remove('bg-amber-100', 'text-amber-800');
+            badge.classList.add('bg-emerald-100', 'text-emerald-800');
+        }
+        card.querySelector('[data-script-approve]')?.remove();
+        showScriptSaveStatus(card, 'Approved');
+        window.dispatchEvent(new CustomEvent('script-review-updated', {
+            detail: { postId, status: 'approved' },
+        }));
+    };
+
     document.body.addEventListener('htmx:responseError', async (event) => {
         const root = document.querySelector('#batch-detail-root');
         const target = event.detail?.target;

@@ -26,9 +26,10 @@ class _FakeResponse:
 
 
 class _FakeTable:
-    def __init__(self, storage, table_name):
+    def __init__(self, storage, table_name, operation_log):
         self.storage = storage
         self.table_name = table_name
+        self.operation_log = operation_log
         self.filters = []
         self.payload = None
         self.operation = "select"
@@ -47,6 +48,7 @@ class _FakeTable:
         return self
 
     def execute(self):
+        self.operation_log.append((self.table_name, self.operation, deepcopy(self.payload)))
         rows = self.storage[self.table_name]
         matches = [row for row in rows if all(row.get(key) == value for key, value in self.filters)]
         if self.operation == "update":
@@ -61,9 +63,10 @@ class _FakeTable:
 class _FakeClient:
     def __init__(self, storage):
         self.storage = storage
+        self.operation_log = []
 
     def table(self, table_name):
-        return _FakeTable(self.storage, table_name)
+        return _FakeTable(self.storage, table_name, self.operation_log)
 
 
 class _FakeSupabase:
@@ -132,7 +135,8 @@ def test_approve_manual_character_script_saves_text_and_marks_approved(monkeypat
         ],
     }
 
-    monkeypatch.setattr(posts_handlers, "get_supabase", lambda: _FakeSupabase(storage))
+    fake_supabase = _FakeSupabase(storage)
+    monkeypatch.setattr(posts_handlers, "get_supabase", lambda: fake_supabase)
 
     client = TestClient(app, base_url="http://localhost")
     response = client.put(
@@ -151,6 +155,13 @@ def test_approve_manual_character_script_saves_text_and_marks_approved(monkeypat
     assert seed_data["script_review_status"] == "approved"
     assert seed_data["manual_post_type"] == "value"
     assert storage["posts"][0]["video_prompt_json"] is None
+    post_updates = [
+        operation
+        for operation in fake_supabase.client.operation_log
+        if operation[0:2] == ("posts", "update")
+    ]
+    assert len(post_updates) == 1
+    assert post_updates[0][2]["seed_data"]["script_review_status"] == "approved"
 
 
 def test_approve_manual_character_script_auto_derives_duration_tier(monkeypatch):
@@ -288,7 +299,8 @@ def test_final_semantic_script_approval_advances_batch_without_second_confirmati
             }
         ],
     }
-    monkeypatch.setattr(posts_handlers, "get_supabase", lambda: _FakeSupabase(storage))
+    fake_supabase = _FakeSupabase(storage)
+    monkeypatch.setattr(posts_handlers, "get_supabase", lambda: fake_supabase)
 
     response = TestClient(app, base_url="http://localhost").put(
         "/posts/post-semantic-final/script-review",
@@ -298,6 +310,13 @@ def test_final_semantic_script_approval_advances_batch_without_second_confirmati
     assert response.status_code == 200, response.text
     assert response.json()["data"]["batch_state"] == "S4_SCRIPTED"
     assert storage["batches"][0]["state"] == "S4_SCRIPTED"
+    assert [(table, operation) for table, operation, _payload in fake_supabase.client.operation_log] == [
+        ("posts", "select"),
+        ("posts", "update"),
+        ("batches", "select"),
+        ("posts", "select"),
+        ("batches", "update"),
+    ]
 
 
 def test_final_automated_script_approval_advances_batch_without_second_confirmation(
