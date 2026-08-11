@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import patch
 
 from app.features.blog import blog_runtime
 from app.features.blog.schemas import build_blog_content_from_llm, render_body_html
@@ -124,6 +123,69 @@ def test_catalog_brief_uses_neutral_guidance_and_verified_links():
     assert all(link["url"].startswith("https://www.lippelift.de/") for link in brief["internal_links"])
     assert "Sarah" not in str(brief)
     assert "eigener Erfahrung" not in str(brief)
+
+
+def test_derived_brief_uses_compact_subject_clause_instead_of_full_editorial_title():
+    topic = (
+        "Technologische Grundlagen Türsensorik - Der Automatik-Tür-Frust "
+        "Ursachen, Sensortechnologien und Lösungsstrategien"
+    )
+
+    brief = seo_catalog.build_seo_brief(topic)
+
+    assert brief["source_kind"] == "derived"
+    assert brief["primary_keyword"] == "technologische grundlagen türsensorik"
+    assert len(brief["primary_keyword"]) <= 48
+
+
+def test_blog_repairs_legacy_derived_brief_with_full_title_as_keyword(monkeypatch):
+    topic = (
+        "Technologische Grundlagen Türsensorik - Der Automatik-Tür-Frust "
+        "Ursachen, Sensortechnologien und Lösungsstrategien"
+    )
+    monkeypatch.setattr(blog_runtime, "seo_catalog_enabled", lambda: True)
+
+    brief = blog_runtime._resolve_blog_seo_brief(
+        {
+            "topic": topic,
+            "seo_brief": {
+                "primary_keyword": (
+                    "technologische grundlagen türsensorik - der automatik-tür-frust – "
+                    "ursachen, sensortechnologien und lösungsstrategien"
+                ),
+                "source_kind": "derived",
+                "internal_links": [],
+            },
+        }
+    )
+
+    assert brief["primary_keyword"] == "technologische grundlagen türsensorik"
+
+
+def test_reported_tuersensorik_topic_has_a_satisfiable_blog_contract():
+    payload = _blog_payload()
+    payload.update(
+        {
+            "name": "Technologische Grundlagen Türsensorik: Ursachen und Lösungen",
+            "slug": "technologische-grundlagen-tuersensorik",
+            "intro_heading": "Technologische Grundlagen der Türsensorik",
+            "introduction_paragraphs": [
+                "Technologische Grundlagen der Türsensorik erklären, warum automatische Türen manchmal stocken."
+            ],
+            "meta_title": "Technologische Grundlagen Türsensorik | Lippe Lift",
+            "meta_description": (
+                "Technologische Grundlagen der Türsensorik: Sensorarten, häufige Ursachen und praktische Lösungen."
+            ),
+        }
+    )
+    brief = {
+        "primary_keyword": "technologische grundlagen türsensorik",
+        "source_kind": "derived",
+        "internal_links": [],
+    }
+
+    assert len(payload["meta_title"]) <= 65
+    assert blog_runtime._collect_blog_contract_issues(payload, brief) == []
 
 
 def test_short_keyword_tokens_do_not_overmatch_unrelated_topics():
@@ -250,6 +312,10 @@ def test_blog_seo_prompt_contains_agency_contract_and_link_ids(monkeypatch):
 def test_blog_contract_validates_keyword_placement_and_link_token():
     issues = blog_runtime._collect_blog_contract_issues(_blog_payload(with_links=True), _seo_brief())
     assert issues == []
+
+
+def test_blog_keyword_validation_accepts_german_slug_transliteration():
+    assert blog_runtime._contains_primary_keyword("tuersensorik-fuer-automatik-tueren", "Türsensorik")
 
 
 def test_blog_renderer_links_only_allowlisted_ids_and_escapes_html():

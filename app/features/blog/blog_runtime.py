@@ -36,7 +36,12 @@ from app.features.blog.schemas import (
 )
 from app.features.blog.webflow_client import WebflowClient
 from app.features.topics.queries import get_topic_research_dossiers
-from app.features.topics.seo_catalog import format_seo_prompt_block, get_enabled_seo_brief, seo_catalog_enabled
+from app.features.topics.seo_catalog import (
+    derive_primary_keyword,
+    format_seo_prompt_block,
+    get_enabled_seo_brief,
+    seo_catalog_enabled,
+)
 
 logger = get_logger(__name__)
 
@@ -139,10 +144,19 @@ def _build_blog_prompt(dossier_payload: Dict[str, Any]) -> str:
 def _resolve_blog_seo_brief(dossier_payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if not seo_catalog_enabled():
         return None
+    topic = str(dossier_payload.get("topic") or dossier_payload.get("seed_topic") or "")
     persisted = dossier_payload.get("seo_brief")
     if isinstance(persisted, dict) and persisted.get("primary_keyword"):
-        return dict(persisted)
-    return get_enabled_seo_brief(str(dossier_payload.get("topic") or dossier_payload.get("seed_topic") or ""))
+        brief = dict(persisted)
+        persisted_primary = _compact_line(brief.get("primary_keyword"))
+        if brief.get("source_kind") == "derived" and (
+            len(persisted_primary) > 48
+            or len(persisted_primary.split()) > 5
+            or persisted_primary.casefold() == _compact_line(topic).casefold()
+        ):
+            brief["primary_keyword"] = derive_primary_keyword(topic)
+        return brief
+    return get_enabled_seo_brief(topic)
 
 
 def _build_blog_image_prompt(blog_content: Dict[str, Any], dossier_payload: Dict[str, Any]) -> str:
@@ -176,7 +190,15 @@ def _limit_text(value: Any, limit: int) -> str:
 
 
 def _seo_tokens(value: Any) -> set[str]:
-    return {token for token in re.findall(r"[\wäöüß]+", _compact_line(value).lower()) if len(token) > 1}
+    folded = (
+        _compact_line(value)
+        .lower()
+        .replace("ä", "ae")
+        .replace("ö", "oe")
+        .replace("ü", "ue")
+        .replace("ß", "ss")
+    )
+    return {token for token in re.findall(r"\w+", folded) if len(token) > 1}
 
 
 def _contains_primary_keyword(value: Any, primary_keyword: str) -> bool:

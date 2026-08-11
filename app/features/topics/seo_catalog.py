@@ -36,6 +36,28 @@ def _tokens(value: Any) -> set[str]:
     return {token.lower() for token in _TOKEN_RE.findall(str(value or "")) if len(token) > 1}
 
 
+def derive_primary_keyword(topic: str) -> str:
+    """Derive a compact keyphrase from an editorial topic title.
+
+    Generated topic titles often append an angle after a colon or spaced dash.
+    That complete title cannot also satisfy the shorter slug and meta-title
+    contracts, so the leading subject clause is the safe derived keyphrase.
+    """
+    normalized = _normalize(topic)
+    leading_clause = re.split(r"\s+[-–—]\s+|[:?!]", normalized, maxsplit=1)[0].strip(" ,.;-")
+    words = leading_clause.split()
+    if not words:
+        return normalized
+
+    selected: List[str] = []
+    for word in words:
+        candidate = " ".join([*selected, word])
+        if selected and (len(selected) >= 5 or len(candidate) > 48):
+            break
+        selected.append(word)
+    return " ".join(selected) or normalized
+
+
 def _has_natural_token(topic_tokens: set[str], keyword_token: str) -> bool:
     grammatical_suffixes = ("e", "en", "er", "es", "em", "heit", "keit")
     return any(
@@ -174,7 +196,7 @@ def build_seo_brief(topic: str) -> Dict[str, Any]:
             "metrics_as_of": load_keyword_catalog().get("source", {}).get("metrics_as_of") or "unknown",
         }
     else:
-        primary_keyword = _normalize(topic)
+        primary_keyword = derive_primary_keyword(topic)
         cluster = ""
         intent = "Information"
         secondary = []
