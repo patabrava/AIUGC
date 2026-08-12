@@ -258,6 +258,43 @@
         showScriptSaveStatus(card, 'Saving approval…');
     };
 
+    window.handleScriptRemovalResponse = function (event, postId) {
+        const card = scriptCard(postId);
+        const removeButton = card?.querySelector('[data-script-remove]');
+        if (!event.detail?.successful) {
+            if (removeButton) {
+                removeButton.disabled = false;
+                removeButton.textContent = 'Remove script';
+            }
+            showScriptSaveStatus(card, 'Removal failed');
+            return;
+        }
+        let data = {};
+        try {
+            data = JSON.parse(event.detail.xhr?.responseText || '{}')?.data || {};
+        } catch (_error) {
+            showScriptSaveStatus(card, 'Removed — refresh to update the workflow');
+            return;
+        }
+        if (data.batch_state === 'S4_SCRIPTED') {
+            window.location.reload();
+            return;
+        }
+        card?.remove();
+        window.dispatchEvent(new CustomEvent('script-review-updated', {
+            detail: { postId, status: 'removed' },
+        }));
+    };
+
+    window.handleScriptRemovalStart = function (postId) {
+        const card = scriptCard(postId);
+        const removeButton = card?.querySelector('[data-script-remove]');
+        if (!removeButton) return;
+        removeButton.disabled = true;
+        removeButton.textContent = 'Removing…';
+        showScriptSaveStatus(card, 'Removing script…');
+    };
+
     document.body.addEventListener('htmx:responseError', async (event) => {
         const root = document.querySelector('#batch-detail-root');
         const target = event.detail?.target;

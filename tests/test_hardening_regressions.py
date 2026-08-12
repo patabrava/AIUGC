@@ -213,7 +213,7 @@ def test_database_dependency_errors_render_html_for_browser_gets():
     assert "Studio database is recovering" in response.body.decode()
 
 
-def test_batch_query_timeouts_fail_fast_without_retry():
+def test_batch_query_timeouts_use_bounded_retry_before_failing():
     import httpx
     from app.core.errors import ThirdPartyError
     from app.features.batches.queries import _execute_with_retry
@@ -227,7 +227,7 @@ def test_batch_query_timeouts_fail_fast_without_retry():
     with pytest.raises(ThirdPartyError) as exc_info:
         _execute_with_retry("list_batches", _timeout)
 
-    assert calls["count"] == 1
+    assert calls["count"] == 4
     assert "Database unavailable" in exc_info.value.message
 
 

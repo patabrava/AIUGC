@@ -815,6 +815,14 @@ def _semantic_final_artifact_urls(
     return raw_url, captioned_url
 
 
+def _post_is_removed(post: Dict[str, Any]) -> bool:
+    seed_data = post.get("seed_data") if isinstance(post.get("seed_data"), dict) else {}
+    return (
+        str(seed_data.get("script_review_status") or "").strip().lower() == "removed"
+        or seed_data.get("video_excluded") is True
+    )
+
+
 def _build_semantic_video_post_projection(
     post: Dict[str, Any],
     *,
@@ -1070,7 +1078,11 @@ def _build_semantic_video_projection(batch_detail: Dict[str, Any]) -> Optional[D
     duration_contract = build_semantic_duration_contract(
         requested_duration_seconds
     )
-    source_posts = list(batch_detail.get("posts") or [])
+    source_posts = [
+        post
+        for post in batch_detail.get("posts") or []
+        if not _post_is_removed(post)
+    ]
     scene_image_jobs = list(batch_detail.get("_semantic_scene_image_jobs") or [])
     scene_image_jobs_by_post = {
         str(job.get("post_id") or ""): job for job in scene_image_jobs
@@ -1525,7 +1537,11 @@ def _load_batch_detail_records(batch_id: str) -> tuple[
             posts_summary,
             get_seeding_progress(batch_id),
         )
-    post_ids = [str(post.get("id")) for post in posts_data if post.get("id")]
+    post_ids = [
+        str(post.get("id"))
+        for post in posts_data
+        if post.get("id") and not _post_is_removed(post)
+    ]
     scene_references = character_queries.list_scene_references_for_posts(post_ids)
     meta_connection = _sanitize_meta_connection(
         _effective_meta_connection(batch_id, batch.get("meta_connection"))

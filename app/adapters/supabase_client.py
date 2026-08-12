@@ -234,10 +234,11 @@ def execute_supabase_read(
     callback: Callable[[Client], Any],
     *,
     client: Optional[Client] = None,
+    adapter: Optional["SupabaseAdapter"] = None,
 ) -> Any:
     """Retry a read on a fresh singleton client after transport corruption."""
-    adapter = get_supabase() if client is None else None
-    active_client = client if client is not None else adapter.client
+    active_adapter = (adapter or get_supabase()) if client is None else None
+    active_client = client if client is not None else active_adapter.client
     last_error: Optional[Exception] = None
     for attempt, delay in enumerate(_SUPABASE_READ_RETRY_DELAYS, start=1):
         if delay:
@@ -257,9 +258,10 @@ def execute_supabase_read(
             )
             if (
                 attempt < len(_SUPABASE_READ_RETRY_DELAYS)
-                and adapter is not None
+                and active_adapter is not None
+                and callable(getattr(active_adapter, "reconnect", None))
             ):
-                active_client = adapter.reconnect(failed_client=active_client)
+                active_client = active_adapter.reconnect(failed_client=active_client)
     if last_error is not None:
         raise last_error
     raise RuntimeError(f"Supabase read {operation} failed without an error.")

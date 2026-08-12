@@ -10,7 +10,7 @@ from datetime import datetime
 from uuid import uuid4
 import httpx
 from postgrest.exceptions import APIError
-from app.adapters.supabase_client import get_supabase
+from app.adapters.supabase_client import execute_supabase_read, get_supabase
 from app.core.states import BatchState, validate_state_transition
 from app.core.errors import NotFoundError, ThirdPartyError, ValidationError
 from app.core.logging import get_logger
@@ -346,17 +346,6 @@ def _execute_with_retry(operation_name: str, callback):
             time.sleep(delay)
         try:
             return callback()
-        except httpx.TimeoutException as exc:
-            logger.warning(
-                "batch_query_timeout",
-                operation=operation_name,
-                attempt=attempt,
-                error=str(exc),
-            )
-            raise ThirdPartyError(
-                message=f"Database unavailable while loading batch data for {operation_name}",
-                details={"operation": operation_name, "error": str(exc)},
-            ) from exc
         except Exception as exc:
             if not _is_transient_database_transport_error(exc):
                 raise
@@ -639,11 +628,13 @@ def create_manual_draft_posts(
 
 def get_batch_by_id(batch_id: str) -> Dict[str, Any]:
     """Get batch by ID."""
-    supabase = get_supabase()
-
-    response = _execute_with_retry(
+    adapter = get_supabase()
+    response = execute_supabase_read(
         "get_batch_by_id",
-        lambda: supabase.client.table("batches").select("*").eq("id", batch_id).execute(),
+        lambda database: (
+            database.table("batches").select("*").eq("id", batch_id).execute()
+        ),
+        adapter=adapter,
     )
     
     if not response.data:

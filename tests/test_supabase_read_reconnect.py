@@ -33,6 +33,39 @@ def test_read_reconnects_after_shared_transport_corruption(monkeypatch):
     assert reconnects == [failed_client]
 
 
+def test_read_reconnects_explicit_adapter_after_timeout(monkeypatch):
+    failed_client = object()
+    healthy_client = object()
+    adapter = SimpleNamespace(client=failed_client)
+    reconnects = []
+    calls = []
+
+    def reconnect(*, failed_client):
+        reconnects.append(failed_client)
+        adapter.client = healthy_client
+        return healthy_client
+
+    adapter.reconnect = reconnect
+    monkeypatch.setattr(supabase_client.time, "sleep", lambda _delay: None)
+
+    def read(client):
+        calls.append(client)
+        if client is failed_client:
+            raise httpx.ReadTimeout(
+                "database read timed out",
+                request=httpx.Request("GET", "https://example.test/rest/v1/batches"),
+            )
+        return {"ok": True}
+
+    assert supabase_client.execute_supabase_read(
+        "batch_detail",
+        read,
+        adapter=adapter,
+    ) == {"ok": True}
+    assert calls == [failed_client, healthy_client]
+    assert reconnects == [failed_client]
+
+
 def test_read_does_not_reconnect_for_contract_errors(monkeypatch):
     client = object()
     adapter = SimpleNamespace(

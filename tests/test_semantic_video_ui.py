@@ -147,6 +147,62 @@ def test_semantic_projection_assigns_active_scene_image_job_only_to_its_post(
     assert posts["post-2"]["scene_image_job_is_active"] is False
 
 
+def test_semantic_projection_excludes_removed_posts_from_downstream_steps(monkeypatch):
+    batch = _semantic_batch()
+    batch["posts"].extend(
+        [
+            {
+                "id": "post-removed",
+                "topic_title": "Removed topic",
+                "seed_data": {
+                    "script_review_status": "removed",
+                    "video_excluded": True,
+                },
+            },
+            {
+                "id": "post-excluded",
+                "topic_title": "Legacy excluded topic",
+                "seed_data": {"video_excluded": True},
+            },
+        ]
+    )
+    projected_ids = []
+
+    def project(post, **_kwargs):
+        projected_ids.append(post["id"])
+        return {
+            "post_id": post["id"],
+            "candidates": [],
+            "actor_references": [],
+            "actor_reference_fingerprint": "",
+            "uses_shared_actor_references": False,
+        }
+
+    monkeypatch.setattr(
+        batch_handlers,
+        "_build_semantic_video_post_projection",
+        project,
+    )
+
+    semantic = batch_handlers._build_semantic_video_projection(batch)
+
+    assert projected_ids == ["post-1"]
+    assert [post["post_id"] for post in semantic["posts"]] == ["post-1"]
+
+
+def test_semantic_script_removal_updates_card_without_unconditional_reload():
+    template = Path(
+        "templates/batches/detail/_semantic_script_review_card.html"
+    ).read_text()
+    detail_js = Path("static/js/batches/detail.js").read_text()
+
+    assert "handleScriptRemovalStart" in template
+    assert "handleScriptRemovalResponse" in template
+    assert "data-script-remove" in template
+    assert "card?.remove()" in detail_js
+    assert "data.batch_state === 'S4_SCRIPTED'" in detail_js
+
+
 def test_semantic_projection_exposes_persisted_approval_and_cost_contract(monkeypatch):
     run = {
         "id": "run-1",

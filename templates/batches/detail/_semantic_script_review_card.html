@@ -89,13 +89,15 @@
             </button>
             {% endif %}
             <button
+                data-script-remove
                 type="button"
                 hx-put="/posts/{{ post.id }}/script-review"
                 hx-vals='{"action":"removed"}'
                 hx-confirm="Remove this script from production?"
                 hx-swap="none"
-                hx-on::after-request="if (event.detail.successful) { window.location.reload(); }"
-                class="brand-focus rounded-xl border border-red-300 px-4 py-2 text-sm font-bold text-red-700"
+                hx-on::before-request="window.handleScriptRemovalStart('{{ post.id }}')"
+                hx-on::after-request="window.handleScriptRemovalResponse(event, '{{ post.id }}')"
+                class="brand-focus rounded-xl border border-red-300 px-4 py-2 text-sm font-bold text-red-700 disabled:cursor-wait disabled:opacity-70"
             >
                 Remove script
             </button>

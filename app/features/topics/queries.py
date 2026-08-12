@@ -10,7 +10,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 import httpx
 
-from app.adapters.supabase_client import get_supabase, SupabaseAdapter
+from app.adapters.supabase_client import execute_supabase_read, get_supabase, SupabaseAdapter
 
 # Module-level singleton placeholder used by patchable test seams; initialize lazily.
 supabase: Optional[SupabaseAdapter] = None
@@ -1802,9 +1802,17 @@ POSTS_BY_BATCH_FIELDS = (
 
 def get_posts_by_batch(batch_id: str, fields: str = POSTS_BY_BATCH_FIELDS) -> List[Dict[str, Any]]:
     """Get all posts for a batch."""
-    supabase = _get_supabase_adapter()
-    
-    response = supabase.client.table("posts").select(fields).eq("batch_id", batch_id).execute()
+    adapter = _get_supabase_adapter()
+    response = execute_supabase_read(
+        "posts_by_batch",
+        lambda database: (
+            database.table("posts")
+            .select(fields)
+            .eq("batch_id", batch_id)
+            .execute()
+        ),
+        adapter=adapter,
+    )
     
     return response.data
 
