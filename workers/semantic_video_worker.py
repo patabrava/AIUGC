@@ -1124,6 +1124,13 @@ class ProductionStageRunner:
                 "Advisory caption delivery requires at least one aligned word."
             )
 
+        advisory_window_added = self._ensure_advisory_speech_window(
+            take=take,
+            transcript=transcript,
+        )
+        if advisory_window_added:
+            pipeline._atomic_write_json(manifest_path, payload)  # noqa: SLF001
+
         requested_duration = int(run.get("requested_duration_seconds") or 0)
         if requested_duration != 8:
             raise StateTransitionError(
@@ -1134,7 +1141,10 @@ class ProductionStageRunner:
         if (
             not isinstance(trim_window, Mapping)
             or not isinstance(transcript_qa, Mapping)
-            or transcript_qa.get("passed") is not True
+            or (
+                transcript_qa.get("passed") is not True
+                and transcript_qa.get("advisory_delivery_window_verified") is not True
+            )
             or trim_window.get("source") != "deepgram_word_window"
         ):
             raise StateTransitionError(
@@ -1332,6 +1342,65 @@ class ProductionStageRunner:
             "sha256": caption_hash,
             "pipeline_manifest": payload,
         }
+
+    @staticmethod
+    def _ensure_advisory_speech_window(
+        *,
+        take: dict[str, Any],
+        transcript: Any,
+    ) -> bool:
+        """Derive a bounded Deepgram speech window for a manual-review delivery."""
+        transcript_qa = take.get("transcript_qa")
+        trim_window = take.get("trim_window")
+        if (
+            isinstance(transcript_qa, Mapping)
+            and transcript_qa.get("passed") is True
+            and isinstance(trim_window, Mapping)
+            and trim_window.get("source") == "deepgram_word_window"
+        ):
+            return False
+
+        words = list(getattr(transcript, "words", ()) or ())
+        if not words:
+            raise StateTransitionError(
+                "Advisory terminal protection requires a verified speech window."
+            )
+        try:
+            first_word_start = float(words[0].start)
+            final_word_end = float(words[-1].end)
+            duration_seconds = float(take.get("duration_seconds"))
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise StateTransitionError(
+                "Advisory terminal protection requires a verified speech window."
+            ) from exc
+        if (
+            not math.isfinite(first_word_start)
+            or not math.isfinite(final_word_end)
+            or not math.isfinite(duration_seconds)
+            or first_word_start < 0
+            or final_word_end < first_word_start
+            or duration_seconds <= 0
+            or final_word_end > duration_seconds + 0.25
+        ):
+            raise StateTransitionError(
+                "Advisory terminal protection requires a verified speech window."
+            )
+
+        normalized_qa = dict(transcript_qa or {})
+        normalized_qa.setdefault("automated_passed", False)
+        normalized_qa["advisory_delivery_window_verified"] = True
+        normalized_qa["first_word_start_seconds"] = first_word_start
+        normalized_qa["final_word_end_seconds"] = min(
+            duration_seconds,
+            final_word_end,
+        )
+        take["transcript_qa"] = normalized_qa
+        take["trim_window"] = {
+            "start_seconds": 0.0,
+            "end_seconds": min(duration_seconds, final_word_end + 0.25),
+            "source": "deepgram_word_window",
+        }
+        return True
 
     @staticmethod
     def _delivery(run: Mapping[str, Any]) -> dict[str, Any]:
@@ -2039,9 +2108,14 @@ class SemanticVideoWorker:
         take = takes[0]
         raw_uri = str(take["raw_artifact_uri"])
         raw_hash = str(take["raw_artifact_sha256"])
+        delivery_run = dict(run)
+        delivery_run["artifact_manifest"] = {
+            **dict(run.get("artifact_manifest") or {}),
+            **dict(artifacts),
+        }
         try:
             captioned = self.stage_runner.caption_advisory_single_take(
-                run=dict(run),
+                run=delivery_run,
                 takes=deepcopy_rows(takes),
             )
         except StateTransitionError as exc:

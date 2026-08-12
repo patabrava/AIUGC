@@ -163,6 +163,7 @@
                                      x-show="isCalendarOpen(post)"
                                      x-cloak
                                      x-transition.opacity.duration.120ms
+                                     x-effect="isCalendarOpen(post); post.blogScheduleTime; $nextTick(() => syncTimeSelects($el, post))"
                                      role="dialog"
                                      aria-label="Veroeffentlichungsdatum waehlen">
                                     <div class="flex items-center justify-between gap-2 pb-2">
@@ -204,7 +205,7 @@
                                             <div class="flex items-center gap-1">
                                                 <select class="bg-[#0c0c18] border border-white/10 rounded-lg px-2 py-1 text-sm text-gray-100 focus:border-[#006AAB] focus:outline-none"
                                                         aria-label="Stunde"
-                                                        :value="scheduleHour(post)"
+                                                        data-schedule-hour
                                                         @change="setScheduleHour(post, $event.target.value)">
                                                     <template x-for="hour in calendarHourOptions" :key="hour">
                                                         <option :value="hour" :selected="hour === scheduleHour(post)" x-text="hour"></option>
@@ -213,7 +214,7 @@
                                                 <span class="text-gray-500">:</span>
                                                 <select class="bg-[#0c0c18] border border-white/10 rounded-lg px-2 py-1 text-sm text-gray-100 focus:border-[#006AAB] focus:outline-none"
                                                         aria-label="Minute"
-                                                        :value="scheduleMinute(post)"
+                                                        data-schedule-minute
                                                         @change="setScheduleMinute(post, $event.target.value)">
                                                     <template x-for="minute in calendarMinuteOptions(post)" :key="minute">
                                                         <option :value="minute" :selected="minute === scheduleMinute(post)" x-text="minute"></option>
@@ -791,6 +792,15 @@ function blogPanelComponent() {
                 options.sort();
             }
             return options;
+        },
+        // x-bind on a <select> runs before its x-for options exist, so set the shown
+        // option imperatively once the popup's children have mounted.
+        syncTimeSelects(root, post) {
+            if (!root || !post) return;
+            const hour = root.querySelector('[data-schedule-hour]');
+            const minute = root.querySelector('[data-schedule-minute]');
+            if (hour) hour.value = this.scheduleHour(post);
+            if (minute) minute.value = this.scheduleMinute(post);
         },
         setScheduleHour(post, value) {
             this.pickCalendarTime(post, `${value}:${this.scheduleMinute(post)}`);

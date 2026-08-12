@@ -984,6 +984,71 @@ def test_worker_delivers_single_paid_eight_second_take_when_qa_is_advisory():
     assert stages.advisory_caption_calls
 
 
+def test_worker_passes_current_transcript_artifacts_to_single_take_delivery():
+    repo = FakeRepo(stage="transcript_qa", take_count=1)
+    raw_hash = "d" * 64
+    repo.takes[0].update(
+        submission_state="completed",
+        raw_artifact_uri="https://storage/paid-8s.mp4",
+        raw_artifact_sha256=raw_hash,
+    )
+    transcript_manifest = {
+        "status": "transcript_qa_failed",
+        "takes": [{"index": 0, "transcript": {"words": [{"word": "Hallo"}]}}],
+    }
+    stages = FakeStages(
+        {
+            "passed": False,
+            "failed_take_indexes": [0],
+            "artifacts": {
+                "pipeline_manifest": transcript_manifest,
+                "qa_failure": {
+                    "stage": "transcript_qa",
+                    "message": "Transcript requires manual review.",
+                },
+            },
+        }
+    )
+    worker = _worker(repo, FakeVertex(), stages)
+
+    result = worker.tick("run-1")
+
+    assert result.action == "completed_with_qa_advisory"
+    caption_run, _ = stages.advisory_caption_calls[0]
+    assert caption_run["artifact_manifest"]["pipeline_manifest"] == transcript_manifest
+
+
+def test_advisory_delivery_derives_a_bounded_window_from_failed_transcript_qa():
+    from workers.semantic_video_worker import ProductionStageRunner
+
+    take = {
+        "duration_seconds": 8,
+        "transcript_qa": {"passed": False, "failure_reasons": ["word_error_rate_exceeded"]},
+        "trim_window": None,
+    }
+    transcript = SimpleNamespace(
+        words=[
+            SimpleNamespace(word="Hallo", start=0.08, end=0.42),
+            SimpleNamespace(word="Welt", start=6.9, end=7.31),
+        ]
+    )
+
+    changed = ProductionStageRunner._ensure_advisory_speech_window(
+        take=take,
+        transcript=transcript,
+    )
+
+    assert changed is True
+    assert take["transcript_qa"]["passed"] is False
+    assert take["transcript_qa"]["advisory_delivery_window_verified"] is True
+    assert take["transcript_qa"]["final_word_end_seconds"] == pytest.approx(7.31)
+    assert take["trim_window"] == {
+        "start_seconds": 0.0,
+        "end_seconds": pytest.approx(7.56),
+        "source": "deepgram_word_window",
+    }
+
+
 @pytest.mark.parametrize(
     ("message", "details", "expected_action", "failure_type"),
     [
