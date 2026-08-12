@@ -72,7 +72,10 @@ def _arm_batch_dispatch_sync(
     # 2. Fetch posts for this batch
     posts_resp = (
         db.table("posts")
-        .select("id,video_url,batch_id,social_networks,tiktok_settings")
+        .select(
+            "id,video_url,batch_id,social_networks,tiktok_settings,"
+            "blog_enabled,blog_status,blog_content,blog_scheduled_at"
+        )
         .eq("batch_id", batch_id)
         .execute()
     )
@@ -120,41 +123,88 @@ def _arm_batch_dispatch_sync(
 
         networks = post_spec.networks_override or request.default_networks
 
+        blog_scheduled_at = None
+        if db_post.get("blog_enabled"):
+            blog_content = db_post.get("blog_content") or {}
+            if not isinstance(blog_content, dict):
+                blog_content = {}
+            if db_post.get("blog_status") not in {"draft", "scheduled"}:
+                raise ValidationError(
+                    f"Post {post_spec.post_id} needs a generated blog draft before scheduling"
+                )
+            if not str(blog_content.get("body_html") or "").strip():
+                raise ValidationError(
+                    f"Post {post_spec.post_id} needs blog text before scheduling"
+                )
+            if not str(blog_content.get("preview_image_url") or "").strip():
+                raise ValidationError(
+                    f"Post {post_spec.post_id} needs a blog image before scheduling"
+                )
+            if post_spec.blog_scheduled_at is None:
+                raise ValidationError(
+                    f"Post {post_spec.post_id} needs a blog publication date and time"
+                )
+            blog_dt = post_spec.blog_scheduled_at
+            if blog_dt.tzinfo is None:
+                blog_dt = blog_dt.replace(tzinfo=user_tz)
+            blog_scheduled_at = blog_dt.astimezone(ZoneInfo("UTC")).isoformat()
+        elif post_spec.blog_scheduled_at is not None:
+            raise ValidationError(
+                f"Post {post_spec.post_id} cannot schedule a disabled blog post"
+            )
+
         scheduled_posts.append({
             "post_id": post_spec.post_id,
             "scheduled_at": scheduled_at,
             "networks": networks,
             "publish_caption": post_spec.caption,
+            "blog_scheduled_at": blog_scheduled_at,
         })
 
     rpc_applied = False
     if hasattr(db, "rpc"):
         try:
             db.rpc(
-                "arm_batch_publish_schedule",
+                "arm_batch_content_schedule",
                 {"p_batch_id": batch_id, "p_schedules": scheduled_posts},
             ).execute()
             rpc_applied = True
         except APIError as exc:
             error_text = str(exc).lower()
-            if exc.code not in {"PGRST202", "42883"} and "arm_batch_publish_schedule" not in error_text:
+            if exc.code not in {"PGRST202", "42883"} and "arm_batch_content_schedule" not in error_text:
                 raise
             log.warning("batch_arm_rpc_unavailable_fallback", batch_id=batch_id)
 
     if not rpc_applied:
         # Rolling-migration fallback. Remove after every deployment has the RPC.
         for schedule in scheduled_posts:
-            db.table("posts").update({
+            update_payload = {
                 "scheduled_at": schedule["scheduled_at"],
                 "publish_caption": schedule["publish_caption"],
                 "social_networks": schedule["networks"],
                 "publish_status": "scheduled",
-            }).eq("id", schedule["post_id"]).execute()
+            }
+            db_post = posts_by_id[schedule["post_id"]]
+            if db_post.get("blog_enabled"):
+                blog_content = dict(db_post.get("blog_content") or {})
+                blog_content["publication_date"] = schedule["blog_scheduled_at"]
+                update_payload.update({
+                    "blog_status": "scheduled",
+                    "blog_scheduled_at": schedule["blog_scheduled_at"],
+                    "blog_content": blog_content,
+                })
+            db.table("posts").update(update_payload).eq(
+                "id",
+                schedule["post_id"],
+            ).execute()
 
     log.info("batch_arm_dispatch", batch_id=batch_id, armed_count=len(scheduled_posts))
     return {
         "ok": True,
         "armed_count": len(scheduled_posts),
+        "scheduled_blog_count": sum(
+            1 for schedule in scheduled_posts if schedule["blog_scheduled_at"]
+        ),
         "scheduled_posts": [
             {key: value for key, value in schedule.items() if key != "publish_caption"}
             for schedule in scheduled_posts

@@ -563,6 +563,7 @@ def _build_publish_post_view(post: Dict[str, Any]) -> Dict[str, Any]:
     seed_data = post.get("seed_data") or {}
     caption_bundle = seed_data.get("caption_bundle") or {}
     video_metadata = _load_json_object(post.get("video_metadata"))
+    blog_content = _load_json_object(post.get("blog_content"))
     return {
         "id": post.get("id"),
         "type": post.get("post_type"),
@@ -590,6 +591,12 @@ def _build_publish_post_view(post: Dict[str, Any]) -> Dict[str, Any]:
         "scheduledAt": post.get("scheduled_at"),
         "socialNetworks": _normalize_string_list(post.get("social_networks")),
         "tiktokSettings": _load_json_object(post.get("tiktok_settings")),
+        "blogEnabled": bool(post.get("blog_enabled")),
+        "blogStatus": post.get("blog_status") or "disabled",
+        "blogScheduledAt": post.get("blog_scheduled_at"),
+        "blogTitle": blog_content.get("name") or blog_content.get("title") or "",
+        "blogTextReady": bool(str(blog_content.get("body_html") or "").strip()),
+        "blogImageReady": bool(str(blog_content.get("preview_image_url") or "").strip()),
     }
 
 

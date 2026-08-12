@@ -589,6 +589,7 @@
                 selectedCaptionKey: p.selectedCaptionKey || ((p.captionOptions || [])[0]?.key || ''),
                 publishResults: p.publishResults || {},
                 platformIds: p.platformIds || {},
+                blogScheduleLocal: '',
             })),
             expanded: null,
             showReviewModal: false,
@@ -659,6 +660,13 @@
                     return window.zoneDateToLocalValue(scheduled, this.timezone);
                 });
                 const persistedDates = persistedLocalValues.filter(Boolean).map((value) => value.split('T')[0]);
+
+                this.posts.forEach((post) => {
+                    if (!post.blogScheduledAt) return;
+                    const scheduled = new Date(post.blogScheduledAt);
+                    if (Number.isNaN(scheduled.getTime())) return;
+                    post.blogScheduleLocal = window.zoneDateToLocalValue(scheduled, this.timezone);
+                });
 
                 if (persistedDates.length) {
                     const earliest = new Date(`${[...persistedDates].sort()[0]}T12:00:00`);
@@ -737,7 +745,11 @@
                     .join(' + ');
                 const days = [...new Set(this.slots.map(s => s.day))];
                 const dayRange = days.length === 1 ? days[0] : `${this.slots[0].day}\u2013${this.slots[this.slots.length - 1].day}`;
-                return `${this.posts.length} posts \u00b7 ${dayRange} \u00b7 ${nets || 'No networks selected'}`;
+                const blogCount = this.posts.filter((post) => post.blogEnabled).length;
+                const blogSummary = blogCount
+                    ? ` \u00b7 ${blogCount} blog post${blogCount === 1 ? '' : 's'}`
+                    : '';
+                return `${this.posts.length} social posts \u00b7 ${dayRange} \u00b7 ${nets || 'No networks selected'}${blogSummary}`;
             },
             scheduledLocalValue(index) {
                 const override = this.posts[index]?.timeOverride;
@@ -778,6 +790,29 @@
                 if (conflict) return `Only ${conflict.gapMinutes} min from another post`;
                 return '';
             },
+            blogScheduledDate(post) {
+                if (!post?.blogScheduleLocal) return null;
+                return window.zonedLocalValueToUtcDate(post.blogScheduleLocal, this.timezone);
+            },
+            blogScheduleIssue(post) {
+                if (!post?.blogEnabled) return '';
+                if (!post.blogTextReady) return 'Generate the blog text first';
+                if (!post.blogImageReady) return 'Generate the blog preview image first';
+                if (!post.blogScheduleLocal) return 'Choose a blog publication date and time';
+                const scheduled = this.blogScheduledDate(post);
+                if (!scheduled || Number.isNaN(scheduled.getTime())) return 'Choose a valid blog publication time';
+                if (scheduled <= new Date()) return 'Choose a future blog publication time';
+                return '';
+            },
+            blogScheduleLabel(post) {
+                const scheduled = this.blogScheduledDate(post);
+                if (!scheduled || Number.isNaN(scheduled.getTime())) return 'Not scheduled';
+                return new Intl.DateTimeFormat('en-GB', {
+                    timeZone: this.timezone,
+                    dateStyle: 'medium',
+                    timeStyle: 'short',
+                }).format(scheduled);
+            },
             tiktokPostIssue(post) {
                 const settings = post.tiktokSettings || {};
                 if (!settings.title?.trim()) return 'TikTok title is missing';
@@ -798,6 +833,8 @@
                     const scheduleIssue = this.slotIssue(index);
                     if (scheduleIssue) issues.push(`${post.title}: ${scheduleIssue}`);
                     if (!post.caption?.trim()) issues.push(`${post.title}: add a caption`);
+                    const blogIssue = this.blogScheduleIssue(post);
+                    if (blogIssue) issues.push(`${post.title}: ${blogIssue}`);
                     if (this.networks.includes('tiktok')) {
                         const tiktokIssue = this.tiktokPostIssue(post);
                         if (tiktokIssue) issues.push(`${post.title}: ${tiktokIssue}`);
@@ -964,6 +1001,9 @@
                                     caption: p.caption.trim(),
                                     time_override: timeOverride,
                                     networks_override: p.networksOverride,
+                                    blog_scheduled_at: p.blogEnabled && p.blogScheduleLocal
+                                        ? this.blogScheduledDate(p).toISOString()
+                                        : null,
                                 };
                             }),
                         }),
@@ -971,7 +1011,7 @@
                     if (!response.ok) {
                         throw new Error(await window.extractApiError(response));
                     }
-                    this.successMessage = 'Dispatch armed successfully.';
+                    this.successMessage = 'Social and blog schedules saved successfully.';
                     this.showReviewModal = false;
                     setTimeout(() => window.location.reload(), 1500);
                 } catch (error) {

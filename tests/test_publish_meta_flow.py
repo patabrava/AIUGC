@@ -43,13 +43,17 @@ def test_publish_panel_preflights_dispatch_contract_and_preserves_validation_err
     assert "x-collapse" not in panel
 
 
-def test_publish_panel_links_back_to_blog_review_before_final_schedule():
+def test_publish_panel_owns_final_social_and_blog_schedule():
     panel = Path("templates/batches/detail/_publish_panel.html").read_text()
+    blog_panel = Path("templates/batches/detail/_blog_panel.html").read_text()
 
-    assert "Review blog drafts before final submission" in panel
+    assert "Blog drafts are ready for final scheduling" in panel
     assert 'href="#blog-panel"' in panel
     assert "Review blog drafts" in panel
-    assert "Schedule all posts" in panel
+    assert "Blog publication date and time" in panel
+    assert "Schedule all content" in panel
+    assert "Scheduling happens in the final Publish step" in blog_panel
+    assert "@click=\"scheduleDraft(post)\"" not in blog_panel
 
 
 class _FakeResponse:

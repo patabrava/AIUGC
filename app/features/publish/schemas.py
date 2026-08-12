@@ -262,6 +262,10 @@ class PostArmSpec(BaseModel):
     caption: str = Field(..., min_length=1, max_length=2200)
     time_override: Optional[str] = None
     networks_override: Optional[List[str]] = None
+    blog_scheduled_at: Optional[datetime] = Field(
+        default=None,
+        description="Optional final blog publication time in UTC",
+    )
 
 
 class BatchArmRequest(BaseModel):
@@ -294,6 +298,13 @@ class BatchArmRequest(BaseModel):
         now = datetime.now(timezone.utc)
         if any(scheduled.astimezone(timezone.utc) <= now for scheduled in times):
             raise ValueError("Every scheduled post must be in the future")
+        blog_times = [
+            _normalize_utc_datetime(post.blog_scheduled_at)
+            for post in self.posts
+            if post.blog_scheduled_at is not None
+        ]
+        if any(scheduled <= now for scheduled in blog_times):
+            raise ValueError("Every scheduled blog post must be in the future")
         for a, b in zip(times, times[1:]):
             if (b - a) < timedelta(minutes=30):
                 raise ValueError("Scheduled posts must be at least 30 minutes apart")

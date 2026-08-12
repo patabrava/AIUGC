@@ -5,6 +5,7 @@ Per Constitution § V: Locality & Vertical Slices
 Per Canon § 3.2: S6_QA state management
 """
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Dict, Any
 import json
@@ -75,6 +76,88 @@ def _seed_data_for_qa_decision(post: Dict[str, Any], *, approved: bool) -> Dict[
         seed_data["video_review_status"] = "rejected"
         seed_data["video_excluded"] = True
     return seed_data
+
+
+def _record_qa_decision_sync(
+    *,
+    post_id: str,
+    qa_request: QAApprovalRequest,
+    correlation_id: str,
+) -> tuple[Dict[str, Any], str | None, bool]:
+    """Persist one QA decision and reconcile its batch off the ASGI event loop."""
+    supabase = get_supabase().client
+    response = supabase.table("posts").select("*").eq("id", post_id).execute()
+
+    if not response.data:
+        raise FlowForgeException(
+            code=ErrorCode.NOT_FOUND,
+            message=f"Post {post_id} not found",
+            details={"post_id": post_id},
+        )
+
+    post = response.data[0]
+    batch_id = post.get("batch_id")
+    video_metadata = _json_object(post.get("video_metadata"))
+    identity_gate_result = _json_object(post.get("identity_gate_result"))
+    identity_gate_update = None
+    if (
+        qa_request.approved
+        and is_actor_identity_video_source(video_metadata.get("actor_identity_source"))
+    ):
+        if identity_gate_result.get("status") == "manual_required":
+            identity_gate_update = passed_manual_gate(
+                "Operator approved video identity match during QA review"
+            ).model_dump(mode="json")
+        elif identity_gate_result.get("status") != "passed":
+            raise FlowForgeException(
+                code=ErrorCode.VALIDATION_ERROR,
+                message="ActorIdentity video identity gate must pass before QA approval.",
+                details={
+                    "post_id": post_id,
+                    "identity_gate_result": identity_gate_result,
+                },
+                status_code=422,
+            )
+
+    update_data = {
+        "qa_pass": qa_request.approved,
+        "qa_notes": qa_request.notes or "",
+        "seed_data": _seed_data_for_qa_decision(
+            post,
+            approved=qa_request.approved,
+        ),
+    }
+    if identity_gate_update:
+        update_data["identity_gate_result"] = identity_gate_update
+
+    supabase.table("posts").update(update_data).eq("id", post_id).execute()
+
+    logger.info(
+        "qa_approval_recorded",
+        post_id=post_id,
+        batch_id=batch_id,
+        correlation_id=correlation_id,
+        approved=qa_request.approved,
+        has_notes=bool(qa_request.notes),
+    )
+
+    should_advance = False
+    if batch_id:
+        reconciled_state = reconcile_batch_video_pipeline_state(
+            batch_id=batch_id,
+            correlation_id=correlation_id,
+            supabase_client=supabase,
+        )
+        should_advance = reconciled_state == "S7_PUBLISH_PLAN"
+        if should_advance:
+            logger.info(
+                "batch_auto_advanced_to_publish",
+                batch_id=batch_id,
+                post_id=post_id,
+                correlation_id=correlation_id,
+            )
+
+    return post, batch_id, should_advance
 
 
 @router.post("/{post_id}/auto-check", response_model=SuccessResponse)
@@ -230,80 +313,12 @@ async def approve_qa(post_id: str, req: Request):
 
         qa_request = QAApprovalRequest(**payload_normalized)
 
-        supabase = get_supabase().client
-        response = supabase.table("posts").select("*").eq("id", post_id).execute()
-        
-        if not response.data:
-            raise FlowForgeException(
-                code=ErrorCode.NOT_FOUND,
-                message=f"Post {post_id} not found",
-                details={"post_id": post_id}
-            )
-        
-        post = response.data[0]
-        batch_id = post.get("batch_id")
-        video_metadata = _json_object(post.get("video_metadata"))
-        identity_gate_result = _json_object(post.get("identity_gate_result"))
-        identity_gate_update = None
-        if (
-            qa_request.approved
-            and is_actor_identity_video_source(video_metadata.get("actor_identity_source"))
-        ):
-            if identity_gate_result.get("status") == "manual_required":
-                identity_gate_update = passed_manual_gate(
-                    "Operator approved video identity match during QA review"
-                ).model_dump(mode="json")
-            elif identity_gate_result.get("status") != "passed":
-                raise FlowForgeException(
-                    code=ErrorCode.VALIDATION_ERROR,
-                    message="ActorIdentity video identity gate must pass before QA approval.",
-                    details={
-                        "post_id": post_id,
-                        "identity_gate_result": identity_gate_result,
-                    },
-                    status_code=422,
-                )
-        
-        seed_data = _seed_data_for_qa_decision(post, approved=qa_request.approved)
-
-        # Update QA fields. A rejected video becomes excluded from publish planning,
-        # matching the existing removed-post contract used downstream.
-        update_data = {
-            "qa_pass": qa_request.approved,
-            "qa_notes": qa_request.notes or "",
-            "seed_data": seed_data,
-        }
-        if identity_gate_update:
-            update_data["identity_gate_result"] = identity_gate_update
-        
-        supabase.table("posts").update(update_data).eq("id", post_id).execute()
-        
-        logger.info(
-            "qa_approval_recorded",
+        post, batch_id, should_advance = await asyncio.to_thread(
+            _record_qa_decision_sync,
             post_id=post_id,
-            batch_id=batch_id,
+            qa_request=qa_request,
             correlation_id=correlation_id,
-            approved=qa_request.approved,
-            has_notes=bool(qa_request.notes)
         )
-        
-        # Reconcile from persisted post truth so a stale S4/S5 batch can recover
-        # through QA and enter publishing in the same approval request.
-        should_advance = False
-        if batch_id:
-            reconciled_state = reconcile_batch_video_pipeline_state(
-                batch_id=batch_id,
-                correlation_id=correlation_id,
-                supabase_client=supabase,
-            )
-            should_advance = reconciled_state == "S7_PUBLISH_PLAN"
-            if should_advance:
-                logger.info(
-                    "batch_auto_advanced_to_publish",
-                    batch_id=batch_id,
-                    post_id=post_id,
-                    correlation_id=correlation_id,
-                )
         
         response_payload = SuccessResponse(
             data={

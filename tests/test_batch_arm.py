@@ -39,6 +39,7 @@ class TestPostArmSpec:
         assert spec.caption == "Hello world"
         assert spec.time_override is None
         assert spec.networks_override is None
+        assert spec.blog_scheduled_at is None
 
     def test_with_overrides(self):
         spec = PostArmSpec(
@@ -161,7 +162,7 @@ class _FakeClient:
         class _Rpc:
             def execute(self):
                 client.rpc_calls.append((function_name, deepcopy(payload)))
-                assert function_name == "arm_batch_publish_schedule"
+                assert function_name == "arm_batch_content_schedule"
                 schedules = payload["p_schedules"]
                 for schedule in schedules:
                     post = next(row for row in client.storage["posts"] if row["id"] == schedule["post_id"])
@@ -171,7 +172,20 @@ class _FakeClient:
                         "social_networks": schedule["networks"],
                         "publish_status": "scheduled",
                     })
-                return _FakeResponse({"armed_count": len(schedules)})
+                    if post.get("blog_enabled"):
+                        blog_content = deepcopy(post.get("blog_content") or {})
+                        blog_content["publication_date"] = schedule["blog_scheduled_at"]
+                        post.update({
+                            "blog_status": "scheduled",
+                            "blog_scheduled_at": schedule["blog_scheduled_at"],
+                            "blog_content": blog_content,
+                        })
+                return _FakeResponse({
+                    "armed_count": len(schedules),
+                    "scheduled_blog_count": sum(
+                        1 for schedule in schedules if schedule.get("blog_scheduled_at")
+                    ),
+                })
 
         return _Rpc()
 
@@ -229,7 +243,7 @@ class TestBatchArmHandler:
             assert post["publish_status"] == "scheduled"
             assert post["social_networks"] == ["instagram", "facebook"]
         assert len(client.rpc_calls) == 1
-        assert client.rpc_calls[0][0] == "arm_batch_publish_schedule"
+        assert client.rpc_calls[0][0] == "arm_batch_content_schedule"
 
     def test_arm_accepts_single_post_and_single_slot(self):
         storage = _make_storage(num_posts=1)
@@ -253,6 +267,72 @@ class TestBatchArmHandler:
         assert storage["posts"][0]["scheduled_at"] is not None
         assert storage["posts"][0]["publish_status"] == "scheduled"
         assert storage["posts"][0]["social_networks"] == ["instagram"]
+
+    def test_arm_schedules_ready_blog_with_social_in_same_rpc(self):
+        storage = _make_storage(num_posts=1)
+        storage["posts"][0].update({
+            "blog_enabled": True,
+            "blog_status": "draft",
+            "blog_content": {
+                "body_html": "<p>Ready article</p>",
+                "preview_image_url": "https://cdn.example.com/blog.webp",
+            },
+            "blog_scheduled_at": None,
+        })
+        client = _FakeClient(storage)
+
+        from app.features.publish.arm import arm_batch_dispatch
+        result = asyncio.run(
+            arm_batch_dispatch(
+                batch_id="b1",
+                request=BatchArmRequest(
+                    week_start="2036-03-24",
+                    slots=[SlotSpec(day="mon", time="09:00")],
+                    default_networks=["instagram"],
+                    posts=[PostArmSpec(
+                        post_id="p1",
+                        caption="Caption 1",
+                        blog_scheduled_at="2036-03-27T09:00:00+01:00",
+                    )],
+                ),
+                db=client,
+            )
+        )
+
+        post = storage["posts"][0]
+        assert result["scheduled_blog_count"] == 1
+        assert post["publish_status"] == "scheduled"
+        assert post["blog_status"] == "scheduled"
+        assert post["blog_scheduled_at"].startswith("2036-03-27T08:00:00")
+        assert post["blog_content"]["publication_date"] == post["blog_scheduled_at"]
+
+    def test_arm_rejects_enabled_blog_without_generated_image(self):
+        storage = _make_storage(num_posts=1)
+        storage["posts"][0].update({
+            "blog_enabled": True,
+            "blog_status": "draft",
+            "blog_content": {"body_html": "<p>Ready article</p>"},
+        })
+        client = _FakeClient(storage)
+
+        from app.features.publish.arm import arm_batch_dispatch
+        with pytest.raises(Exception, match="blog image"):
+            asyncio.run(
+                arm_batch_dispatch(
+                    batch_id="b1",
+                    request=BatchArmRequest(
+                        week_start="2036-03-24",
+                        slots=[SlotSpec(day="mon", time="09:00")],
+                        default_networks=["instagram"],
+                        posts=[PostArmSpec(
+                            post_id="p1",
+                            caption="Caption 1",
+                            blog_scheduled_at="2036-03-27T09:00:00+01:00",
+                        )],
+                    ),
+                    db=client,
+                )
+            )
 
     def test_arm_rejects_batch_not_in_s7(self):
         storage = _make_storage()
@@ -358,6 +438,20 @@ def test_atomic_batch_arm_migration_validates_and_updates_in_one_statement():
     assert "matched_count <> expected_count" in migration
     assert "UPDATE public.posts AS post" in migration
     assert "TO service_role" in migration
+
+
+def test_unified_final_schedule_migration_arms_social_and_blog_atomically():
+    migration = (
+        Path(__file__).resolve().parents[1]
+        / "supabase/migrations/20260812220000_unified_final_publish_schedule.sql"
+    ).read_text()
+
+    assert "CREATE OR REPLACE FUNCTION public.arm_batch_content_schedule" in migration
+    assert "blog_scheduled_at TIMESTAMPTZ" in migration
+    assert "post.blog_content ->> 'preview_image_url'" in migration
+    assert "blog_status = CASE" in migration
+    assert "publish_status = 'scheduled'" in migration
+    assert "NOTIFY pgrst, 'reload schema'" in migration
 
 
 def test_arm_rejects_tiktok_post_without_settings(monkeypatch):

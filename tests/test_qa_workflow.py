@@ -1,4 +1,6 @@
+import asyncio
 import os
+import threading
 from types import SimpleNamespace
 
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
@@ -75,6 +77,34 @@ class _FakeSupabaseClient:
 
     def table(self, table_name):
         return _FakeQuery(table_name, self.db)
+
+
+@pytest.mark.asyncio
+async def test_delivery_approval_database_work_does_not_starve_event_loop(monkeypatch):
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_decision(**_kwargs):
+        started.set()
+        assert release.wait(timeout=2)
+        return ({"qa_auto_checks": None}, "batch-1", True)
+
+    monkeypatch.setattr(qa_handlers, "_record_qa_decision_sync", blocking_decision)
+
+    approval = asyncio.create_task(
+        qa_handlers.approve_qa(
+            "post-final",
+            _HtmxJsonRequest({"approved": True}),
+        )
+    )
+    assert await asyncio.to_thread(started.wait, 1)
+    event_loop_probe = asyncio.Event()
+    asyncio.get_running_loop().call_soon(event_loop_probe.set)
+    await asyncio.wait_for(event_loop_probe.wait(), timeout=0.1)
+    release.set()
+
+    response = await approval
+    assert response.headers["hx-redirect"] == "/batches/batch-1#publish-workflow"
 
 
 @pytest.mark.asyncio
