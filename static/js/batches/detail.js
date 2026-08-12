@@ -211,7 +211,16 @@
     };
 
     window.handleScriptReviewResponse = function (event, postId) {
-        if (!event.detail?.successful) return;
+        const card = scriptCard(postId);
+        const approveButton = card?.querySelector('[data-script-approve]');
+        if (!event.detail?.successful) {
+            if (approveButton) {
+                approveButton.disabled = false;
+                approveButton.textContent = 'Approve script';
+            }
+            showScriptSaveStatus(card, 'Approval failed');
+            return;
+        }
         let data = {};
         try {
             data = JSON.parse(event.detail.xhr?.responseText || '{}')?.data || {};
@@ -225,7 +234,6 @@
             return;
         }
 
-        const card = scriptCard(postId);
         if (!card) return;
         card.dataset.scriptReviewStatus = 'approved';
         const badge = card.querySelector('[data-script-review-badge]');
@@ -239,6 +247,15 @@
         window.dispatchEvent(new CustomEvent('script-review-updated', {
             detail: { postId, status: 'approved' },
         }));
+    };
+
+    window.handleScriptReviewStart = function (postId) {
+        const card = scriptCard(postId);
+        const approveButton = card?.querySelector('[data-script-approve]');
+        if (!approveButton) return;
+        approveButton.disabled = true;
+        approveButton.textContent = 'Approving…';
+        showScriptSaveStatus(card, 'Saving approval…');
     };
 
     document.body.addEventListener('htmx:responseError', async (event) => {

@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, Request
+from postgrest.exceptions import APIError
 from zoneinfo import ZoneInfo
 
 from app.adapters.supabase_client import get_supabase
@@ -51,7 +52,7 @@ def _compute_scheduled_at(week_start: str, day: str, time: str) -> str:
     return local_dt.astimezone(ZoneInfo("UTC")).isoformat()
 
 
-async def arm_batch_dispatch(
+def _arm_batch_dispatch_sync(
     batch_id: str,
     request: BatchArmRequest,
     db: Any = None,
@@ -119,26 +120,62 @@ async def arm_batch_dispatch(
 
         networks = post_spec.networks_override or request.default_networks
 
-        # Save to DB
-        db.table("posts").update({
-            "scheduled_at": scheduled_at,
-            "publish_caption": post_spec.caption,
-            "social_networks": networks,
-            "publish_status": "scheduled",
-        }).eq("id", post_spec.post_id).execute()
-
         scheduled_posts.append({
             "post_id": post_spec.post_id,
             "scheduled_at": scheduled_at,
             "networks": networks,
+            "publish_caption": post_spec.caption,
         })
+
+    rpc_applied = False
+    if hasattr(db, "rpc"):
+        try:
+            db.rpc(
+                "arm_batch_publish_schedule",
+                {"p_batch_id": batch_id, "p_schedules": scheduled_posts},
+            ).execute()
+            rpc_applied = True
+        except APIError as exc:
+            error_text = str(exc).lower()
+            if exc.code not in {"PGRST202", "42883"} and "arm_batch_publish_schedule" not in error_text:
+                raise
+            log.warning("batch_arm_rpc_unavailable_fallback", batch_id=batch_id)
+
+    if not rpc_applied:
+        # Rolling-migration fallback. Remove after every deployment has the RPC.
+        for schedule in scheduled_posts:
+            db.table("posts").update({
+                "scheduled_at": schedule["scheduled_at"],
+                "publish_caption": schedule["publish_caption"],
+                "social_networks": schedule["networks"],
+                "publish_status": "scheduled",
+            }).eq("id", schedule["post_id"]).execute()
 
     log.info("batch_arm_dispatch", batch_id=batch_id, armed_count=len(scheduled_posts))
     return {
         "ok": True,
         "armed_count": len(scheduled_posts),
-        "scheduled_posts": scheduled_posts,
+        "scheduled_posts": [
+            {key: value for key, value in schedule.items() if key != "publish_caption"}
+            for schedule in scheduled_posts
+        ],
     }
+
+
+async def arm_batch_dispatch(
+    batch_id: str,
+    request: BatchArmRequest,
+    db: Any = None,
+) -> Dict[str, Any]:
+    """Keep synchronous PostgREST work away from the application event loop."""
+    import asyncio
+
+    return await asyncio.to_thread(
+        _arm_batch_dispatch_sync,
+        batch_id,
+        request,
+        db,
+    )
 
 
 @router.post("/batches/{batch_id}/arm")

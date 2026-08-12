@@ -9,6 +9,8 @@ import base64
 import hashlib
 import hmac
 import json
+import time
+from collections import OrderedDict
 from typing import Any, Dict, Optional
 
 from fastapi import Request
@@ -22,6 +24,42 @@ logger = get_logger(__name__)
 # Paths that do not require authentication
 PUBLIC_PATH_PREFIXES = ("/auth/", "/health", "/livez", "/static/", "/tiktok", "/topics/cron", "/blog/cron")
 PUBLIC_PATHS_EXACT = ("/health", "/livez", "/terms", "/privacy")
+_AUTH_TOKEN_CACHE_TTL_SECONDS = 60.0
+_AUTH_TOKEN_CACHE_MAX_ENTRIES = 256
+_authenticated_token_cache: "OrderedDict[str, tuple[float, str]]" = OrderedDict()
+
+
+def _token_cache_key(access_token: str) -> str:
+    return hashlib.sha256(access_token.encode("utf-8")).hexdigest()
+
+
+def _cached_authenticated_email(access_token: str) -> Optional[str]:
+    key = _token_cache_key(access_token)
+    cached = _authenticated_token_cache.get(key)
+    if cached is None:
+        return None
+    expires_at, email = cached
+    if expires_at <= time.monotonic():
+        _authenticated_token_cache.pop(key, None)
+        return None
+    _authenticated_token_cache.move_to_end(key)
+    return email
+
+
+def _cache_authenticated_email(access_token: str, email: str) -> None:
+    key = _token_cache_key(access_token)
+    _authenticated_token_cache[key] = (
+        time.monotonic() + _AUTH_TOKEN_CACHE_TTL_SECONDS,
+        email,
+    )
+    _authenticated_token_cache.move_to_end(key)
+    while len(_authenticated_token_cache) > _AUTH_TOKEN_CACHE_MAX_ENTRIES:
+        _authenticated_token_cache.popitem(last=False)
+
+
+def invalidate_authenticated_token(access_token: str) -> None:
+    """Remove one signed-in token from the short request-auth cache."""
+    _authenticated_token_cache.pop(_token_cache_key(access_token), None)
 
 
 def _is_local_request(request: Request) -> bool:
@@ -93,12 +131,18 @@ async def load_authenticated_user(request: Request) -> bool:
     if not session or "access_token" not in session:
         return False
 
+    cached_email = _cached_authenticated_email(session["access_token"])
+    if cached_email:
+        request.state.user_email = cached_email
+        return True
+
     # Validate token with Supabase
     from app.features.auth.queries import get_user_from_token, refresh_session
 
     user = await get_user_from_token(session["access_token"])
     if user:
         request.state.user_email = user["email"]
+        _cache_authenticated_email(session["access_token"], user["email"])
         return True
 
     # Token expired — try refresh
@@ -107,6 +151,10 @@ async def load_authenticated_user(request: Request) -> bool:
         if new_session:
             request.state.user_email = new_session["user"]["email"]
             request.state.new_session = new_session  # Handler will update cookie
+            _cache_authenticated_email(
+                new_session["access_token"],
+                new_session["user"]["email"],
+            )
             return True
 
     return False

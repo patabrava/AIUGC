@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from copy import deepcopy
+from pathlib import Path
 
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "test-key")
@@ -20,6 +21,12 @@ from app.main import app  # noqa: E402
 from app.features.posts import handlers as posts_handlers  # noqa: E402
 
 
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_REVIEW_MIGRATION = (
+    ROOT / "supabase/migrations/20260812000000_atomic_script_review.sql"
+)
+
+
 class _FakeResponse:
     def __init__(self, data):
         self.data = data
@@ -33,9 +40,11 @@ class _FakeTable:
         self.filters = []
         self.payload = None
         self.operation = "select"
+        self.selected_fields = ""
 
-    def select(self, *_fields):
+    def select(self, *fields):
         self.operation = "select"
+        self.selected_fields = ",".join(str(field) for field in fields)
         return self
 
     def update(self, payload):
@@ -57,7 +66,51 @@ class _FakeTable:
                 row.update(deepcopy(self.payload))
                 updated.append(deepcopy(row))
             return _FakeResponse(updated)
-        return _FakeResponse([deepcopy(row) for row in matches])
+        selected = [deepcopy(row) for row in matches]
+        if self.table_name == "posts" and "batch:batches" in self.selected_fields:
+            for row in selected:
+                row["batch"] = next(
+                    (
+                        deepcopy(batch)
+                        for batch in self.storage.get("batches", [])
+                        if batch.get("id") == row.get("batch_id")
+                    ),
+                    None,
+                )
+        return _FakeResponse(selected)
+
+
+class _FakeRpc:
+    def __init__(self, storage, operation_log, function_name, payload):
+        self.storage = storage
+        self.operation_log = operation_log
+        self.function_name = function_name
+        self.payload = payload
+
+    def execute(self):
+        self.operation_log.append(("rpc", self.function_name, deepcopy(self.payload)))
+        assert self.function_name == "apply_post_script_review"
+        post = next(row for row in self.storage["posts"] if row["id"] == self.payload["p_post_id"])
+        post["seed_data"] = deepcopy(self.payload["p_seed_data"])
+        post["video_prompt_json"] = deepcopy(self.payload["p_video_prompt_json"])
+        if self.payload.get("p_video_status") is not None:
+            post["video_status"] = self.payload["p_video_status"]
+        if self.payload.get("p_post_type"):
+            post["post_type"] = self.payload["p_post_type"]
+
+        batch = next(row for row in self.storage["batches"] if row["id"] == post["batch_id"])
+        statuses = [
+            row.get("seed_data", {}).get("script_review_status", "pending")
+            for row in self.storage["posts"]
+            if row.get("batch_id") == post["batch_id"]
+        ]
+        if (
+            batch.get("state") == "S2_SEEDED"
+            and any(value == "approved" for value in statuses)
+            and all(value in {"approved", "removed"} for value in statuses)
+        ):
+            batch["state"] = "S4_SCRIPTED"
+        return _FakeResponse({"batch_state": batch.get("state")})
 
 
 class _FakeClient:
@@ -68,10 +121,24 @@ class _FakeClient:
     def table(self, table_name):
         return _FakeTable(self.storage, table_name, self.operation_log)
 
+    def rpc(self, function_name, payload):
+        return _FakeRpc(self.storage, self.operation_log, function_name, payload)
+
 
 class _FakeSupabase:
     def __init__(self, storage):
         self.client = _FakeClient(storage)
+
+
+def test_script_review_migration_is_atomic_and_service_role_only():
+    source = SCRIPT_REVIEW_MIGRATION.read_text()
+
+    assert "CREATE OR REPLACE FUNCTION public.apply_post_script_review" in source
+    assert "FOR UPDATE;" in source
+    assert "SET state = 'S4_SCRIPTED'" in source
+    assert "approved_count > 0 AND pending_count = 0" in source
+    assert "FROM PUBLIC, anon, authenticated" in source
+    assert "TO service_role" in source
 
 
 def test_remove_script_review_marks_post_removed_and_returns_success(monkeypatch):
@@ -155,13 +222,13 @@ def test_approve_manual_character_script_saves_text_and_marks_approved(monkeypat
     assert seed_data["script_review_status"] == "approved"
     assert seed_data["manual_post_type"] == "value"
     assert storage["posts"][0]["video_prompt_json"] is None
-    post_updates = [
+    review_writes = [
         operation
         for operation in fake_supabase.client.operation_log
-        if operation[0:2] == ("posts", "update")
+        if operation[0:2] == ("rpc", "apply_post_script_review")
     ]
-    assert len(post_updates) == 1
-    assert post_updates[0][2]["seed_data"]["script_review_status"] == "approved"
+    assert len(review_writes) == 1
+    assert review_writes[0][2]["p_seed_data"]["script_review_status"] == "approved"
 
 
 def test_approve_manual_character_script_auto_derives_duration_tier(monkeypatch):
@@ -312,10 +379,7 @@ def test_final_semantic_script_approval_advances_batch_without_second_confirmati
     assert storage["batches"][0]["state"] == "S4_SCRIPTED"
     assert [(table, operation) for table, operation, _payload in fake_supabase.client.operation_log] == [
         ("posts", "select"),
-        ("posts", "update"),
-        ("batches", "select"),
-        ("posts", "select"),
-        ("batches", "update"),
+        ("rpc", "apply_post_script_review"),
     ]
 
 

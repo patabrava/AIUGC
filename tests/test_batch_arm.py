@@ -4,6 +4,7 @@ import asyncio
 import pytest
 from copy import deepcopy
 from datetime import datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 
 from pydantic import ValidationError as PydanticValidationError
@@ -149,9 +150,30 @@ class _FakeTable:
 class _FakeClient:
     def __init__(self, storage):
         self.storage = storage
+        self.rpc_calls = []
 
     def table(self, name):
         return _FakeTable(self.storage, name)
+
+    def rpc(self, function_name, payload):
+        client = self
+
+        class _Rpc:
+            def execute(self):
+                client.rpc_calls.append((function_name, deepcopy(payload)))
+                assert function_name == "arm_batch_publish_schedule"
+                schedules = payload["p_schedules"]
+                for schedule in schedules:
+                    post = next(row for row in client.storage["posts"] if row["id"] == schedule["post_id"])
+                    post.update({
+                        "scheduled_at": schedule["scheduled_at"],
+                        "publish_caption": schedule["publish_caption"],
+                        "social_networks": schedule["networks"],
+                        "publish_status": "scheduled",
+                    })
+                return _FakeResponse({"armed_count": len(schedules)})
+
+        return _Rpc()
 
 
 def _make_storage(batch_id="b1", num_posts=5):
@@ -206,6 +228,8 @@ class TestBatchArmHandler:
             assert post["scheduled_at"] is not None
             assert post["publish_status"] == "scheduled"
             assert post["social_networks"] == ["instagram", "facebook"]
+        assert len(client.rpc_calls) == 1
+        assert client.rpc_calls[0][0] == "arm_batch_publish_schedule"
 
     def test_arm_accepts_single_post_and_single_slot(self):
         storage = _make_storage(num_posts=1)
@@ -321,6 +345,19 @@ class TestBatchArmHandler:
             )
         )
         assert storage["posts"][0]["social_networks"] == ["tiktok"]
+
+
+def test_atomic_batch_arm_migration_validates_and_updates_in_one_statement():
+    migration = (
+        Path(__file__).resolve().parents[1]
+        / "supabase/migrations/20260812010000_atomic_batch_publish_arm.sql"
+    ).read_text()
+
+    assert "CREATE OR REPLACE FUNCTION public.arm_batch_publish_schedule" in migration
+    assert "FOR UPDATE;" in migration
+    assert "matched_count <> expected_count" in migration
+    assert "UPDATE public.posts AS post" in migration
+    assert "TO service_role" in migration
 
 
 def test_arm_rejects_tiktok_post_without_settings(monkeypatch):

@@ -13,6 +13,7 @@ from app.features.auth.queries import is_email_allowed, send_otp, verify_otp, si
 from app.features.auth.middleware import (
     encode_session_cookie,
     decode_session_cookie,
+    invalidate_authenticated_token,
     should_bypass_auth,
 )
 
@@ -238,6 +239,7 @@ async def handle_logout(request: Request):
         session = decode_session_cookie(cookie_value, settings.token_encryption_key)
         if session and "access_token" in session:
             await sign_out(session["access_token"])
+            invalidate_authenticated_token(session["access_token"])
 
     response = RedirectResponse(url="/auth/login", status_code=302)
     response.delete_cookie(key=settings.session_cookie_name)

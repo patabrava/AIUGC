@@ -4,6 +4,7 @@ FastAPI route handlers for post operations.
 Per Constitution § V: Locality & Vertical Slices
 """
 
+import asyncio
 import json
 from typing import Optional
 
@@ -37,6 +38,7 @@ from app.features.characters.scene_reference import get_scene_bible
 from app.features.shot_production.planner import plan_editorial_beats
 from app.features.topics.semantic_scripts import validate_semantic_script
 from app.features.posts.schemas import UpdatePromptRequest
+from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
 from app.core.states import BatchState
 logger = get_logger(__name__)
 
@@ -203,7 +205,10 @@ def _load_post_seed_data(post_id: str, supabase_client):
     """Fetch post plus normalized seed data for localized S2 review updates."""
     response = (
         supabase_client.table("posts")
-        .select("id, batch_id, post_type, seed_data, video_prompt_json")
+        .select(
+            "id, batch_id, post_type, seed_data, video_prompt_json, video_status,"
+            " batch:batches(id,state,creation_mode,target_length_tier,target_duration_seconds)"
+        )
         .eq("id", post_id)
         .execute()
     )
@@ -239,6 +244,20 @@ def _load_batch_script_settings(batch_id: str, supabase_client) -> dict:
         "target_length_tier": row.get("target_length_tier"),
         "target_duration_seconds": row.get("target_duration_seconds"),
     }
+
+
+def _post_batch_script_settings(post: dict, supabase_client) -> dict:
+    """Use the PostgREST embedded batch to avoid a second approval-path read."""
+    embedded = post.get("batch")
+    if isinstance(embedded, list):
+        embedded = embedded[0] if embedded else None
+    if isinstance(embedded, dict) and embedded:
+        return {
+            "creation_mode": str(embedded.get("creation_mode") or "automated"),
+            "target_length_tier": embedded.get("target_length_tier"),
+            "target_duration_seconds": embedded.get("target_duration_seconds"),
+        }
+    return _load_batch_script_settings(post["batch_id"], supabase_client)
 
 
 def _apply_semantic_visual_overrides(
@@ -294,8 +313,9 @@ def _apply_script_text_update(
     supabase_client,
     require_valid_duration: bool = False,
     review_status: str = "pending",
+    persist: bool = True,
 ) -> dict:
-    batch_settings = _load_batch_script_settings(post["batch_id"], supabase_client)
+    batch_settings = _post_batch_script_settings(post, supabase_client)
     batch_creation_mode = batch_settings["creation_mode"]
     is_semantic_batch = is_semantic_ugc_mode(batch_creation_mode)
     seed_data["script"] = script_text
@@ -410,6 +430,9 @@ def _apply_script_text_update(
     if post_type_changed:
         update_payload["post_type"] = resolved_post_type
 
+    if not persist:
+        return seed_data
+
     try:
         supabase_client.table("posts").update(update_payload).eq("id", post["id"]).execute()
     except APIError as exc:
@@ -433,6 +456,100 @@ def _apply_script_text_update(
         else:
             raise
     return seed_data
+
+
+def _script_review_rpc_unavailable(exc: APIError) -> bool:
+    error_text = str(exc).lower()
+    return exc.code in {"PGRST202", "42883"} or (
+        "apply_post_script_review" in error_text
+        and ("not find" in error_text or "does not exist" in error_text)
+    )
+
+
+def _persist_script_review(
+    *,
+    post: dict,
+    seed_data: dict,
+    action: str,
+    clear_video_prompt: bool,
+    resolved_post_type: Optional[str],
+    supabase_client,
+) -> Optional[str]:
+    """Persist review and conditional S4 advancement through one transaction."""
+    video_prompt_json = None if clear_video_prompt else post.get("video_prompt_json")
+    video_status = (post.get("video_status") or "pending") if action == "removed" else None
+    if not hasattr(supabase_client, "rpc"):
+        return _persist_script_review_legacy(
+            post=post,
+            seed_data=seed_data,
+            action=action,
+            video_prompt_json=video_prompt_json,
+            video_status=video_status,
+            resolved_post_type=resolved_post_type,
+            supabase_client=supabase_client,
+        )
+    try:
+        response = supabase_client.rpc(
+            "apply_post_script_review",
+            {
+                "p_post_id": post["id"],
+                "p_seed_data": seed_data,
+                "p_video_prompt_json": video_prompt_json,
+                "p_video_status": video_status,
+                "p_post_type": resolved_post_type,
+            },
+        ).execute()
+        result = response.data or {}
+        if isinstance(result, list):
+            result = result[0] if result else {}
+        return result.get("batch_state")
+    except APIError as exc:
+        if not _script_review_rpc_unavailable(exc):
+            raise
+        logger.warning(
+            "script_review_rpc_unavailable_fallback",
+            post_id=post.get("id"),
+            error=str(exc),
+        )
+
+    # Rolling-deploy compatibility while the migration reaches the database.
+    return _persist_script_review_legacy(
+        post=post,
+        seed_data=seed_data,
+        action=action,
+        video_prompt_json=video_prompt_json,
+        video_status=video_status,
+        resolved_post_type=resolved_post_type,
+        supabase_client=supabase_client,
+    )
+
+
+def _persist_script_review_legacy(
+    *,
+    post: dict,
+    seed_data: dict,
+    action: str,
+    video_prompt_json,
+    video_status: Optional[str],
+    resolved_post_type: Optional[str],
+    supabase_client,
+) -> Optional[str]:
+    update_payload = {
+        "seed_data": seed_data,
+        "video_prompt_json": video_prompt_json,
+    }
+    if video_status is not None:
+        update_payload["video_status"] = video_status
+    if resolved_post_type:
+        update_payload["post_type"] = resolved_post_type
+    supabase_client.table("posts").update(update_payload).eq("id", post["id"]).execute()
+    if action in {"approved", "removed"} and post.get("batch_id"):
+        return _advance_batch_when_scripts_are_reviewed(
+            batch_id=post["batch_id"],
+            supabase_client=supabase_client,
+        )
+    embedded_batch = post.get("batch") or {}
+    return embedded_batch.get("state") if isinstance(embedded_batch, dict) else None
 
 
 def _load_batch_for_prompt(batch_id: str, supabase_client) -> dict:
@@ -537,6 +654,79 @@ async def update_post_script(post_id: str, request: Request):
         )
 
 
+def _update_post_script_review_sync(
+    *,
+    post_id: str,
+    action: str,
+    submitted_script_text: Optional[str],
+    submitted_post_type: Optional[str],
+    submitted_semantic_scene_key: Optional[str],
+    submitted_semantic_wardrobe_description: Optional[str],
+) -> SuccessResponse:
+    """Execute the synchronous Supabase review transaction outside the ASGI loop."""
+    supabase = get_supabase().client
+    post, seed_data = _load_post_seed_data(post_id, supabase)
+    resolved_post_type = None
+
+    if action == "approved":
+        if submitted_script_text:
+            seed_data = _apply_script_text_update(
+                post=post,
+                seed_data=seed_data,
+                script_text=submitted_script_text,
+                submitted_post_type=submitted_post_type,
+                submitted_semantic_scene_key=submitted_semantic_scene_key,
+                submitted_semantic_wardrobe_description=(
+                    submitted_semantic_wardrobe_description
+                ),
+                supabase_client=supabase,
+                require_valid_duration=True,
+                review_status="approved",
+                persist=False,
+            )
+            candidate_post_type = str(seed_data.get("manual_post_type") or "").strip()
+            if candidate_post_type and candidate_post_type != str(post.get("post_type") or "").strip():
+                resolved_post_type = candidate_post_type
+        if not (seed_data.get("script") or "").strip():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Cannot approve an empty script. Add script content first.",
+            )
+        seed_data["script_review_status"] = "approved"
+        seed_data.pop("video_excluded", None)
+    elif action == "removed":
+        seed_data["script_review_status"] = "removed"
+        seed_data["video_excluded"] = True
+    else:
+        seed_data["script_review_status"] = "pending"
+        seed_data.pop("video_excluded", None)
+
+    batch_state = _persist_script_review(
+        post=post,
+        seed_data=seed_data,
+        action=action,
+        clear_video_prompt=(action == "removed" or submitted_script_text is not None),
+        resolved_post_type=resolved_post_type,
+        supabase_client=supabase,
+    )
+
+    logger.info(
+        "post_script_review_updated",
+        post_id=post_id,
+        batch_id=post.get("batch_id"),
+        action=action,
+    )
+
+    return SuccessResponse(
+        data={
+            "id": post_id,
+            "action": action,
+            "script_review_status": seed_data["script_review_status"],
+            "batch_state": batch_state,
+        }
+    )
+
+
 @router.put("/{post_id}/script-review", response_model=SuccessResponse)
 async def update_post_script_review(post_id: str, request: Request):
     """Approve, remove, or reset an individual post script during S2 review."""
@@ -575,74 +765,14 @@ async def update_post_script_review(post_id: str, request: Request):
                 detail=f"action must be one of {sorted(allowed_actions)}"
             )
 
-        supabase = get_supabase().client
-        post, seed_data = _load_post_seed_data(post_id, supabase)
-        script_update_persisted = False
-
-        if action == "approved":
-            if submitted_script_text:
-                seed_data = _apply_script_text_update(
-                    post=post,
-                    seed_data=seed_data,
-                    script_text=submitted_script_text,
-                    submitted_post_type=submitted_post_type,
-                    submitted_semantic_scene_key=submitted_semantic_scene_key,
-                    submitted_semantic_wardrobe_description=(
-                        submitted_semantic_wardrobe_description
-                    ),
-                    supabase_client=supabase,
-                    require_valid_duration=True,
-                    review_status="approved",
-                )
-                script_update_persisted = True
-            if not (seed_data.get("script") or "").strip():
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail="Cannot approve an empty script. Add script content first.",
-                )
-            seed_data["script_review_status"] = "approved"
-            seed_data.pop("video_excluded", None)
-        elif action == "removed":
-            seed_data["script_review_status"] = "removed"
-            seed_data["video_excluded"] = True
-        else:
-            seed_data["script_review_status"] = "pending"
-            seed_data.pop("video_excluded", None)
-
-        update_payload = {
-            "seed_data": seed_data,
-            "video_prompt_json": (
-                None if action == "removed" or submitted_script_text else post.get("video_prompt_json")
-            ),
-        }
-        if action == "removed":
-            # Keep the existing non-null video_status; removal is expressed via seed_data flags.
-            update_payload["video_status"] = post.get("video_status") or "pending"
-
-        if not script_update_persisted:
-            supabase.table("posts").update(update_payload).eq("id", post_id).execute()
-
-        batch_state = None
-        if action in {"approved", "removed"} and post.get("batch_id"):
-            batch_state = _advance_batch_when_scripts_are_reviewed(
-                batch_id=post["batch_id"],
-                supabase_client=supabase,
-            )
-
-        logger.info(
-            "post_script_review_updated",
+        return await asyncio.to_thread(
+            _update_post_script_review_sync,
             post_id=post_id,
-            batch_id=post.get("batch_id"),
-            action=action
-        )
-
-        return SuccessResponse(
-            data={
-                "id": post_id,
-                "action": action,
-                "script_review_status": seed_data["script_review_status"],
-                "batch_state": batch_state,
-            }
+            action=action,
+            submitted_script_text=submitted_script_text,
+            submitted_post_type=submitted_post_type,
+            submitted_semantic_scene_key=submitted_semantic_scene_key,
+            submitted_semantic_wardrobe_description=submitted_semantic_wardrobe_description,
         )
 
     except FlowForgeException:

@@ -1270,6 +1270,8 @@ def test_semantic_script_review_exposes_blog_generation_and_script_sources():
     assert "Official accessibility guidance" in html
     assert "window.handleScriptSaveResponse" in html
     assert "window.handleScriptReviewResponse" in html
+    assert "window.handleScriptReviewStart" in html
+    assert "disabled:cursor-wait" in html
     assert 'href="https://source.example/accessibility"' in html
     assert "Blog post" in html
     assert "/blog/posts/post-value/blog-toggle" in html

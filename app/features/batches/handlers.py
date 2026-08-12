@@ -6,6 +6,7 @@ Per Constitution § V: Locality & Vertical Slices
 
 import asyncio
 import json
+import time
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -70,7 +71,9 @@ from app.features.semantic_videos import queries as semantic_video_queries
 from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
 
 try:
-    from app.features.publish.tiktok import get_tiktok_publish_state
+    from app.features.publish.tiktok import (
+        get_cached_tiktok_publish_state as get_tiktok_publish_state,
+    )
 except ModuleNotFoundError:
     async def get_tiktok_publish_state() -> Dict[str, Any]:
         """Keep batch detail rendering alive when TikTok code is not deployed yet."""
@@ -221,6 +224,19 @@ def _refresh_prompt_scene_for_display(video_prompt: Optional[Dict[str, Any]]) ->
     return refreshed
 
 
+def _posts_have_manual_drafts(posts: list[Dict[str, Any]]) -> bool:
+    for post in posts:
+        seed_data = post.get("seed_data") or {}
+        if isinstance(seed_data, str):
+            try:
+                seed_data = json.loads(seed_data)
+            except json.JSONDecodeError:
+                seed_data = {}
+        if isinstance(seed_data, dict) and seed_data.get("manual_draft") is True:
+            return True
+    return False
+
+
 def _batch_has_manual_drafts(batch: Dict[str, Any]) -> bool:
     if is_manual_creation_mode(batch.get("creation_mode")):
         return True
@@ -230,15 +246,7 @@ def _batch_has_manual_drafts(batch: Dict[str, Any]) -> bool:
         return False
 
     try:
-        for post in get_posts_by_batch(batch_id):
-            seed_data = post.get("seed_data") or {}
-            if isinstance(seed_data, str):
-                try:
-                    seed_data = json.loads(seed_data)
-                except json.JSONDecodeError:
-                    seed_data = {}
-            if isinstance(seed_data, dict) and seed_data.get("manual_draft") is True:
-                return True
+        return _posts_have_manual_drafts(get_posts_by_batch(batch_id))
     except Exception as exc:
         logger.warning(
             "manual_batch_detection_failed",
@@ -1400,7 +1408,7 @@ def _recover_stale_semantic_batch(
             _COVERAGE_RECOVERY_LAST_SCHEDULED_AT.pop(batch_id, None)
             schedule_batch_discovery(batch_id, reason="coverage_recovery")
         else:
-            now = asyncio.get_running_loop().time()
+            now = time.monotonic()
             last_scheduled = _COVERAGE_RECOVERY_LAST_SCHEDULED_AT.get(batch_id, 0.0)
             progress = update_seeding_progress(
                 batch_id,
@@ -1450,7 +1458,12 @@ async def list_batches_endpoint(
     List batches with optional filtering.
     """
     try:
-        batches, total = list_batches(archived=archived, limit=limit, offset=offset)
+        batches, total = await asyncio.to_thread(
+            list_batches,
+            archived=archived,
+            limit=limit,
+            offset=offset,
+        )
 
         batch_responses = [BatchResponse(**batch) for batch in batches]
 
@@ -1484,25 +1497,70 @@ async def list_batches_endpoint(
         )
 
 
+def _load_batch_detail_records(batch_id: str) -> tuple[
+    Dict[str, Any],
+    Dict[str, Any],
+    list[Dict[str, Any]],
+    dict[str, list[dict[str, Any]]],
+    Dict[str, Any],
+    list[dict[str, Any]],
+]:
+    """Load the synchronous batch projection on a worker thread in one bounded pass."""
+    batch = get_batch_by_id(batch_id)
+    posts_data = get_posts_by_batch(batch_id)
+    posts_by_type: Dict[str, int] = {}
+    for post in posts_data:
+        post_type = str(post.get("post_type") or "")
+        posts_by_type[post_type] = posts_by_type.get(post_type, 0) + 1
+    posts_summary = {
+        "posts_count": len(posts_data),
+        "posts_by_state": posts_by_type,
+    }
+    if not (
+        is_manual_creation_mode(batch.get("creation_mode"))
+        or _posts_have_manual_drafts(posts_data)
+    ):
+        _recover_stale_semantic_batch(
+            batch,
+            posts_summary,
+            get_seeding_progress(batch_id),
+        )
+    post_ids = [str(post.get("id")) for post in posts_data if post.get("id")]
+    scene_references = character_queries.list_scene_references_for_posts(post_ids)
+    meta_connection = _sanitize_meta_connection(
+        _effective_meta_connection(batch_id, batch.get("meta_connection"))
+    )
+    scene_image_jobs = (
+        semantic_video_queries.list_scene_image_jobs_for_posts(post_ids)
+        if is_semantic_ugc_mode(batch.get("creation_mode"))
+        else []
+    )
+    return (
+        batch,
+        posts_summary,
+        posts_data,
+        scene_references,
+        meta_connection,
+        scene_image_jobs,
+    )
+
+
 @router.get("/{batch_id}", response_model=SuccessResponse)
 async def get_batch_endpoint(request: Request, batch_id: str):
     """
     Get batch by ID with posts summary.
     """
     try:
-        from app.features.topics.queries import get_posts_by_batch
-        
-        batch = get_batch_by_id(batch_id)
-        posts_summary = get_batch_posts_summary(batch_id)
-        if not _batch_has_manual_drafts(batch):
-            _recover_stale_semantic_batch(
-                batch,
-                posts_summary,
-                get_seeding_progress(batch_id),
-            )
-        posts_data = get_posts_by_batch(batch_id)
-        raw_scene_references_by_post = character_queries.list_scene_references_for_posts(
-            [str(p.get("id")) for p in posts_data if p.get("id")]
+        (
+            batch,
+            posts_summary,
+            posts_data,
+            raw_scene_references_by_post,
+            meta_connection,
+            scene_image_jobs,
+        ) = await asyncio.to_thread(
+            _load_batch_detail_records,
+            batch_id,
         )
         scene_references_by_post = {}
         batch_actor_identity_id = str(batch.get("actor_identity_id") or "").strip()
@@ -1680,9 +1738,7 @@ async def get_batch_endpoint(request: Request, batch_id: str):
             **batch,
             "creation_mode": derived_creation_mode,
             **posts_summary,
-            "meta_connection": _sanitize_meta_connection(
-                _effective_meta_connection(batch_id, batch.get("meta_connection"))
-            ),
+            "meta_connection": meta_connection,
             "tiktok_connection": await get_tiktok_publish_state(),
             "posts": posts_list,
         }
@@ -1691,11 +1747,7 @@ async def get_batch_endpoint(request: Request, batch_id: str):
             batch_model = BatchDetailResponse(**batch_detail)
             batch_payload = batch_model.model_dump(mode="json")
             if is_semantic_ugc_mode(batch_payload.get("creation_mode")):
-                batch_payload["_semantic_scene_image_jobs"] = (
-                    semantic_video_queries.list_scene_image_jobs_for_posts(
-                        [str(post.get("id") or "") for post in batch_payload["posts"]]
-                    )
-                )
+                batch_payload["_semantic_scene_image_jobs"] = scene_image_jobs
             context = {
                 "request": request,
                 "batch": batch_payload,
@@ -1719,50 +1771,39 @@ async def get_batch_endpoint(request: Request, batch_id: str):
         )
 
 
-@router.get("/{batch_id}/status", response_model=SuccessResponse)
-async def get_batch_status(batch_id: str):
-    """Return lightweight status payload for polling newly created batches."""
-    try:
-        batch = get_batch_by_id(batch_id)
-        posts_summary = get_batch_posts_summary(batch_id)
-        progress = get_seeding_progress(batch_id)
+def _load_batch_status(batch_id: str) -> SuccessResponse:
+    batch = get_batch_by_id(batch_id)
+    posts_summary = get_batch_posts_summary(batch_id)
+    progress = get_seeding_progress(batch_id)
 
-        is_manual_batch = _batch_has_manual_drafts(batch) or (
-            batch.get("state") == BatchState.S2_SEEDED.value
-            and not batch.get("post_type_counts")
-        )
+    is_manual_batch = is_manual_creation_mode(batch.get("creation_mode")) or (
+        batch.get("state") == BatchState.S2_SEEDED.value
+        and not batch.get("post_type_counts")
+    )
 
-        if is_manual_batch:
-            payload = {
-                "id": batch["id"],
-                "state": batch["state"],
-                "creation_mode": batch.get("creation_mode"),
-                "target_length_tier": batch.get("target_length_tier"),
-                "target_duration_seconds": batch.get("target_duration_seconds"),
-                "video_pipeline_route": batch.get("video_pipeline_route"),
-                "posts_count": posts_summary["posts_count"],
-                "posts_by_state": posts_summary["posts_by_state"],
-                "updated_at": batch["updated_at"],
-                "progress": progress,
-            }
-            return SuccessResponse(data=payload)
-
+    if not is_manual_batch:
         progress = _recover_stale_semantic_batch(batch, posts_summary, progress)
 
-        payload = {
-            "id": batch["id"],
-            "state": batch["state"],
-            "creation_mode": batch.get("creation_mode"),
-            "target_length_tier": batch.get("target_length_tier"),
-            "target_duration_seconds": batch.get("target_duration_seconds"),
-            "video_pipeline_route": batch.get("video_pipeline_route"),
-            "posts_count": posts_summary["posts_count"],
-            "posts_by_state": posts_summary["posts_by_state"],
-            "updated_at": batch["updated_at"],
-            "progress": progress,
-        }
+    payload = {
+        "id": batch["id"],
+        "state": batch["state"],
+        "creation_mode": batch.get("creation_mode"),
+        "target_length_tier": batch.get("target_length_tier"),
+        "target_duration_seconds": batch.get("target_duration_seconds"),
+        "video_pipeline_route": batch.get("video_pipeline_route"),
+        "posts_count": posts_summary["posts_count"],
+        "posts_by_state": posts_summary["posts_by_state"],
+        "updated_at": batch["updated_at"],
+        "progress": progress,
+    }
+    return SuccessResponse(data=payload)
 
-        return SuccessResponse(data=payload)
+
+@router.get("/{batch_id}/status", response_model=SuccessResponse)
+async def get_batch_status(batch_id: str):
+    """Return lightweight status payload without blocking unrelated requests."""
+    try:
+        return await asyncio.to_thread(_load_batch_status, batch_id)
 
     except FlowForgeException:
         raise

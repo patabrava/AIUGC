@@ -80,6 +80,10 @@ class _FakeTable:
         self.filters.append(("eq", key, value))
         return self
 
+    def in_(self, key, values):
+        self.filters.append(("in", key, set(values)))
+        return self
+
     def lte(self, key, value):
         self.filters.append(("lte", key, value))
         return self
@@ -115,6 +119,8 @@ class _FakeTable:
             if operator == "eq" and current != value:
                 return False
             if operator == "lte" and current > value:
+                return False
+            if operator == "in" and current not in value:
                 return False
         return True
 

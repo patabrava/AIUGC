@@ -34,7 +34,11 @@ from app.features.topics.queries import get_topic_research_cron_monitoring
 from app.features.posts.handlers import router as posts_router
 from app.features.videos.handlers import router as videos_router
 from app.features.qa.handlers import router as qa_router
-from app.features.publish.handlers import router as publish_router, run_scheduled_publish_job
+from app.features.publish.handlers import (
+    close_meta_http_client,
+    router as publish_router,
+    run_scheduled_publish_job,
+)
 from app.features.blog.handlers import router as blog_router, run_scheduled_blog_publish_job
 from app.features.auth.handlers import router as auth_router
 from app.features.auth.middleware import (
@@ -62,6 +66,7 @@ logger = get_logger(__name__)
 
 _HEALTH_DB_CACHE_SECONDS = 60
 _HEALTH_DB_TIMEOUT_SECONDS = 5
+_SLOW_REQUEST_LOG_SECONDS = 0.5
 _SCENE_IMAGE_WORKER_HEARTBEAT_TTL_SECONDS = 45
 _TRUE_ENV_VALUES = {"1", "true", "yes"}
 _health_db_cache = {
@@ -160,6 +165,7 @@ async def lifespan(app: FastAPI):
         scheduler.shutdown(wait=False)
         logger.info("publish_scheduler_stopped")
         logger.info("blog_publish_scheduler_stopped")
+    await close_meta_http_client()
     logger.info("application_shutdown")
 
 
@@ -341,6 +347,24 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=_trusted_hosts_from_sett
 app.mount("/static", StaticFiles(directory="static"), name="static")
 TIKTOK_VERIFICATION_FILENAME = "tiktokfMAUp90SKLqchsEPpV3O5uLRr3ySu5h7.txt"
 TIKTOK_SANDBOX_VERIFICATION_FILENAME = "tiktokdcXzbIXpURopZpk1bkFGKLkXFMtWeX9T.txt"
+
+
+@app.middleware("http")
+async def request_timing_middleware(request: Request, call_next):
+    """Expose request latency and log only the paths that exceed the app budget."""
+    started_at = time.perf_counter()
+    response = await call_next(request)
+    duration_ms = (time.perf_counter() - started_at) * 1000
+    response.headers["Server-Timing"] = f"app;dur={duration_ms:.1f}"
+    if duration_ms >= _SLOW_REQUEST_LOG_SECONDS * 1000:
+        logger.warning(
+            "slow_http_request",
+            method=request.method,
+            path=request.url.path,
+            status_code=response.status_code,
+            duration_ms=round(duration_ms, 1),
+        )
+    return response
 
 
 # Middleware for correlation IDs

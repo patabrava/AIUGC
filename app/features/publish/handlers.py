@@ -103,6 +103,7 @@ META_OAUTH_URL = "https://www.facebook.com/v25.0/dialog/oauth"
 META_TIMEOUT_SECONDS = 30.0
 INSTAGRAM_POLL_ATTEMPTS = 45
 INSTAGRAM_POLL_SECONDS = 2
+_meta_http_client: Optional[httpx.AsyncClient] = None
 META_LOGIN_SCOPES = [
     "pages_show_list",
     "pages_read_engagement",
@@ -111,6 +112,23 @@ META_LOGIN_SCOPES = [
     "instagram_basic",
     "instagram_content_publish",
 ]
+
+
+def _get_meta_http_client() -> httpx.AsyncClient:
+    global _meta_http_client
+    if _meta_http_client is None or _meta_http_client.is_closed:
+        _meta_http_client = httpx.AsyncClient(
+            timeout=META_TIMEOUT_SECONDS,
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        )
+    return _meta_http_client
+
+
+async def close_meta_http_client() -> None:
+    global _meta_http_client
+    if _meta_http_client is not None and not _meta_http_client.is_closed:
+        await _meta_http_client.aclose()
+    _meta_http_client = None
 
 
 def _load_json_object(value: Any) -> Dict[str, Any]:
@@ -335,8 +353,12 @@ async def _meta_request(
     data: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Perform a Meta Graph API request with standard error normalization."""
-    async with httpx.AsyncClient(timeout=META_TIMEOUT_SECONDS) as client:
-        response = await client.request(method, url, params=params, data=data)
+    response = await _get_meta_http_client().request(
+        method,
+        url,
+        params=params,
+        data=data,
+    )
 
     try:
         payload = response.json()
@@ -566,9 +588,10 @@ def _set_workspace_meta_connection(meta_connection: Dict[str, Any], *, source_ba
     batch_ids = [row.get("id") for row in rows if row.get("id")]
     if source_batch_id and source_batch_id not in batch_ids:
         batch_ids.append(source_batch_id)
-
-    for batch_id in batch_ids:
-        _update_batch_meta_connection(str(batch_id), deepcopy(meta_connection))
+    if batch_ids:
+        get_supabase().client.table("batches").update(
+            {"meta_connection": deepcopy(meta_connection)}
+        ).in_("id", batch_ids).execute()
 
 
 def _get_selected_meta_targets(meta_connection: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -1250,12 +1273,13 @@ async def confirm_publish(
         )
 
     supabase = get_supabase().client
-    results: List[PublishResult] = []
-    for schedule in schedules:
-        supabase.table("posts").update(
+    post_ids = [schedule["id"] for schedule in schedules]
+    await asyncio.to_thread(
+        lambda: supabase.table("posts").update(
             {"publish_status": "scheduled", "publish_results": {}, "platform_ids": {}}
-        ).eq("id", schedule["id"]).execute()
-        results.append(PublishResult(post_id=schedule["id"], success=True))
+        ).in_("id", post_ids).execute()
+    )
+    results = [PublishResult(post_id=post_id, success=True) for post_id in post_ids]
 
     logger.info(
         "batch_publish_dispatch_armed",
@@ -1597,7 +1621,11 @@ async def dispatch_due_posts(limit: int = 10, *, trigger: str = "scheduler") -> 
         platform_ids = _load_json_object(post.get("platform_ids"))
         batch = _load_batch(post["batch_id"], fields="id,meta_connection,state")
         meta_connection = _effective_meta_connection(post["batch_id"], batch.get("meta_connection"))
-        tiktok_connection = await get_tiktok_publish_state()
+        tiktok_connection = (
+            await get_tiktok_publish_state()
+            if SocialNetwork.TIKTOK.value in post["social_networks"]
+            else {}
+        )
 
         try:
             _ensure_meta_targets_for_networks(post["social_networks"], meta_connection)
@@ -1824,7 +1852,11 @@ async def publish_post_now(
     platform_ids = _load_json_object(post.get("platform_ids"))
     try:
         meta_connection = _effective_meta_connection(post["batch_id"], batch.get("meta_connection"))
-        tiktok_connection = await get_tiktok_publish_state()
+        tiktok_connection = (
+            await get_tiktok_publish_state()
+            if SocialNetwork.TIKTOK.value in social_networks
+            else {}
+        )
 
         # 4. Dispatch to each network (reuse existing per-network functions)
         meta_networks = [n for n in social_networks if n in (SocialNetwork.FACEBOOK.value, SocialNetwork.INSTAGRAM.value)]

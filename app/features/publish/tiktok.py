@@ -6,8 +6,10 @@ Implements sandbox OAuth and draft upload without disturbing the Meta scheduling
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import json
 import re
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlencode, urlparse
@@ -59,6 +61,25 @@ MAX_FINAL_CHUNK_BYTES = 128 * 1024 * 1024
 TIKTOK_STATUS_POLL_ATTEMPTS = 15
 TIKTOK_STATUS_POLL_SECONDS = 2.0
 TIKTOK_ACCESS_TOKEN_REFRESH_SKEW_SECONDS = 300
+TIKTOK_BATCH_VIEW_CACHE_SECONDS = 30.0
+_tiktok_publish_state_cache: Dict[str, Any] = {"expires_at": 0.0, "value": None}
+
+
+def invalidate_tiktok_publish_state_cache() -> None:
+    _tiktok_publish_state_cache.update({"expires_at": 0.0, "value": None})
+
+
+async def get_cached_tiktok_publish_state() -> Dict[str, Any]:
+    """Reuse sanitized creator readiness while rendering frequently refreshed pages."""
+    now = time.monotonic()
+    cached = _tiktok_publish_state_cache.get("value")
+    if isinstance(cached, dict) and float(_tiktok_publish_state_cache["expires_at"]) > now:
+        return deepcopy(cached)
+    value = await get_tiktok_publish_state()
+    _tiktok_publish_state_cache.update(
+        {"expires_at": now + TIKTOK_BATCH_VIEW_CACHE_SECONDS, "value": deepcopy(value)}
+    )
+    return value
 
 
 def _load_json_object(value: Any) -> Dict[str, Any]:
@@ -267,7 +288,7 @@ async def _query_creator_info(access_token: str) -> Dict[str, Any]:
 
 
 async def get_tiktok_publish_state() -> Dict[str, Any]:
-    account = get_tiktok_public_account()
+    account = await asyncio.to_thread(get_tiktok_public_account)
     if account.get("status") not in {"connected", "reconnect_required"}:
         return _derive_tiktok_readiness(account)
 
@@ -296,13 +317,15 @@ async def get_tiktok_publish_state() -> Dict[str, Any]:
 
 async def _load_tiktok_account_secret() -> Dict[str, Any]:
     settings = _require_tiktok_settings()
-    response = get_supabase().client.rpc(
-        "get_tiktok_connected_account_secret",
-        {
-            "p_environment": settings.tiktok_environment,
-            "p_encryption_key": settings.token_encryption_key,
-        },
-    ).execute()
+    response = await asyncio.to_thread(
+        lambda: get_supabase().client.rpc(
+            "get_tiktok_connected_account_secret",
+            {
+                "p_environment": settings.tiktok_environment,
+                "p_encryption_key": settings.token_encryption_key,
+            },
+        ).execute()
+    )
     rows = _coerce_supabase_rows(response.data)
     if not rows:
         raise AuthenticationError("No TikTok sandbox account is connected.")
@@ -450,7 +473,8 @@ async def _refresh_tiktok_access_token(account: Dict[str, Any]) -> Dict[str, Any
         "refresh_token_expires_at": (now + timedelta(seconds=refresh_expires_in)).isoformat() if refresh_expires_in > 0 else account.get("refresh_token_expires_at"),
         "scope": str(token_payload.get("scope") or account.get("scope") or DEFAULT_SCOPE),
     }
-    persisted = _upsert_connected_account(
+    persisted = await asyncio.to_thread(
+        _upsert_connected_account,
         open_id=str(account.get("open_id") or token_payload.get("open_id") or ""),
         display_name=str(account.get("display_name") or "TikTok Account"),
         avatar_url=str(account.get("avatar_url") or ""),
@@ -460,6 +484,7 @@ async def _refresh_tiktok_access_token(account: Dict[str, Any]) -> Dict[str, Any
         refresh_token_expires_at=refreshed.get("refresh_token_expires_at"),
         scope=str(refreshed.get("scope") or DEFAULT_SCOPE),
     )
+    invalidate_tiktok_publish_state_cache()
     if persisted.get("id"):
         refreshed["id"] = persisted["id"]
     logger.info("tiktok_access_token_refreshed", account_id=refreshed.get("id"), environment=settings.tiktok_environment)
@@ -1051,7 +1076,8 @@ async def tiktok_oauth_callback(
         datetime.now(timezone.utc) + timedelta(seconds=refresh_expires_in)
     ).isoformat() if refresh_expires_in > 0 else None
 
-    account = _upsert_connected_account(
+    account = await asyncio.to_thread(
+        _upsert_connected_account,
         open_id=open_id,
         display_name=str(profile.get("display_name") or "TikTok Account"),
         avatar_url=str(profile.get("avatar_url") or ""),
@@ -1061,6 +1087,7 @@ async def tiktok_oauth_callback(
         refresh_token_expires_at=refresh_token_expires_at,
         scope=str(token_payload.get("scope") or DEFAULT_SCOPE),
     )
+    invalidate_tiktok_publish_state_cache()
     logger.info(
         "tiktok_account_connected",
         batch_id=batch_id,
@@ -1074,14 +1101,17 @@ async def tiktok_oauth_callback(
 async def disconnect_tiktok_account():
     """Remove the connected TikTok account from the workspace."""
     settings = _require_tiktok_settings()
-    response = (
-        get_supabase()
-        .client.table("connected_accounts")
-        .delete()
-        .eq("platform", "tiktok")
-        .eq("environment", settings.tiktok_environment)
-        .execute()
+    response = await asyncio.to_thread(
+        lambda: (
+            get_supabase()
+            .client.table("connected_accounts")
+            .delete()
+            .eq("platform", "tiktok")
+            .eq("environment", settings.tiktok_environment)
+            .execute()
+        )
     )
+    invalidate_tiktok_publish_state_cache()
     logger.info("tiktok_account_disconnected", environment=settings.tiktok_environment)
     return SuccessResponse(data={"status": "disconnected", "deleted": len(response.data or [])})
 

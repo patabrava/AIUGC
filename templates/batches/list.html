@@ -916,7 +916,7 @@
 
         function startStream(batchId, expectedPosts, brand) {
             if (!window.EventSource || streams.has(batchId)) {
-                return;
+                return false;
             }
 
             const source = new window.EventSource(`/batches/${batchId}/progress/stream`);
@@ -924,6 +924,8 @@
             setStreamState(batchId, { streamState: 'connecting' });
 
             source.onopen = () => {
+                // Live progress is authoritative. Keep polling only as a transport fallback.
+                stopPolling(batchId);
                 setStreamState(batchId, { streamState: 'live' });
             };
 
@@ -980,7 +982,9 @@
                     return;
                 }
                 setStreamState(batchId, { streamState: 'reconnecting' });
+                startPolling(batchId, expectedPosts, brand);
             };
+            return true;
         }
 
         document.body.addEventListener('batch_created', (event) => {
@@ -1011,8 +1015,9 @@
                 streamState: 'connecting',
                 events: [],
             });
-            startPolling(batchId, Number(expectedPosts), brand);
-            startStream(batchId, Number(expectedPosts), brand);
+            if (!startStream(batchId, Number(expectedPosts), brand)) {
+                startPolling(batchId, Number(expectedPosts), brand);
+            }
         });
         
         // Also listen on htmx:afterSwap to catch HX-Trigger events

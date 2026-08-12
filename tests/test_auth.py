@@ -113,6 +113,53 @@ def test_session_cookie_wrong_secret():
     assert result is None
 
 
+@pytest.mark.asyncio
+async def test_authenticated_request_reuses_short_lived_token_validation(monkeypatch):
+    import app.core.config as config_module
+    from starlette.requests import Request
+    from app.features.auth import middleware as auth_middleware
+
+    monkeypatch.setattr(config_module, "_settings", None)
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("APP_URL", "https://lippelift.xyz")
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", "test-token-encryption-key")
+    auth_middleware._authenticated_token_cache.clear()
+    calls = 0
+
+    async def fake_get_user(access_token):
+        nonlocal calls
+        calls += 1
+        assert access_token == "cached-access-token"
+        return {"email": "user@lippelift.de"}
+
+    monkeypatch.setattr("app.features.auth.queries.get_user_from_token", fake_get_user)
+    cookie = auth_middleware.encode_session_cookie(
+        {"access_token": "cached-access-token", "refresh_token": "refresh"},
+        "test-token-encryption-key",
+    )
+
+    def request():
+        return Request({
+            "type": "http",
+            "method": "GET",
+            "path": "/batches",
+            "raw_path": b"/batches",
+            "query_string": b"",
+            "headers": [
+                (b"host", b"lippelift.xyz"),
+                (b"cookie", f"ff_session={cookie}".encode()),
+            ],
+            "client": ("10.0.0.2", 12345),
+            "server": ("lippelift.xyz", 443),
+            "scheme": "https",
+            "http_version": "1.1",
+        })
+
+    assert await auth_middleware.load_authenticated_user(request()) is True
+    assert await auth_middleware.load_authenticated_user(request()) is True
+    assert calls == 1
+
+
 def test_local_request_detection_marks_localhost_as_bypassed():
     from starlette.requests import Request
     from app.features.auth.middleware import _is_local_request

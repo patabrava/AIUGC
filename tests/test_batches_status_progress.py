@@ -375,11 +375,6 @@ def test_batch_detail_view_triggers_partial_semantic_recovery(monkeypatch):
     progress = {"stage": "retrying", "is_retrying": True}
 
     monkeypatch.setattr(batch_handlers, "get_batch_by_id", lambda _batch_id: batch)
-    monkeypatch.setattr(
-        batch_handlers,
-        "get_batch_posts_summary",
-        lambda _batch_id: summary,
-    )
     monkeypatch.setattr(batch_handlers, "_batch_has_manual_drafts", lambda _batch: False)
     monkeypatch.setattr(
         batch_handlers,
@@ -396,7 +391,13 @@ def test_batch_detail_view_triggers_partial_semantic_recovery(monkeypatch):
     monkeypatch.setattr(
         topic_queries,
         "get_posts_by_batch",
-        lambda _batch_id: (_ for _ in ()).throw(RuntimeError("stop after recovery")),
+        lambda _batch_id: [{"id": "post-1", "post_type": "value"}],
+    )
+    monkeypatch.setattr(batch_handlers, "get_posts_by_batch", topic_queries.get_posts_by_batch)
+    monkeypatch.setattr(
+        batch_handlers.character_queries,
+        "list_scene_references_for_posts",
+        lambda _post_ids: (_ for _ in ()).throw(RuntimeError("stop after recovery")),
     )
 
     with pytest.raises(Exception):
@@ -1123,7 +1124,8 @@ def test_batch_detail_template_uses_slower_refresh_interval():
     repo_root = Path(__file__).resolve().parents[1]
     template = (repo_root / "templates/batches/detail.html").read_text(encoding="utf-8")
     assert 'hx-trigger="every 5s"' not in template
-    assert 'hx-trigger="every 15s"' in template
+    assert 'hx-trigger="every 30s [document.visibilityState === \'visible\']"' in template
+    assert 'hx-sync="this:drop"' in template
 
 
 def test_topic_run_card_uses_slower_refresh_interval():
@@ -1532,7 +1534,7 @@ def test_batch_detail_templates_compile_without_syntax_errors():
     batch_detail_template = Path("templates/batches/detail.html").read_text()
     run_card_template = Path("templates/topics/partials/run_card.html").read_text()
 
-    assert 'hx-trigger="every 15s"' in batch_detail_template
+    assert 'hx-trigger="every 30s [document.visibilityState === \'visible\']"' in batch_detail_template
     assert 'hx-trigger="load, every 15s"' in run_card_template
 
 

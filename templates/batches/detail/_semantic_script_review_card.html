@@ -81,8 +81,9 @@
                 hx-vals='{"action":"approved"}'
                 hx-include="#script-form-{{ post.id }}"
                 hx-swap="none"
+                hx-on::before-request="window.handleScriptReviewStart('{{ post.id }}')"
                 hx-on::after-request="window.handleScriptReviewResponse(event, '{{ post.id }}')"
-                class="brand-button-primary brand-focus rounded-xl px-4 py-2 text-sm font-bold text-white"
+                class="brand-button-primary brand-focus rounded-xl px-4 py-2 text-sm font-bold text-white disabled:cursor-wait disabled:opacity-70"
             >
                 Approve script
             </button>
