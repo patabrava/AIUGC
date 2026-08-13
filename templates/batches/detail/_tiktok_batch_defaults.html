@@ -2,6 +2,7 @@
 <div x-data='tiktokPostSettings({
         scope: "batch",
         batchId: {{ batch.id | tojson }},
+        posts: posts,
         readinessStatus: {{ (batch_view.tiktok_publish_state or {}).get("readiness_status", "disconnected") | tojson }},
         creatorInfo: {{ ((batch_view.tiktok_publish_state or {}).get("creator_info") or {}) | tojson }},
         accountAvatarUrl: {{ (batch_view.tiktok_publish_state or {}).get("avatar_url") | tojson }},
@@ -17,11 +18,11 @@
             consentAcknowledged: false
         }
      })'
-     class="mb-6">
-    <div class="mb-3 flex items-start justify-between">
+     class="rounded-xl border border-[#C9D8E8] bg-[#F9FBFD] p-4 sm:p-5">
+    <div class="mb-4 flex items-start justify-between">
         <div>
-            <h3 class="text-base font-semibold text-gray-900">TikTok defaults for this batch</h3>
-            <p class="mt-1 text-xs text-gray-500">These values prefill every TikTok post. Open each post once to confirm consent and save its settings.</p>
+            <h3 class="text-base font-bold text-[#1C2740]">TikTok setup for the batch</h3>
+            <p class="mt-1 max-w-2xl text-sm text-[#506078]">Review one configuration and apply it to every unscheduled video. Each video still stores its own required consent.</p>
         </div>
     </div>
     {% include "batches/detail/_tiktok_post_settings.html" %}

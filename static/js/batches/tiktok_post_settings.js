@@ -25,6 +25,7 @@
             scope: options.scope || "post",
             postId: options.postId || null,
             batchId: options.batchId || null,
+            posts: options.posts || [],
             readinessStatus,
             creatorInfo,
             accountAvatarUrl: options.accountAvatarUrl || "",
@@ -35,6 +36,7 @@
             maxDurationSec: Number(creatorInfo.max_video_post_duration_sec || 0),
             durationSec: Number(options.durationSec || 0),
             saving: false,
+            bulkConsentAcknowledged: false,
             errorMessage: "",
             successMessage: "",
             settings: initial,
@@ -103,6 +105,19 @@
                 return true;
             },
 
+            get editableBulkPosts() {
+                if (this.scope !== "batch") return [];
+                return this.posts.filter((post) => !["scheduled", "publishing", "published"].includes(
+                    String(post.publishStatus || "").toLowerCase(),
+                ));
+            },
+
+            get canSave() {
+                if (!this.isValid || this.saving) return false;
+                if (this.scope !== "batch") return true;
+                return this.editableBulkPosts.length === 0 || this.bulkConsentAcknowledged;
+            },
+
             togglePrivacy(option) {
                 if (this.privateDisabledByBranded && option === "SELF_ONLY") return;
                 this.settings.privacyLevel = option;
@@ -122,8 +137,30 @@
                 };
             },
 
+            buildPostPayload(post) {
+                const payload = this.buildPayload();
+                const existingTitle = String(post?.tiktokSettings?.title || "").trim();
+                payload.title = (existingTitle || payload.title || String(post?.title || "")).slice(0, 90);
+                payload.consent_acknowledged = true;
+                return payload;
+            },
+
+            async savePostSettings(post) {
+                const payload = this.buildPostPayload(post);
+                const response = await fetch(`/publish/posts/${post.id}/tiktok-settings`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                });
+                if (!response.ok) {
+                    throw new Error(await window.extractApiError(response));
+                }
+                post.tiktokSettings = payload;
+                return payload;
+            },
+
             async save() {
-                if (!this.isValid) return;
+                if (!this.canSave) return;
                 this.saving = true;
                 this.errorMessage = "";
                 this.successMessage = "";
@@ -142,9 +179,24 @@
                     if (!response.ok) {
                         throw new Error(await window.extractApiError(response));
                     }
-                    this.successMessage = "Saved.";
+
+                    if (this.scope === "batch" && this.editableBulkPosts.length) {
+                        const results = await Promise.allSettled(
+                            this.editableBulkPosts.map((post) => this.savePostSettings(post)),
+                        );
+                        const failedTitles = results
+                            .map((result, index) => result.status === "rejected" ? this.editableBulkPosts[index].title : null)
+                            .filter(Boolean);
+                        if (failedTitles.length) {
+                            throw new Error(`TikTok settings could not be saved for: ${failedTitles.join(", ")}. Successful videos are already confirmed.`);
+                        }
+                    }
+
+                    this.successMessage = this.scope === "batch"
+                        ? `TikTok is ready for ${this.editableBulkPosts.length} video${this.editableBulkPosts.length === 1 ? "" : "s"}.`
+                        : "TikTok settings saved for this video.";
                     if (typeof options.onSaved === "function") {
-                        options.onSaved(this.buildPayload());
+                        options.onSaved(body);
                     }
                 } catch (err) {
                     this.errorMessage = err?.message || "Failed to save TikTok settings.";

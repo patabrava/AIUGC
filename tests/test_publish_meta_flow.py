@@ -37,8 +37,8 @@ def test_publish_panel_preflights_dispatch_contract_and_preserves_validation_err
     assert "isDispatchLocked" in detail_js
     assert "Schedule active" in panel
     assert "Array.isArray(payload?.detail)" in detail_js
-    assert "Space posts 30 min apart" in panel
-    assert ':disabled="!canReview"' in panel
+    assert "Space videos 30 min apart" in panel
+    assert ':disabled="!canArm"' in panel
     assert 'role="alert"' in panel
     assert "x-collapse" not in panel
 
@@ -47,13 +47,31 @@ def test_publish_panel_owns_final_social_and_blog_schedule():
     panel = Path("templates/batches/detail/_publish_panel.html").read_text()
     blog_panel = Path("templates/batches/detail/_blog_panel.html").read_text()
 
-    assert "Blog drafts are ready for final scheduling" in panel
+    assert "Publishing workspace" in panel
+    assert "Social and blog timing live together for each content item." in panel
     assert 'href="#blog-panel"' in panel
-    assert "Review blog drafts" in panel
-    assert "Blog publication date and time" in panel
+    assert "Review {{ blog_review_posts | length }} blog draft" in panel
+    assert "Blog post" in panel
     assert "Schedule all content" in panel
+    assert "showReviewModal" not in panel
     assert "Scheduling happens in the final Publish step" in blog_panel
     assert "@click=\"scheduleDraft(post)\"" not in blog_panel
+
+
+def test_publish_panel_supports_one_tiktok_confirmation_for_all_editable_posts():
+    panel = Path("templates/batches/detail/_publish_panel.html").read_text()
+    defaults = Path("templates/batches/detail/_tiktok_batch_defaults.html").read_text()
+    settings_panel = Path("templates/batches/detail/_tiktok_post_settings.html").read_text()
+    settings_js = Path("static/js/batches/tiktok_post_settings.js").read_text()
+
+    assert "TikTok setup for the batch" in defaults
+    assert "posts: posts" in defaults
+    assert "Confirm these settings for every unscheduled video" in settings_panel
+    assert "Apply to all videos" in settings_panel
+    assert "editableBulkPosts" in settings_js
+    assert "Promise.allSettled" in settings_js
+    assert "consent_acknowledged = true" in settings_js
+    assert "Per-video TikTok override" in panel
 
 
 class _FakeResponse:

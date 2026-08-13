@@ -577,6 +577,7 @@
         ];
         return {
             batchId: options.batchId,
+            tiktokDefaults: options.tiktokDefaults || {},
             weekStart: '',
             slots: [],
             timezone: 'Europe/Berlin',
@@ -592,7 +593,6 @@
                 blogScheduleLocal: '',
             })),
             expanded: null,
-            showReviewModal: false,
             saving: false,
             successMessage: '',
             errorMessage: '',
@@ -723,6 +723,20 @@
                 return this.posts.length > 0 && this.editablePosts.length === 0;
             },
 
+            get contentTotalCount() {
+                return this.hasActiveSchedule ? this.posts.length : this.editablePosts.length;
+            },
+
+            get contentReadyCount() {
+                if (this.hasActiveSchedule) return this.posts.length;
+                return this.editablePosts.filter((post) => {
+                    const index = this.posts.findIndex((item) => item.id === post.id);
+                    return !this.postDetailIssue(post, index)
+                        && !this.slotIssue(index)
+                        && !this.blogScheduleIssue(post);
+                }).length;
+            },
+
             get scheduleStatusReady() {
                 return this.hasActiveSchedule || this.canReview;
             },
@@ -749,7 +763,8 @@
                 const blogSummary = blogCount
                     ? ` \u00b7 ${blogCount} blog post${blogCount === 1 ? '' : 's'}`
                     : '';
-                return `${this.posts.length} social posts \u00b7 ${dayRange} \u00b7 ${nets || 'No networks selected'}${blogSummary}`;
+                const socialLabel = `${this.posts.length} social post${this.posts.length === 1 ? '' : 's'}`;
+                return `${socialLabel} \u00b7 ${dayRange} \u00b7 ${nets || 'No networks selected'}${blogSummary}`;
             },
             scheduledLocalValue(index) {
                 const override = this.posts[index]?.timeOverride;
@@ -826,6 +841,13 @@
                 if (!settings.consent_acknowledged) return 'TikTok consent is not saved';
                 return '';
             },
+            postDetailIssue(post, index) {
+                if (!post?.caption?.trim()) return 'Add a social caption';
+                if (this.networks.includes('tiktok')) {
+                    return this.tiktokPostIssue(post);
+                }
+                return '';
+            },
             get readinessIssues() {
                 const issues = [];
                 this.posts.forEach((post, index) => {
@@ -893,6 +915,25 @@
             },
             get canArm() {
                 return this.canReview;
+            },
+
+            openFirstIssue() {
+                const target = this.posts.find((post, index) => {
+                    if (this.isDispatchLocked(post)) return false;
+                    return !!(
+                        this.slotIssue(index)
+                        || this.blogScheduleIssue(post)
+                        || this.postDetailIssue(post, index)
+                    );
+                });
+                if (!target) return;
+                this.expanded = target.id;
+                this.$nextTick(() => {
+                    document.getElementById(`publish-post-${target.id}`)?.scrollIntoView({
+                        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+                        block: 'center',
+                    });
+                });
             },
 
             slotDateISO(i) {
@@ -1012,7 +1053,6 @@
                         throw new Error(await window.extractApiError(response));
                     }
                     this.successMessage = 'Social and blog schedules saved successfully.';
-                    this.showReviewModal = false;
                     setTimeout(() => window.location.reload(), 1500);
                 } catch (error) {
                     this.errorMessage = error.message || 'Failed to arm dispatch';
