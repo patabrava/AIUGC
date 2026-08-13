@@ -119,6 +119,35 @@ class UpdatePostScheduleRequest(BaseModel):
         return normalized
 
 
+class PostPublishPlanDraftRequest(BaseModel):
+    """Persist one post's social and optional blog placement without arming dispatch."""
+
+    scheduled_at: datetime = Field(..., description="Planned social publish time in UTC")
+    publish_caption: str = Field(..., min_length=1, max_length=2200)
+    social_networks: List[SocialNetwork] = Field(..., min_length=1)
+    blog_scheduled_at: Optional[datetime] = Field(
+        default=None,
+        description="Planned blog publication time in UTC when the post has a blog",
+    )
+
+    @field_validator("scheduled_at", "blog_scheduled_at")
+    @classmethod
+    def validate_future_times(cls, value: Optional[datetime]) -> Optional[datetime]:
+        if value is None:
+            return value
+        normalized = _normalize_utc_datetime(value)
+        if normalized <= datetime.now(timezone.utc):
+            raise ValueError("Planned publication time must be in the future")
+        return normalized
+
+    @field_validator("social_networks")
+    @classmethod
+    def validate_unique_networks(cls, value: List[SocialNetwork]) -> List[SocialNetwork]:
+        if len(value) != len(set(value)):
+            raise ValueError("Duplicate social networks not allowed")
+        return value
+
+
 class PostNowRequest(BaseModel):
     """Request to publish one post immediately to selected networks."""
     post_id: str = Field(..., description="Post ID to publish now")

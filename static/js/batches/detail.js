@@ -601,6 +601,17 @@
             postNowSaving: false,
             postNowError: null,
             tiktokModalReady: false,
+            selectedPostId: null,
+            showTikTokDefaults: false,
+            showSelectedDetails: false,
+            showWeekend: false,
+            itemFeedback: '',
+            itemFeedbackError: false,
+            savingItem: false,
+            placementKind: 'social',
+            draggedCalendarItem: null,
+            dragOverDay: null,
+            savedItemFingerprints: {},
             get canPostNow() {
                 if (!this.postNowTarget) return false;
                 if (!this.networks.length) return false;
@@ -692,6 +703,8 @@
                     this._syncSlotDays();
                 }
 
+                this.selectedPostId = this.posts[0]?.id || null;
+
                 // Watch weekStart and update slot days when it changes
                 this.$watch('weekStart', () => this._syncSlotDays());
 
@@ -709,6 +722,330 @@
                     }
                     if (tiktok.publish_ready) this.networks.push('tiktok');
                 }
+                this.posts.forEach((_post, index) => {
+                    this.savedItemFingerprints[this.posts[index].id] = this.itemFingerprint(index);
+                });
+            },
+
+            get selectedPost() {
+                return this.posts.find((post) => post.id === this.selectedPostId) || this.posts[0] || null;
+            },
+
+            get selectedPostIndex() {
+                return this.selectedPost ? this.posts.findIndex((post) => post.id === this.selectedPost.id) : -1;
+            },
+
+            selectPost(postId) {
+                this.selectedPostId = postId;
+                this.itemFeedback = '';
+                this.itemFeedbackError = false;
+                if (!this.selectedPost?.blogEnabled && this.placementKind === 'blog') {
+                    this.placementKind = 'social';
+                }
+            },
+
+            setPlacementKind(kind) {
+                if (kind === 'blog' && !this.selectedPost?.blogEnabled) return;
+                this.placementKind = kind === 'blog' ? 'blog' : 'social';
+            },
+
+            durationLabel(post) {
+                const raw = post?.videoMetadata?.duration_seconds
+                    ?? post?.videoMetadata?.delivery_duration_seconds
+                    ?? post?.videoMetadata?.output_duration_seconds;
+                const seconds = Number(raw);
+                if (!Number.isFinite(seconds) || seconds <= 0) return 'Video';
+                return `${Math.round(seconds)}s video`;
+            },
+
+            syncVideoDuration(post, event) {
+                const duration = Number(event?.currentTarget?.duration);
+                if (!post || !Number.isFinite(duration) || duration <= 0) return;
+                post.videoMetadata = {
+                    ...(post.videoMetadata || {}),
+                    duration_seconds: duration,
+                };
+            },
+
+            formatCalendarDate(dateValue, options = {}) {
+                if (!dateValue) return '';
+                const date = new Date(`${dateValue}T12:00:00`);
+                if (Number.isNaN(date.getTime())) return '';
+                return new Intl.DateTimeFormat('en-GB', {
+                    weekday: options.weekday || undefined,
+                    day: 'numeric',
+                    month: 'short',
+                    year: options.year || undefined,
+                }).format(date);
+            },
+
+            get calendarDays() {
+                if (!this.weekStart) return [];
+                const dayCount = this.showWeekend || this.hasWeekendEvents ? 7 : 5;
+                return Array.from({ length: dayCount }, (_value, index) => {
+                    const date = new Date(`${this.weekStart}T12:00:00`);
+                    date.setDate(date.getDate() + index);
+                    const iso = date.toISOString().slice(0, 10);
+                    return {
+                        iso,
+                        weekday: new Intl.DateTimeFormat('en-GB', { weekday: 'short' }).format(date),
+                        label: new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' }).format(date),
+                    };
+                });
+            },
+
+            get hasWeekendEvents() {
+                return this.posts.some((post, index) => {
+                    const values = [this.scheduledLocalValue(index), post.blogEnabled ? post.blogScheduleLocal : ''].filter(Boolean);
+                    return values.some((value) => {
+                        const dateValue = String(value).split('T')[0];
+                        const date = new Date(`${dateValue}T12:00:00`);
+                        return !Number.isNaN(date.getTime()) && [0, 6].includes(date.getDay());
+                    });
+                });
+            },
+
+            get calendarRangeLabel() {
+                const days = this.calendarDays;
+                if (!days.length) return '';
+                const start = new Date(`${days[0].iso}T12:00:00`);
+                const end = new Date(`${days[days.length - 1].iso}T12:00:00`);
+                const startLabel = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' }).format(start);
+                const endLabel = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).format(end);
+                return `${startLabel}–${endLabel}`;
+            },
+
+            get calendarHours() {
+                return Array.from({ length: 13 }, (_value, index) => index + 8);
+            },
+
+            calendarEventsForDay(dayIso) {
+                const events = [];
+                this.posts.forEach((post, index) => {
+                    const socialValue = this.scheduledLocalValue(index);
+                    if (socialValue?.startsWith(`${dayIso}T`)) {
+                        events.push({ post, index, kind: 'social', localValue: socialValue });
+                    }
+                    if (post.blogEnabled && post.blogScheduleLocal?.startsWith(`${dayIso}T`)) {
+                        events.push({ post, index, kind: 'blog', localValue: post.blogScheduleLocal });
+                    }
+                });
+                return events.sort((left, right) => left.localValue.localeCompare(right.localValue));
+            },
+
+            calendarEventStyle(event) {
+                const time = String(event?.localValue || '').split('T')[1] || '08:00';
+                const [hour, minute] = time.split(':').map(Number);
+                const startMinutes = 8 * 60;
+                const totalMinutes = 12 * 60;
+                const eventMinutes = Math.min(totalMinutes, Math.max(0, (hour * 60 + minute) - startMinutes));
+                const top = (eventMinutes / totalMinutes) * 100;
+                const height = event.kind === 'blog' ? 6.25 : 8.35;
+                return `top: calc(${top}% + 2px); height: calc(${height}% - 4px);`;
+            },
+
+            calendarEventTime(event) {
+                return String(event?.localValue || '').split('T')[1]?.slice(0, 5) || '';
+            },
+
+            get calendarEventCount() {
+                return this.calendarDays.reduce(
+                    (total, day) => total + this.calendarEventsForDay(day.iso).length,
+                    0,
+                );
+            },
+
+            _calendarTimeFromEvent(event) {
+                const lane = event?.currentTarget;
+                const rect = lane?.getBoundingClientRect?.();
+                if (!rect || !rect.height || typeof event.clientY !== 'number' || event.clientY <= 0) {
+                    return '10:00';
+                }
+                const ratio = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
+                const rounded = Math.round((ratio * 12 * 60) / 15) * 15;
+                const minutesFromMidnight = Math.min((19 * 60) + 45, (8 * 60) + rounded);
+                const hour = Math.floor(minutesFromMidnight / 60);
+                const minute = minutesFromMidnight % 60;
+                return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+            },
+
+            placeCalendarItem(postId, kind, dayIso, time) {
+                const index = this.posts.findIndex((post) => post.id === postId);
+                const post = this.posts[index];
+                if (index < 0 || !post || this.isDispatchLocked(post)) return;
+                if (kind === 'blog' && !post.blogEnabled) {
+                    this.itemFeedback = 'This item does not have a blog post.';
+                    this.itemFeedbackError = true;
+                    return;
+                }
+                this.selectPost(postId);
+                this.placementKind = kind;
+                if (kind === 'blog') {
+                    post.blogScheduleLocal = `${dayIso}T${time}`;
+                } else {
+                    this.slots[index].date = dayIso;
+                    this.slots[index].time = time;
+                    post.timeOverride = '';
+                    this.updateSlotDate(index, dayIso);
+                }
+                const label = kind === 'blog' ? 'Blog post' : 'Social video';
+                this.itemFeedback = `${label} placed at ${time}. Save the item to keep this placement.`;
+                this.itemFeedbackError = false;
+            },
+
+            placeSelectedOnCalendar(dayIso, event) {
+                if (!this.selectedPost) return;
+                this.placeCalendarItem(
+                    this.selectedPost.id,
+                    this.placementKind,
+                    dayIso,
+                    this._calendarTimeFromEvent(event),
+                );
+            },
+
+            placeSelectedWithKeyboard(dayIso, event) {
+                if (!['Enter', ' '].includes(event.key)) return;
+                event.preventDefault();
+                this.placeSelectedOnCalendar(dayIso, event);
+            },
+
+            startCalendarDrag(event, postId, kind = 'social') {
+                const post = this.posts.find((item) => item.id === postId);
+                if (!post || this.isDispatchLocked(post) || (kind === 'blog' && !post.blogEnabled)) {
+                    event.preventDefault();
+                    return;
+                }
+                this.selectPost(postId);
+                this.placementKind = kind;
+                this.draggedCalendarItem = { postId, kind };
+                if (event.dataTransfer) {
+                    event.dataTransfer.effectAllowed = 'move';
+                    event.dataTransfer.setData('text/plain', JSON.stringify(this.draggedCalendarItem));
+                }
+            },
+
+            endCalendarDrag() {
+                this.draggedCalendarItem = null;
+                this.dragOverDay = null;
+            },
+
+            dropCalendarItem(dayIso, event) {
+                let dragged = this.draggedCalendarItem;
+                if (!dragged && event.dataTransfer) {
+                    try {
+                        dragged = JSON.parse(event.dataTransfer.getData('text/plain'));
+                    } catch (_error) {
+                        dragged = null;
+                    }
+                }
+                if (!dragged?.postId) return;
+                this.placeCalendarItem(
+                    dragged.postId,
+                    dragged.kind || 'social',
+                    dayIso,
+                    this._calendarTimeFromEvent(event),
+                );
+                this.endCalendarDrag();
+            },
+
+            shiftCalendarWeek(days) {
+                if (!this.weekStart) return;
+                const next = new Date(`${this.weekStart}T12:00:00`);
+                next.setDate(next.getDate() + days);
+                this.weekStart = next.toISOString().slice(0, 10);
+            },
+
+            goToCurrentWeek() {
+                const now = new Date();
+                const monday = new Date(now);
+                monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+                this.weekStart = monday.toISOString().slice(0, 10);
+            },
+
+            itemFingerprint(index) {
+                const post = this.posts[index];
+                if (!post) return '';
+                return JSON.stringify({
+                    social: this.scheduledLocalValue(index),
+                    blog: post.blogEnabled ? post.blogScheduleLocal : '',
+                    caption: String(post.caption || '').trim(),
+                    networks: [...this.networks].sort(),
+                    timezone: this.timezone,
+                });
+            },
+
+            get selectedItemDirty() {
+                if (this.selectedPostIndex < 0) return false;
+                return this.savedItemFingerprints[this.selectedPost.id] !== this.itemFingerprint(this.selectedPostIndex);
+            },
+
+            get selectedItemPersisted() {
+                if (!this.selectedPost?.scheduledAt) return false;
+                return !this.selectedPost.blogEnabled || !!this.selectedPost.blogScheduledAt;
+            },
+
+            async saveSelectedItem() {
+                if (this.selectedPostIndex < 0 || this.savingItem) return;
+                const post = this.selectedPost;
+                const index = this.selectedPostIndex;
+                const issue = this.slotIssue(index)
+                    || this.blogScheduleIssue(post)
+                    || (!post.caption?.trim() ? 'Add a social caption' : '')
+                    || (!this.networks.length ? 'Select at least one destination' : '');
+                if (issue) {
+                    this.itemFeedback = issue;
+                    this.itemFeedbackError = true;
+                    return;
+                }
+                this.savingItem = true;
+                this.itemFeedback = '';
+                try {
+                    const response = await fetch(`/publish/posts/${post.id}/plan`, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Correlation-ID': `save_publish_plan_${post.id}`,
+                        },
+                        body: JSON.stringify({
+                            scheduled_at: this.scheduledDate(index).toISOString(),
+                            publish_caption: post.caption.trim(),
+                            social_networks: this.networks,
+                            blog_scheduled_at: post.blogEnabled
+                                ? this.blogScheduledDate(post).toISOString()
+                                : null,
+                        }),
+                    });
+                    if (!response.ok) throw new Error(await window.extractApiError(response));
+                    const payload = await response.json();
+                    const saved = payload?.data || {};
+                    post.scheduledAt = saved.scheduled_at;
+                    post.blogScheduledAt = saved.blog_scheduled_at;
+                    post.socialNetworks = saved.social_networks || [...this.networks];
+                    post.publishStatus = saved.publish_status || 'pending';
+                    if (post.blogEnabled) post.blogStatus = saved.blog_status || 'draft';
+                    this.savedItemFingerprints[post.id] = this.itemFingerprint(index);
+                    const attention = this.networks.includes('tiktok') ? this.tiktokPostIssue(post) : '';
+                    this.itemFeedback = attention
+                        ? `Item schedule saved. ${attention}.`
+                        : 'Item schedule saved.';
+                    this.itemFeedbackError = false;
+                } catch (error) {
+                    this.itemFeedback = error.message || 'Failed to save this item schedule.';
+                    this.itemFeedbackError = true;
+                } finally {
+                    this.savingItem = false;
+                }
+            },
+
+            openFirstCalendarIssue() {
+                const target = this.posts.find((post, index) => {
+                    if (this.isDispatchLocked(post)) return false;
+                    return !!(this.slotIssue(index) || this.blogScheduleIssue(post) || this.postDetailIssue(post, index));
+                });
+                if (!target) return;
+                this.selectPost(target.id);
+                this.showSelectedDetails = !!this.postDetailIssue(target, this.posts.findIndex((post) => post.id === target.id));
+                this.$nextTick(() => document.getElementById('selected-item-heading')?.scrollIntoView({ block: 'nearest' }));
             },
 
             isDispatchLocked(post) {

@@ -1,4 +1,4 @@
-{# Batch-level publish scheduling panel for S7_PUBLISH_PLAN #}
+{# Calendar-first final publishing workspace for S7_PUBLISH_PLAN. #}
 {% set blog_review_posts = batch_view.visible_posts | selectattr('blog_enabled') | list %}
 <div id="publish-workflow" x-data='batchPublishComponent({
     batchId: {{ batch.id | tojson }},
@@ -7,289 +7,340 @@
     tiktokState: {{ batch_view.tiktok_publish_state | tojson }},
     tiktokDefaults: {{ (batch_view.tiktok_defaults or {}) | tojson }}
 })'>
-    <section class="overflow-hidden rounded-2xl border border-[#C9D8E8] bg-white shadow-sm">
+    <section class="overflow-hidden rounded-2xl border border-[#C9D8E8] bg-white shadow-sm" aria-labelledby="publishing-calendar-heading">
         <header class="border-b border-[#DCE6F0] bg-[#F7FAFD] px-4 py-5 sm:px-6">
-            <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                 <div class="max-w-2xl">
                     <p class="text-sm font-semibold text-[#006AAB]">Publish</p>
-                    <h2 class="mt-1 text-2xl font-bold tracking-tight text-[#1C2740]">Publishing workspace</h2>
-                    <p class="mt-2 text-sm leading-6 text-[#506078]">Choose destinations, set every social and blog time, then schedule the complete batch once.</p>
+                    <h2 id="publishing-calendar-heading" class="mt-1 text-2xl font-bold tracking-tight text-[#1C2740]">Publishing calendar</h2>
+                    <p class="mt-2 text-sm leading-6 text-[#506078]">Place every social video and blog post on one calendar, resolve individual details, then schedule the complete batch once.</p>
+                    <span class="sr-only">Publishing workspace</span>
                 </div>
-                <span class="inline-flex w-fit items-center rounded-full px-3 py-1.5 text-xs font-bold"
-                    :class="scheduleStatusReady ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-900'"
-                    x-text="scheduleStatusLabel"></span>
+                <div class="flex flex-wrap items-center gap-2">
+                    <span class="inline-flex items-center rounded-full px-3 py-1.5 text-xs font-bold"
+                        :class="scheduleStatusReady ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-900'"
+                        x-text="scheduleStatusLabel"></span>
+                    <button type="button" @click="window.location.reload()" class="brand-focus min-h-11 rounded-lg border border-[#C9D8E8] bg-white px-3 py-2 text-xs font-bold text-[#36506C] hover:border-[#006AAB]">Refresh calendar</button>
+                </div>
             </div>
-            <ol class="mt-5 grid gap-2 sm:grid-cols-3" aria-label="Publishing setup progress">
-                <li class="rounded-lg border border-[#C9D8E8] bg-white px-3 py-2.5">
-                    <span class="text-xs font-bold text-[#006AAB]">1. Destinations</span>
-                    <p class="mt-0.5 text-xs text-[#506078]" x-text="networks.length ? networks.length + ' selected' : 'Choose at least one'"></p>
-                </li>
-                <li class="rounded-lg border border-[#C9D8E8] bg-white px-3 py-2.5">
-                    <span class="text-xs font-bold text-[#006AAB]">2. Content</span>
-                    <p class="mt-0.5 text-xs text-[#506078]" x-text="contentReadyCount + ' of ' + contentTotalCount + ' ready'"></p>
-                </li>
-                <li class="rounded-lg border border-[#C9D8E8] bg-white px-3 py-2.5">
-                    <span class="text-xs font-bold text-[#006AAB]">3. Confirm</span>
-                    <p class="mt-0.5 text-xs text-[#506078]" x-text="hasActiveSchedule ? 'Schedule active' : canArm ? 'Ready to schedule' : 'Waiting for setup'"></p>
-                </li>
-            </ol>
+
+            <div class="mt-5 grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(220px,0.36fr)]">
+                <fieldset>
+                    <legend class="text-xs font-bold text-[#3E4C63]">Publish to</legend>
+                    <div class="mt-2 flex flex-wrap gap-2">
+                        <template x-for="net in [{id:'instagram',label:'Instagram'},{id:'facebook',label:'Facebook'},{id:'tiktok',label:'TikTok'}]" :key="net.id">
+                            <button type="button" @click="toggleNetwork(net.id)" :disabled="!networkAvailable(net.id) || hasActiveSchedule"
+                                :title="networkAvailabilityLabel(net.id)"
+                                class="brand-focus inline-flex min-h-11 items-center gap-2 rounded-lg border px-4 py-2 text-sm font-semibold"
+                                :class="!networkAvailable(net.id) ? 'cursor-not-allowed border-gray-200 bg-gray-100 text-gray-500' : networks.includes(net.id) ? 'border-[#006AAB] bg-[#EAF3FB] text-[#004C7C]' : 'border-[#C9D8E8] bg-white text-[#3E4C63] hover:border-[#006AAB]'">
+                                <span class="h-2.5 w-2.5 rounded-full" :class="networks.includes(net.id) ? 'bg-green-600' : 'bg-gray-300'" aria-hidden="true"></span>
+                                <span x-text="net.label"></span>
+                                <span class="text-[10px]" x-text="networks.includes(net.id) ? 'Selected' : 'Not selected'"></span>
+                            </button>
+                        </template>
+                    </div>
+                </fieldset>
+                <label class="block text-xs font-bold text-[#3E4C63]">
+                    Timezone
+                    <select x-model="timezone" :disabled="hasActiveSchedule" class="brand-focus mt-2 min-h-11 w-full rounded-lg border border-[#C9D8E8] bg-white px-3 py-2 text-sm font-medium text-[#1C2740] disabled:opacity-60">
+                        <option value="Europe/Berlin">Europe/Berlin (CET/CEST)</option>
+                        <option value="Europe/London">Europe/London (GMT/BST)</option>
+                        <option value="America/New_York">America/New York (EST/EDT)</option>
+                        <option value="America/Los_Angeles">America/Los Angeles (PST/PDT)</option>
+                        <option value="UTC">UTC</option>
+                    </select>
+                </label>
+            </div>
         </header>
 
-        <div class="space-y-6 p-4 sm:p-6">
-            <section aria-labelledby="publish-destinations-heading">
-                <div class="mb-3">
-                    <h3 id="publish-destinations-heading" class="text-lg font-bold text-[#1C2740]">1. Choose destinations</h3>
-                    <p class="mt-1 text-sm text-[#506078]">These channels apply to every unscheduled video in this batch.</p>
+        <div x-show="showTikTokDefaults && networks.includes('tiktok') && !hasActiveSchedule" x-cloak class="border-b border-[#DCE6F0] bg-white p-4 sm:p-6">
+            {% include "batches/detail/_tiktok_batch_defaults.html" %}
+        </div>
+
+        <div class="grid min-h-[760px] lg:grid-cols-[220px_minmax(0,1fr)] 2xl:grid-cols-[240px_minmax(0,1fr)_320px]">
+            <aside class="border-b border-[#DCE6F0] bg-[#FBFCFE] p-4 lg:border-b-0 lg:border-r" aria-labelledby="content-queue-heading">
+                <div class="flex items-center justify-between gap-2">
+                    <h3 id="content-queue-heading" class="text-lg font-bold text-[#1C2740]">Content queue</h3>
+                    <span class="rounded-full bg-[#EAF3FB] px-2.5 py-1 text-xs font-bold text-[#005F99]" x-text="posts.length + ' item' + (posts.length === 1 ? '' : 's')"></span>
                 </div>
-                <div class="grid gap-4 rounded-xl border border-[#DCE6F0] bg-[#F9FBFD] p-4 lg:grid-cols-[minmax(0,1fr)_minmax(220px,0.45fr)]">
-                    <fieldset>
-                        <legend class="text-xs font-bold text-[#3E4C63]">Channels</legend>
-                        <div class="mt-2 flex flex-wrap gap-2">
-                            <template x-for="net in [{id:'instagram',label:'Instagram'},{id:'facebook',label:'Facebook'},{id:'tiktok',label:'TikTok'}]" :key="net.id">
-                                <button type="button" @click="toggleNetwork(net.id)" :disabled="!networkAvailable(net.id) || hasActiveSchedule"
-                                    :title="networkAvailabilityLabel(net.id)"
-                                    class="brand-focus inline-flex min-h-11 items-center gap-2 rounded-lg border px-4 py-2 text-sm font-semibold transition"
-                                    :class="!networkAvailable(net.id) ? 'cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400' : hasActiveSchedule ? 'cursor-default border-[#B8CEE2] bg-[#EAF3FB] text-[#36506C]' : networks.includes(net.id) ? 'border-[#006AAB] bg-[#EAF3FB] text-[#004C7C]' : 'border-[#C9D8E8] bg-white text-[#3E4C63] hover:border-[#006AAB]'">
-                                    <span class="h-2.5 w-2.5 rounded-full" :class="networks.includes(net.id) ? 'bg-green-600' : 'bg-gray-300'"></span>
-                                    <span x-text="net.label"></span>
-                                    <span class="sr-only" x-text="networks.includes(net.id) ? 'selected' : 'not selected'"></span>
-                                </button>
-                            </template>
+                <p class="mt-1 text-xs leading-5 text-[#65738A]">Select an item, then click the calendar or drag it to a time.</p>
+
+                <div class="mt-4 space-y-2" role="list">
+                    <template x-for="(post, i) in posts" :key="post.id">
+                        <div role="listitem" class="overflow-hidden rounded-xl border"
+                            :class="selectedPostId === post.id ? 'border-[#006AAB] bg-[#EAF3FB]' : 'border-[#DCE6F0] bg-white'">
+                            <button type="button" @click="selectPost(post.id)" draggable="true"
+                                @dragstart="startCalendarDrag($event, post.id, 'social')" @dragend="endCalendarDrag()"
+                                class="brand-focus grid w-full grid-cols-[44px_minmax(0,1fr)] gap-3 p-3 text-left hover:bg-[#F4F8FC]"
+                                :aria-current="selectedPostId === post.id ? 'true' : 'false'"
+                                :aria-label="'Select and drag social video: ' + post.title">
+                                <span class="relative flex h-14 w-11 items-center justify-center overflow-hidden rounded-md bg-[#1C2740] text-xs font-bold text-white">
+                                    <video x-show="post.captionVideoUrl" :src="post.captionVideoUrl" muted preload="metadata" @loadedmetadata="syncVideoDuration(post, $event)" class="h-full w-full object-cover"></video>
+                                    <span class="absolute bottom-1 right-1 rounded bg-black/75 px-1 py-0.5 text-[9px] text-white" x-text="durationLabel(post)"></span>
+                                </span>
+                                <span class="min-w-0">
+                                    <span class="line-clamp-2 text-sm font-bold leading-5 text-[#1C2740]" x-text="post.title"></span>
+                                    <span class="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] font-semibold">
+                                        <span class="rounded-full px-2 py-0.5" :class="publishStatusClass(post, i)" x-text="publishStatusLabel(post, i)"></span>
+                                        <span class="text-[#65738A]" x-text="post.blogEnabled ? 'Video + blog' : 'Video only'"></span>
+                                    </span>
+                                </span>
+                            </button>
+                            <div class="flex border-t border-[#DCE6F0] text-[11px] font-bold">
+                                <button type="button" draggable="true" @click="selectPost(post.id); setPlacementKind('social')"
+                                    @dragstart="startCalendarDrag($event, post.id, 'social')" @dragend="endCalendarDrag()"
+                                    class="brand-focus min-h-9 flex-1 px-2 text-[#006AAB] hover:bg-white">▶ Social</button>
+                                <button x-show="post.blogEnabled" type="button" draggable="true" @click="selectPost(post.id); setPlacementKind('blog')"
+                                    @dragstart="startCalendarDrag($event, post.id, 'blog')" @dragend="endCalendarDrag()"
+                                    class="brand-focus min-h-9 flex-1 border-l border-[#DCE6F0] px-2 text-[#36506C] hover:bg-white">▤ Blog</button>
+                            </div>
                         </div>
-                    </fieldset>
-                    <label class="block text-xs font-bold text-[#3E4C63]">
-                        Timezone
-                        <select x-model="timezone" :disabled="hasActiveSchedule" class="brand-focus mt-2 min-h-11 w-full rounded-lg border border-[#C9D8E8] bg-white px-3 py-2 text-sm font-medium text-[#1C2740] disabled:opacity-60">
-                            <option value="Europe/Berlin">Europe/Berlin (CET/CEST)</option>
-                            <option value="Europe/London">Europe/London (GMT/BST)</option>
-                            <option value="America/New_York">America/New York (EST/EDT)</option>
-                            <option value="America/Los_Angeles">America/Los Angeles (PST/PDT)</option>
-                            <option value="UTC">UTC</option>
-                        </select>
-                    </label>
+                    </template>
                 </div>
-            </section>
+                <p class="mt-4 flex items-start gap-2 text-xs leading-5 text-[#65738A]"><span aria-hidden="true">⌨</span><span>Keyboard: choose Social or Blog, then focus a day and press Enter. Fine-tune in Selected item.</span></p>
+            </aside>
 
-            <section x-show="networks.includes('tiktok') && !hasActiveSchedule" x-cloak aria-label="TikTok batch setup">
-                {% include "batches/detail/_tiktok_batch_defaults.html" %}
-            </section>
-
-            <section aria-labelledby="publish-content-heading">
-                <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <section class="min-w-0 border-b border-[#DCE6F0] bg-white p-4 2xl:border-b-0" aria-labelledby="week-calendar-heading">
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                        <h3 id="publish-content-heading" class="text-lg font-bold text-[#1C2740]">2. Set the content schedule</h3>
-                        <p class="mt-1 text-sm text-[#506078]">Social and blog timing live together for each content item.</p>
+                        <h3 id="week-calendar-heading" class="text-lg font-bold text-[#1C2740]">Week calendar</h3>
+                        <p class="mt-1 text-xs text-[#65738A]">Social videos are blue. Related blog posts use a document marker.</p>
                     </div>
-                    <label class="block text-xs font-bold text-[#3E4C63]">
-                        Auto-fill from week of
-                        <input type="date" x-model="weekStart" :disabled="hasActiveSchedule" class="brand-focus mt-1 min-h-11 rounded-lg border border-[#C9D8E8] bg-white px-3 py-2 text-sm font-medium text-[#1C2740] disabled:opacity-60">
-                    </label>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <button type="button" @click="goToCurrentWeek()" class="brand-focus min-h-10 rounded-lg border border-[#C9D8E8] bg-white px-3 py-2 text-xs font-bold text-[#36506C]">Today</button>
+                        <button type="button" @click="shiftCalendarWeek(-7)" aria-label="Previous week" class="brand-focus h-10 w-10 rounded-lg border border-[#C9D8E8] bg-white text-lg font-bold text-[#36506C]">‹</button>
+                        <span class="min-w-40 text-center text-sm font-bold text-[#1C2740]" x-text="calendarRangeLabel"></span>
+                        <button type="button" @click="shiftCalendarWeek(7)" aria-label="Next week" class="brand-focus h-10 w-10 rounded-lg border border-[#C9D8E8] bg-white text-lg font-bold text-[#36506C]">›</button>
+                        <button type="button" @click="showWeekend = !showWeekend" class="brand-focus min-h-10 rounded-lg border border-[#C9D8E8] bg-white px-3 py-2 text-xs font-bold text-[#36506C]" x-text="showWeekend ? 'Weekdays' : '7 days'"></button>
+                    </div>
                 </div>
 
-                <div x-show="scheduleConflicts.length" class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3">
-                    <p class="text-xs font-medium text-amber-950">Social dispatches need at least 30 minutes between videos.</p>
-                    <button type="button" @click="spaceConflictingSlots()" class="brand-focus rounded-md border border-amber-400 bg-white px-3 py-2 text-xs font-bold text-amber-950 hover:bg-amber-100">Space videos 30 min apart</button>
+                <div class="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#DCE6F0] bg-[#F7FAFD] p-2.5">
+                    <p class="text-xs font-semibold text-[#36506C]">
+                        Click or drag to place
+                        <span class="font-bold text-[#1C2740]" x-text="selectedPost?.title || 'an item'"></span>
+                    </p>
+                    <div class="inline-flex rounded-lg border border-[#B8CEE2] bg-white p-1" role="group" aria-label="Calendar placement type">
+                        <button type="button" @click="setPlacementKind('social')" class="brand-focus min-h-9 rounded-md px-3 text-xs font-bold"
+                            :class="placementKind === 'social' ? 'bg-[#006AAB] text-white' : 'text-[#36506C]'" :aria-pressed="placementKind === 'social'">▶ Social video</button>
+                        <button type="button" @click="setPlacementKind('blog')" :disabled="!selectedPost?.blogEnabled" class="brand-focus min-h-9 rounded-md px-3 text-xs font-bold disabled:cursor-not-allowed disabled:text-gray-400"
+                            :class="placementKind === 'blog' ? 'bg-[#36506C] text-white' : 'text-[#36506C]'" :aria-pressed="placementKind === 'blog'">▤ Blog post</button>
+                    </div>
                 </div>
 
-                <div class="mt-4 space-y-3">
-            <template x-for="(post, i) in posts" :key="post.id">
-                <article :id="'publish-post-' + post.id" class="rounded-xl border bg-white transition" :class="expanded === post.id ? 'border-[#006AAB] shadow-sm' : 'border-[#DCE6F0]'">
-                    <div class="grid gap-4 p-4 xl:grid-cols-[minmax(220px,1.35fr)_minmax(210px,0.8fr)_minmax(220px,0.9fr)_auto] xl:items-center">
-                        <div class="min-w-0">
-                            <div class="flex flex-wrap items-center gap-2">
-                                <span class="inline-flex rounded-full bg-[#EAF3FB] px-2.5 py-1 text-[11px] font-bold text-[#005F99]" x-text="post.type"></span>
-                                <span class="inline-flex rounded-full px-2.5 py-1 text-[11px] font-bold" :class="publishStatusClass(post, i)" x-text="publishStatusLabel(post, i)"></span>
-                            </div>
-                            <h4 class="mt-2 truncate text-sm font-bold text-[#1C2740]" x-text="post.title"></h4>
-                            <p class="mt-1 truncate text-xs text-[#65738A]" x-text="(post.caption || '').substring(0, 90) || 'Caption missing'"></p>
-                        </div>
-                        <fieldset :disabled="isDispatchLocked(post)" class="grid grid-cols-[1fr_92px] gap-2 disabled:opacity-60">
-                            <legend class="mb-1 text-xs font-bold text-[#3E4C63]">Social video</legend>
-                            <input type="date" :value="slotDateISO(i)" @change="updateSlotDate(i, $event.target.value)" class="brand-focus min-h-11 min-w-0 rounded-lg border border-[#C9D8E8] px-2 py-2 text-sm text-[#1C2740]">
-                            <input type="time" x-model="slots[i].time" class="brand-focus min-h-11 min-w-0 rounded-lg border border-[#C9D8E8] px-2 py-2 text-sm text-[#1C2740]">
-                            <p x-show="!isDispatchLocked(post) && slotIssue(i)" class="col-span-2 text-xs font-medium text-red-700" x-text="slotIssue(i)"></p>
-                        </fieldset>
-                        <div>
-                            <template x-if="post.blogEnabled">
-                                <label class="block text-xs font-bold text-[#3E4C63]">
-                                    Blog post
-                                    <input type="datetime-local" x-model="post.blogScheduleLocal" :disabled="isDispatchLocked(post)" class="brand-focus mt-1 min-h-11 w-full rounded-lg border border-[#C9D8E8] px-2 py-2 text-sm text-[#1C2740] disabled:opacity-60">
-                                    <span x-show="blogScheduleIssue(post)" class="mt-1 block font-medium text-red-700" x-text="blogScheduleIssue(post)"></span>
-                                    <span x-show="!blogScheduleIssue(post)" class="mt-1 block font-medium text-green-700" x-text="'Ready · ' + blogScheduleLabel(post)"></span>
-                                </label>
+                <div x-show="scheduleConflicts.length" class="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3">
+                    <p class="text-xs font-medium text-amber-950">Social videos need at least 30 minutes between publication times.</p>
+                    <button type="button" @click="spaceConflictingSlots()" class="brand-focus rounded-md border border-amber-400 bg-white px-3 py-2 text-xs font-bold text-amber-950">Space videos 30 min apart</button>
+                </div>
+
+                <div class="mt-4 overflow-x-auto rounded-xl border border-[#DCE6F0]" tabindex="0" aria-label="Weekly publication calendar">
+                    <div :class="calendarDays.length === 7 ? 'min-w-[840px]' : 'min-w-[600px]'">
+                        <div class="grid border-b border-[#DCE6F0] bg-[#F7FAFD]" :style="'grid-template-columns:58px repeat(' + calendarDays.length + ', minmax(104px, 1fr))'">
+                            <div class="border-r border-[#DCE6F0] p-2 text-[10px] font-semibold text-[#65738A]">Time</div>
+                            <template x-for="day in calendarDays" :key="day.iso">
+                                <div class="border-r border-[#DCE6F0] px-2 py-2 text-center last:border-r-0">
+                                    <p class="text-xs font-bold text-[#1C2740]" x-text="day.weekday"></p>
+                                    <p class="mt-0.5 text-[11px] text-[#65738A]" x-text="day.label"></p>
+                                </div>
                             </template>
-                            <p x-show="!post.blogEnabled" class="text-xs text-[#65738A]">No blog post for this item</p>
                         </div>
-                        <div class="flex flex-wrap gap-2 xl:justify-end">
-                            <button type="button" @click="expanded = expanded === post.id ? null : post.id" class="brand-focus min-h-11 rounded-lg border border-[#C9D8E8] bg-white px-3 py-2 text-xs font-bold text-[#36506C] hover:border-[#006AAB]" :aria-expanded="expanded === post.id">
-                                <span x-text="expanded === post.id ? 'Close details' : (isDispatchLocked(post) ? 'View details' : postDetailIssue(post, i) ? 'Fix details' : 'Edit details')"></span>
-                            </button>
-                            <button type="button" @click="postNowTarget = post; showPostNowModal = true" :disabled="!post.caption || networks.length === 0 || isDispatchLocked(post)" class="brand-focus min-h-11 rounded-lg px-3 py-2 text-xs font-bold" :class="isDispatchLocked(post) ? 'cursor-not-allowed bg-gray-100 text-gray-500' : 'bg-[#E58434] text-white hover:bg-[#CE6F25]'">
-                                <span x-text="isDispatchLocked(post) ? publishStatusLabel(post, i) : 'Post now'"></span>
-                            </button>
-                        </div>
-                    </div>
-
-                    <div x-show="expanded === post.id" x-cloak class="space-y-4 border-t border-[#DCE6F0] bg-[#F9FBFD] px-4 py-4">
-                        <div>
-                            <label class="mb-1 block text-xs font-bold text-[#3E4C63]">Social caption</label>
-                            <textarea x-model="post.caption" rows="3" maxlength="2200"
-                                class="brand-focus w-full rounded-lg border border-[#C9D8E8] bg-white px-3 py-2 text-sm text-[#1C2740]"
-                                placeholder="Write the caption for this post..."></textarea>
-                            <div class="mt-1 flex justify-between text-[11px] text-[#65738A]">
-                                <span>Used for every selected social channel</span>
-                                <span x-text="(post.caption || '').length + '/2200'"></span>
-                            </div>
-                        </div>
-                        <div x-show="(post.captionOptions || []).length > 1" class="space-y-2">
-                            <label class="block text-xs font-bold text-[#3E4C63]">Generated caption</label>
-                            <div class="flex flex-wrap gap-2">
-                                <template x-for="variant in post.captionOptions" :key="variant.key">
-                                    <button type="button" @click="selectCaption(post.id, variant.key)" class="brand-focus rounded-full border px-3 py-1.5 text-xs font-bold" :class="post.selectedCaptionKey === variant.key ? 'border-[#006AAB] bg-[#EAF3FB] text-[#005F99]' : 'border-[#C9D8E8] bg-white text-[#506078]'">
-                                        <span x-text="variant.label"></span>
-                                    </button>
+                        <div class="grid" :style="'grid-template-columns:58px repeat(' + calendarDays.length + ', minmax(104px, 1fr))'">
+                            <div class="relative h-[720px] border-r border-[#DCE6F0] bg-[#FBFCFE]">
+                                <template x-for="hour in calendarHours" :key="hour">
+                                    <span class="absolute left-0 right-0 -translate-y-1/2 pr-2 text-right text-[10px] text-[#65738A]" :style="'top:' + (((hour - 8) / 12) * 100) + '%'" x-text="String(hour).padStart(2, '0') + ':00'"></span>
                                 </template>
                             </div>
+                            <template x-for="day in calendarDays" :key="day.iso">
+                                <div class="publish-calendar-lane brand-focus relative h-[720px] cursor-crosshair border-r border-[#DCE6F0] last:border-r-0"
+                                    role="button" tabindex="0"
+                                    :class="dragOverDay === day.iso ? 'publish-calendar-lane--active' : ''"
+                                    :aria-label="'Place selected ' + (placementKind === 'blog' ? 'blog post' : 'social video') + ' on ' + day.label + '. Press Enter for 10:00.'"
+                                    @click.self="placeSelectedOnCalendar(day.iso, $event)"
+                                    @keydown="placeSelectedWithKeyboard(day.iso, $event)"
+                                    @dragenter.prevent="dragOverDay = day.iso" @dragover.prevent="dragOverDay = day.iso"
+                                    @dragleave.self="dragOverDay = null" @drop.prevent="dropCalendarItem(day.iso, $event)">
+                                    <p x-show="calendarEventCount === 0 && day.iso === calendarDays[0]?.iso" class="pointer-events-none absolute left-3 top-4 z-0 w-[calc(500%-1.5rem)] max-w-md rounded-lg border border-dashed border-[#8CB7D7] bg-white/90 p-3 text-xs leading-5 text-[#36506C]">
+                                        Select a queue item, choose Social or Blog, then click a day and time. Placements snap to 15 minutes.
+                                    </p>
+                                    <template x-for="event in calendarEventsForDay(day.iso)" :key="event.post.id + '-' + event.kind">
+                                        <button type="button" draggable="true" data-calendar-event @click.stop="selectPost(event.post.id)" :style="calendarEventStyle(event)"
+                                            @dragstart.stop="startCalendarDrag($event, event.post.id, event.kind)" @dragend="endCalendarDrag()"
+                                            class="brand-focus absolute left-1 right-1 z-10 cursor-grab overflow-hidden rounded-md border px-2 py-1 text-left shadow-sm active:cursor-grabbing"
+                                            :class="event.kind === 'blog' ? 'border-[#8CB7D7] bg-[#F4F8FC] text-[#36506C]' : selectedPostId === event.post.id ? 'border-[#006AAB] bg-[#DDEFFC] text-[#003F68] ring-2 ring-[#006AAB]/25' : 'border-[#8CB7D7] bg-[#EAF3FB] text-[#004C7C]'"
+                                            :aria-label="(event.kind === 'blog' ? 'Blog post' : 'Social video') + ' for ' + event.post.title + ' at ' + calendarEventTime(event)">
+                                            <span class="flex items-center justify-between gap-1 text-[10px] font-bold">
+                                                <span x-text="event.kind === 'blog' ? '▤ Blog' : '▶ Social'"></span>
+                                                <span x-text="calendarEventTime(event)"></span>
+                                            </span>
+                                            <span class="mt-0.5 block truncate text-[10px] font-semibold" x-text="event.post.title"></span>
+                                        </button>
+                                    </template>
+                                </div>
+                            </template>
                         </div>
-                        <div x-show="networks.includes('tiktok')" x-cloak class="mt-4">
-                            <p class="mb-2 text-xs font-bold text-[#3E4C63]">Per-video TikTok override</p>
-                            <div x-data='tiktokPostSettings({
+                    </div>
+                </div>
+            </section>
+
+            <aside class="bg-[#FBFCFE] p-4 lg:col-span-2 lg:border-t lg:border-[#DCE6F0] 2xl:col-span-1 2xl:border-l 2xl:border-t-0" aria-labelledby="selected-item-heading">
+                <template x-for="selectedPost in (selectedPost ? [selectedPost] : [])" :key="selectedPost.id">
+                    <div>
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="min-w-0">
+                                <p class="text-xs font-semibold text-[#006AAB]">Selected item</p>
+                                <h3 id="selected-item-heading" class="publish-selected-title mt-1 text-base font-bold leading-6 text-[#1C2740]" x-text="selectedPost.title" :title="selectedPost.title"></h3>
+                                <p class="mt-1 text-xs text-[#65738A]" x-text="durationLabel(selectedPost)"></p>
+                            </div>
+                            <span class="shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold" :class="publishStatusClass(selectedPost, selectedPostIndex)" x-text="publishStatusLabel(selectedPost, selectedPostIndex)"></span>
+                        </div>
+
+                        <fieldset :disabled="isDispatchLocked(selectedPost)" class="mt-5 space-y-4 disabled:opacity-60">
+                            <div>
+                                <p class="text-xs font-bold text-[#3E4C63]">Social video</p>
+                                <div class="mt-2 grid grid-cols-[minmax(0,1fr)_96px] gap-2">
+                                    <label class="text-[11px] font-semibold text-[#65738A]">Date
+                                        <input type="date" :value="slotDateISO(selectedPostIndex)" @change="updateSlotDate(selectedPostIndex, $event.target.value)" class="brand-focus mt-1 min-h-11 w-full rounded-lg border border-[#C9D8E8] bg-white px-2 py-2 text-sm text-[#1C2740]">
+                                    </label>
+                                    <label class="text-[11px] font-semibold text-[#65738A]">Time
+                                        <input type="time" x-model="slots[selectedPostIndex].time" class="brand-focus mt-1 min-h-11 w-full rounded-lg border border-[#C9D8E8] bg-white px-2 py-2 text-sm text-[#1C2740]">
+                                    </label>
+                                </div>
+                                <p x-show="slotIssue(selectedPostIndex)" class="mt-1 text-xs font-medium text-red-700" x-text="slotIssue(selectedPostIndex)"></p>
+                            </div>
+
+                            <div x-show="selectedPost.blogEnabled">
+                                <label class="block text-xs font-bold text-[#3E4C63]">Blog post
+                                    <input type="datetime-local" x-model="selectedPost.blogScheduleLocal" class="brand-focus mt-2 min-h-11 w-full rounded-lg border border-[#C9D8E8] bg-white px-2 py-2 text-sm text-[#1C2740]">
+                                </label>
+                                <p x-show="blogScheduleIssue(selectedPost)" class="mt-1 text-xs font-medium text-red-700" x-text="blogScheduleIssue(selectedPost)"></p>
+                                <p x-show="!blogScheduleIssue(selectedPost)" class="mt-1 text-xs font-medium text-green-700" x-text="'Ready · ' + blogScheduleLabel(selectedPost)"></p>
+                            </div>
+                            <p x-show="!selectedPost.blogEnabled" class="rounded-lg border border-[#DCE6F0] bg-white p-3 text-xs text-[#65738A]">This content item has no blog post.</p>
+                        </fieldset>
+
+                        <div class="mt-5 border-t border-[#DCE6F0] pt-4">
+                            <p class="text-xs font-bold text-[#3E4C63]">Destinations</p>
+                            <p class="mt-1 text-xs text-[#65738A]" x-text="networks.map(n => n === 'instagram' ? 'Instagram' : n === 'facebook' ? 'Facebook' : 'TikTok').join(' · ') || 'None selected'"></p>
+                        </div>
+
+                        <div x-show="networks.includes('tiktok')" class="mt-4 border-t border-[#DCE6F0] pt-4">
+                            <div class="flex items-start justify-between gap-3">
+                                <div>
+                                    <p class="text-xs font-bold text-[#3E4C63]">TikTok readiness</p>
+                                    <p class="mt-1 text-xs font-semibold" :class="tiktokPostIssue(selectedPost) ? 'text-amber-800' : 'text-green-700'" x-text="tiktokPostIssue(selectedPost) || 'Ready for TikTok'"></p>
+                                </div>
+                                <button type="button" @click="showTikTokDefaults = !showTikTokDefaults" class="brand-focus rounded-md border border-[#C9D8E8] bg-white px-2.5 py-2 text-[11px] font-bold text-[#006AAB]">Batch defaults</button>
+                            </div>
+                        </div>
+
+                        <div class="mt-4 border-t border-[#DCE6F0] pt-4">
+                            <button type="button" @click="showSelectedDetails = !showSelectedDetails" class="brand-focus flex min-h-11 w-full items-center justify-between rounded-lg border border-[#C9D8E8] bg-white px-3 py-2 text-xs font-bold text-[#36506C]" :aria-expanded="showSelectedDetails">
+                                <span x-text="showSelectedDetails ? 'Hide caption and TikTok details' : 'Edit caption and TikTok details'"></span><span aria-hidden="true" x-text="showSelectedDetails ? '−' : '+'"></span>
+                            </button>
+                            <div x-show="showSelectedDetails" x-cloak class="mt-3 space-y-3">
+                                <label class="block text-xs font-bold text-[#3E4C63]">Social caption
+                                    <textarea x-model="selectedPost.caption" rows="4" maxlength="2200" class="brand-focus mt-1 w-full rounded-lg border border-[#C9D8E8] bg-white px-3 py-2 text-sm text-[#1C2740]"></textarea>
+                                </label>
+                                <div x-show="networks.includes('tiktok')" x-data='tiktokPostSettings({
                                     scope: "post",
-                                    postId: post.id,
+                                    postId: selectedPost.id,
                                     readinessStatus: {{ (batch_view.tiktok_publish_state or {}).get("readiness_status", "disconnected") | tojson }},
                                     creatorInfo: {{ ((batch_view.tiktok_publish_state or {}).get("creator_info") or {}) | tojson }},
                                     accountAvatarUrl: {{ (batch_view.tiktok_publish_state or {}).get("avatar_url") | tojson }},
-                                    durationSec: (post.videoMetadata && post.videoMetadata.duration_seconds) || 0,
+                                    durationSec: (selectedPost.videoMetadata && selectedPost.videoMetadata.duration_seconds) || 0,
                                     initial: {
-                                        title: (post.tiktokSettings && post.tiktokSettings.title) || {{ (batch_view.tiktok_defaults or {}).get("title_template") | tojson }} || (post.title || ""),
-                                        privacyLevel: (post.tiktokSettings && post.tiktokSettings.privacy_level) || {{ (batch_view.tiktok_defaults or {}).get("privacy_level") | tojson }} || null,
-                                        allowComment: post.tiktokSettings ? !!post.tiktokSettings.allow_comment : {{ (batch_view.tiktok_defaults or {}).get("allow_comment", false) | tojson }},
-                                        allowDuet: post.tiktokSettings ? !!post.tiktokSettings.allow_duet : {{ (batch_view.tiktok_defaults or {}).get("allow_duet", false) | tojson }},
-                                        allowStitch: post.tiktokSettings ? !!post.tiktokSettings.allow_stitch : {{ (batch_view.tiktok_defaults or {}).get("allow_stitch", false) | tojson }},
-                                        commercialDisclosure: post.tiktokSettings ? !!post.tiktokSettings.commercial_disclosure : {{ (batch_view.tiktok_defaults or {}).get("commercial_disclosure", false) | tojson }},
-                                        yourBrand: post.tiktokSettings ? !!post.tiktokSettings.your_brand : {{ (batch_view.tiktok_defaults or {}).get("your_brand", false) | tojson }},
-                                        brandedContent: post.tiktokSettings ? !!post.tiktokSettings.branded_content : {{ (batch_view.tiktok_defaults or {}).get("branded_content", false) | tojson }},
-                                        consentAcknowledged: !!(post.tiktokSettings && (post.tiktokSettings.consent_acknowledged || post.tiktokSettings.consentAcknowledged))
+                                        title: (selectedPost.tiktokSettings && selectedPost.tiktokSettings.title) || (selectedPost.title || ""),
+                                        privacyLevel: (selectedPost.tiktokSettings && selectedPost.tiktokSettings.privacy_level) || null,
+                                        allowComment: !!(selectedPost.tiktokSettings && selectedPost.tiktokSettings.allow_comment),
+                                        allowDuet: !!(selectedPost.tiktokSettings && selectedPost.tiktokSettings.allow_duet),
+                                        allowStitch: !!(selectedPost.tiktokSettings && selectedPost.tiktokSettings.allow_stitch),
+                                        commercialDisclosure: !!(selectedPost.tiktokSettings && selectedPost.tiktokSettings.commercial_disclosure),
+                                        yourBrand: !!(selectedPost.tiktokSettings && selectedPost.tiktokSettings.your_brand),
+                                        brandedContent: !!(selectedPost.tiktokSettings && selectedPost.tiktokSettings.branded_content),
+                                        consentAcknowledged: !!(selectedPost.tiktokSettings && (selectedPost.tiktokSettings.consent_acknowledged || selectedPost.tiktokSettings.consentAcknowledged))
                                     },
-                                    onSaved: function (payload) { post.tiktokSettings = payload; }
-                                 })'>
-                                {% include "batches/detail/_tiktok_post_settings.html" %}
+                                    onSaved: function (payload) { selectedPost.tiktokSettings = payload; }
+                                })'>
+                                    {% include "batches/detail/_tiktok_post_settings.html" %}
+                                </div>
                             </div>
                         </div>
-                    </div>
-                </article>
-            </template>
-            </div>
-            </section>
 
-            <section class="rounded-xl border p-4 sm:p-5" :class="scheduleStatusReady ? 'border-green-300 bg-green-50' : 'border-amber-300 bg-amber-50'" aria-labelledby="publish-confirm-heading" aria-live="polite">
-                <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                    <div class="min-w-0">
-                        <h3 id="publish-confirm-heading" class="text-lg font-bold" :class="scheduleStatusReady ? 'text-green-950' : 'text-amber-950'">3. Confirm the complete schedule</h3>
-                        <p class="mt-1 text-sm" :class="scheduleStatusReady ? 'text-green-800' : 'text-amber-900'" x-text="summaryLine"></p>
-                        <ul x-show="!scheduleStatusReady" class="mt-3 space-y-1.5 text-xs font-medium text-amber-950">
-                            <template x-for="issue in readinessIssues" :key="issue">
-                                <li class="flex gap-2"><span aria-hidden="true">•</span><span x-text="issue"></span></li>
-                            </template>
-                        </ul>
-                        <button x-show="!scheduleStatusReady && readinessIssues.length" type="button" @click="openFirstIssue()" class="brand-focus mt-3 rounded-md border border-amber-400 bg-white px-3 py-2 text-xs font-bold text-amber-950 hover:bg-amber-100">Open first item to fix</button>
-                    </div>
-                    <div class="flex shrink-0 flex-col gap-2 sm:flex-row lg:flex-col">
-                        {% if blog_review_posts %}
-                        <a href="#blog-panel" class="brand-focus inline-flex min-h-11 items-center justify-center rounded-lg border border-[#006AAB] bg-white px-4 py-2 text-sm font-bold text-[#006AAB] hover:bg-[#EAF3FB]">Review {{ blog_review_posts | length }} blog draft{% if blog_review_posts | length != 1 %}s{% endif %}</a>
-                        {% endif %}
-                        <button x-show="!hasActiveSchedule" type="button" @click="armDispatch()" :disabled="!canArm" class="brand-focus inline-flex min-h-11 items-center justify-center rounded-lg px-5 py-2.5 text-sm font-bold text-white shadow-sm" :class="canArm ? 'bg-[#006AAB] hover:bg-[#005A90]' : 'cursor-not-allowed bg-gray-300'">
-                            <span x-text="saving ? 'Scheduling...' : 'Schedule all content'"></span>
-                        </button>
-                    </div>
-                </div>
-                <div x-show="successMessage" x-transition class="mt-4 rounded-lg border border-green-300 bg-white p-3 text-sm font-medium text-green-800" x-text="successMessage"></div>
-                <div x-show="errorMessage" x-transition class="mt-4 rounded-lg border border-red-300 bg-white p-3 text-sm font-medium text-red-800" role="alert" x-text="errorMessage"></div>
-            </section>
-        </div>
-    </section>
-
-    {# ── Post Now Confirmation Modal ── #}
-    <div x-show="showPostNowModal" x-cloak x-transition.opacity
-        class="fixed inset-0 z-50 flex items-center justify-center bg-gray-500 bg-opacity-75 px-4 py-6"
-        @keydown.escape.window="showPostNowModal = false">
-        <div class="absolute inset-0" @click="showPostNowModal = false"></div>
-        <div class="relative z-10 w-full max-w-2xl overflow-hidden rounded-lg bg-white shadow-xl">
-            <div class="border-b border-gray-200 bg-orange-50 px-6 py-4 flex items-start justify-between">
-                <div>
-                    <h3 class="text-lg font-semibold text-gray-900">Post now</h3>
-                    <p class="mt-1 text-sm text-gray-600" x-text="postNowTarget?.title"></p>
-                </div>
-                <button type="button" @click="showPostNowModal = false" class="rounded-md border border-gray-300 bg-white p-2 text-[var(--lippe-deep-blue)] hover:bg-gray-50">
-                    <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                    </svg>
-                </button>
-            </div>
-            <div class="px-6 py-4 space-y-4 max-h-[70vh] overflow-y-auto">
-                <div>
-                    <span class="text-xs font-medium text-gray-500 uppercase">Post</span>
-                    <p class="text-sm font-medium text-gray-900" x-text="postNowTarget?.title"></p>
-                </div>
-                <div x-show="postNowTarget?.captionVideoUrl" class="rounded-md bg-black/95">
-                    <video :src="postNowTarget?.captionVideoUrl" controls muted playsinline class="mx-auto max-h-[320px] rounded-md"></video>
-                </div>
-                <div>
-                    <span class="text-xs font-medium text-gray-500 uppercase">Networks</span>
-                    <div class="flex gap-1.5 mt-1">
-                        <template x-for="net in networks" :key="net">
-                            <span class="text-[11px] font-semibold px-2 py-0.5 rounded"
-                                :class="net === 'instagram' ? 'bg-[#006AAB]/10 text-[#006AAB]' : net === 'facebook' ? 'bg-[#006AAB]/10 text-[#006AAB]' : 'bg-gray-800 text-white'"
-                                x-text="net === 'instagram' ? 'IG' : net === 'facebook' ? 'FB' : 'TT'"></span>
-                        </template>
-                    </div>
-                </div>
-                <template x-if="networks.includes('tiktok') && postNowTarget">
-                    <div x-data='tiktokPostSettings({
-                            scope: "post",
-                            postId: postNowTarget.id,
-                            readinessStatus: {{ (batch_view.tiktok_publish_state or {}).get("readiness_status", "disconnected") | tojson }},
-                            creatorInfo: {{ ((batch_view.tiktok_publish_state or {}).get("creator_info") or {}) | tojson }},
-                            accountAvatarUrl: {{ (batch_view.tiktok_publish_state or {}).get("avatar_url") | tojson }},
-                            durationSec: (postNowTarget.videoMetadata && postNowTarget.videoMetadata.duration_seconds) || 0,
-                            initial: {
-                                title: (postNowTarget.tiktokSettings && postNowTarget.tiktokSettings.title) || (postNowTarget.title || ""),
-                                privacyLevel: (postNowTarget.tiktokSettings && postNowTarget.tiktokSettings.privacy_level) || null,
-                                allowComment: !!(postNowTarget.tiktokSettings && postNowTarget.tiktokSettings.allow_comment),
-                                allowDuet: !!(postNowTarget.tiktokSettings && postNowTarget.tiktokSettings.allow_duet),
-                                allowStitch: !!(postNowTarget.tiktokSettings && postNowTarget.tiktokSettings.allow_stitch),
-                                commercialDisclosure: !!(postNowTarget.tiktokSettings && postNowTarget.tiktokSettings.commercial_disclosure),
-                                yourBrand: !!(postNowTarget.tiktokSettings && postNowTarget.tiktokSettings.your_brand),
-                                brandedContent: !!(postNowTarget.tiktokSettings && postNowTarget.tiktokSettings.branded_content),
-                                consentAcknowledged: !!(postNowTarget.tiktokSettings && (postNowTarget.tiktokSettings.consent_acknowledged || postNowTarget.tiktokSettings.consentAcknowledged))
-                            },
-                            onSaved: function (payload) {
-                                postNowTarget.tiktokSettings = payload;
-                                tiktokModalReady = true;
-                            }
-                         })'>
-                        {% include "batches/detail/_tiktok_post_settings.html" %}
+                        <p x-show="itemFeedback" class="mt-3 text-xs font-medium" :class="itemFeedbackError ? 'text-red-700' : 'text-green-700'" x-text="itemFeedback" aria-live="polite"></p>
+                        <div class="mt-4 grid grid-cols-2 gap-2">
+                            <button type="button" @click="saveSelectedItem()" :disabled="savingItem || isDispatchLocked(selectedPost)" class="brand-focus min-h-11 rounded-lg border border-[#006AAB] bg-white px-3 py-2 text-xs font-bold text-[#006AAB] disabled:border-gray-300 disabled:text-gray-500">
+                                <span x-text="savingItem ? 'Saving item...' : (selectedItemDirty || !selectedItemPersisted) ? 'Save item' : 'Item saved'"></span>
+                            </button>
+                            <button type="button" @click="postNowTarget = selectedPost; showPostNowModal = true" :disabled="!selectedPost.caption || networks.length === 0 || isDispatchLocked(selectedPost)" class="brand-focus min-h-11 rounded-lg bg-[#E58434] px-3 py-2 text-xs font-bold text-white disabled:bg-gray-300">Post now</button>
+                        </div>
                     </div>
                 </template>
-                <div x-show="postNowTarget?.publishResults?.tiktok?.status === 'published' && postNowTarget?.publishStatus === 'failed'" class="rounded-md bg-green-50 border border-green-200 p-3">
-                    <p class="text-xs font-semibold text-green-800">TikTok published</p>
-                    <p class="text-xs text-green-700 mt-1">Another selected network failed, but TikTok accepted the post.</p>
+            </aside>
+        </div>
+
+        <footer class="sticky bottom-0 z-20 border-t border-[#B8CEE2] bg-white/95 px-4 py-4 shadow-[0_-12px_28px_rgba(28,39,64,0.08)] backdrop-blur sm:px-6" aria-live="polite">
+            <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                <div class="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-center">
+                    <div class="shrink-0">
+                        <p class="text-base font-bold text-[#1C2740]" x-text="contentReadyCount + ' of ' + contentTotalCount + ' ready'"></p>
+                        <p class="text-xs text-[#65738A]" x-text="summaryLine"></p>
+                    </div>
+                    <div x-show="readinessIssues.length" class="min-w-0 border-l-0 border-[#DCE6F0] sm:border-l sm:pl-4">
+                        <p class="truncate text-xs font-bold text-amber-900" x-text="readinessIssues[0]"></p>
+                        <button type="button" @click="openFirstCalendarIssue()" class="brand-focus mt-1 text-xs font-bold text-[#006AAB]">Open first item to fix</button>
+                    </div>
                 </div>
-                <div x-show="postNowTarget?.publishResults?.tiktok?.status === 'failed'" class="rounded-md bg-red-50 border border-red-200 p-3">
-                    <p class="text-xs font-semibold text-red-800">TikTok failed</p>
-                    <p class="text-xs text-red-700 mt-1" x-text="postNowTarget?.publishResults?.tiktok?.error_message || postNowTarget?.publishResults?.tiktok?.fail_reason || 'TikTok rejected the publish request.'"></p>
-                </div>
-                <div x-show="postNowError" class="rounded-md bg-red-50 border border-red-200 p-3">
-                    <p class="text-xs text-red-800" x-text="postNowError"></p>
+                <div class="flex shrink-0 flex-col gap-2 sm:flex-row">
+                    {% if blog_review_posts %}
+                    <a href="#blog-panel" class="brand-focus inline-flex min-h-11 items-center justify-center rounded-lg border border-[#006AAB] bg-white px-4 py-2 text-sm font-bold text-[#006AAB]">Review {{ blog_review_posts | length }} blog draft{% if blog_review_posts | length != 1 %}s{% endif %}</a>
+                    {% endif %}
+                    <button x-show="!hasActiveSchedule" type="button" @click="armDispatch()" :disabled="!canArm" class="brand-focus inline-flex min-h-11 min-w-48 items-center justify-center rounded-lg px-5 py-2.5 text-sm font-bold text-white" :class="canArm ? 'bg-[#006AAB] hover:bg-[#005A90]' : 'cursor-not-allowed bg-gray-300'">
+                        <span x-text="saving ? 'Scheduling...' : 'Schedule all content'"></span>
+                    </button>
                 </div>
             </div>
-            <div class="border-t border-gray-200 bg-gray-50 px-6 py-4 flex items-center justify-between">
-                <button type="button" @click="showPostNowModal = false"
-                    class="px-4 py-2 text-sm font-medium text-[var(--lippe-deep-blue)] hover:text-gray-900">Cancel</button>
-                <button type="button" @click="postNow()"
-                    :disabled="postNowSaving || !canPostNow"
-                    class="inline-flex items-center gap-2 rounded-md px-5 py-2 text-sm font-semibold text-white shadow-sm transition"
-                    :class="(postNowSaving || !canPostNow) ? 'bg-gray-300 cursor-wait' : 'bg-orange-500 hover:bg-orange-600'">
+            <div x-show="successMessage" x-transition class="mt-3 rounded-lg border border-green-300 bg-green-50 p-3 text-sm font-medium text-green-800" x-text="successMessage"></div>
+            <div x-show="errorMessage" x-transition class="mt-3 rounded-lg border border-red-300 bg-red-50 p-3 text-sm font-medium text-red-800" role="alert" x-text="errorMessage"></div>
+        </footer>
+    </section>
+
+    {# Post Now confirmation keeps immediate publishing separate from scheduling. #}
+    <div x-show="showPostNowModal" x-cloak x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center bg-gray-500 bg-opacity-75 px-4 py-6" @keydown.escape.window="showPostNowModal = false">
+        <div class="absolute inset-0" @click="showPostNowModal = false"></div>
+        <div class="relative z-10 w-full max-w-2xl overflow-hidden rounded-lg bg-white shadow-xl">
+            <div class="flex items-start justify-between border-b border-gray-200 bg-orange-50 px-6 py-4">
+                <div><h3 class="text-lg font-semibold text-gray-900">Post now</h3><p class="mt-1 text-sm text-gray-600" x-text="postNowTarget?.title"></p></div>
+                <button type="button" @click="showPostNowModal = false" aria-label="Close Post now dialog" class="brand-focus rounded-md border border-gray-300 bg-white p-2 text-[#1C2740]">✕</button>
+            </div>
+            <div class="max-h-[70vh] space-y-4 overflow-y-auto px-6 py-4">
+                <div x-show="postNowTarget?.captionVideoUrl" class="rounded-md bg-black/95"><video :src="postNowTarget?.captionVideoUrl" controls muted playsinline class="mx-auto max-h-[320px] rounded-md"></video></div>
+                <p class="text-sm font-medium text-gray-900" x-text="postNowTarget?.caption"></p>
+                <template x-if="networks.includes('tiktok') && postNowTarget">
+                    <div x-data='tiktokPostSettings({
+                        scope: "post", postId: postNowTarget.id,
+                        readinessStatus: {{ (batch_view.tiktok_publish_state or {}).get("readiness_status", "disconnected") | tojson }},
+                        creatorInfo: {{ ((batch_view.tiktok_publish_state or {}).get("creator_info") or {}) | tojson }},
+                        accountAvatarUrl: {{ (batch_view.tiktok_publish_state or {}).get("avatar_url") | tojson }},
+                        durationSec: (postNowTarget.videoMetadata && postNowTarget.videoMetadata.duration_seconds) || 0,
+                        initial: {
+                            title: (postNowTarget.tiktokSettings && postNowTarget.tiktokSettings.title) || (postNowTarget.title || ""),
+                            privacyLevel: (postNowTarget.tiktokSettings && postNowTarget.tiktokSettings.privacy_level) || null,
+                            allowComment: !!(postNowTarget.tiktokSettings && postNowTarget.tiktokSettings.allow_comment),
+                            allowDuet: !!(postNowTarget.tiktokSettings && postNowTarget.tiktokSettings.allow_duet),
+                            allowStitch: !!(postNowTarget.tiktokSettings && postNowTarget.tiktokSettings.allow_stitch),
+                            commercialDisclosure: !!(postNowTarget.tiktokSettings && postNowTarget.tiktokSettings.commercial_disclosure),
+                            yourBrand: !!(postNowTarget.tiktokSettings && postNowTarget.tiktokSettings.your_brand),
+                            brandedContent: !!(postNowTarget.tiktokSettings && postNowTarget.tiktokSettings.branded_content),
+                            consentAcknowledged: !!(postNowTarget.tiktokSettings && (postNowTarget.tiktokSettings.consent_acknowledged || postNowTarget.tiktokSettings.consentAcknowledged))
+                        },
+                        onSaved: function (payload) { postNowTarget.tiktokSettings = payload; tiktokModalReady = true; }
+                    })'>{% include "batches/detail/_tiktok_post_settings.html" %}</div>
+                </template>
+                <div x-show="postNowError" class="rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-800" x-text="postNowError"></div>
+            </div>
+            <div class="flex items-center justify-between border-t border-gray-200 bg-gray-50 px-6 py-4">
+                <button type="button" @click="showPostNowModal = false" class="px-4 py-2 text-sm font-medium text-[#1C2740]">Cancel</button>
+                <button type="button" @click="postNow()" :disabled="postNowSaving || !canPostNow" class="inline-flex items-center gap-2 rounded-md px-5 py-2 text-sm font-semibold text-white" :class="(postNowSaving || !canPostNow) ? 'cursor-wait bg-gray-300' : 'bg-orange-500 hover:bg-orange-600'">
                     <span x-text="postNowSaving ? (networks.includes('tiktok') ? 'Submitting to TikTok...' : 'Publishing...') : ('▶ ' + tiktokActionLabel())"></span>
                 </button>
             </div>

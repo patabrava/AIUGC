@@ -70,6 +70,37 @@ h1, h2, h3, h4, h5, h6,
     }
 }
 
+.publish-calendar-lane {
+    background-image: repeating-linear-gradient(
+        to bottom,
+        transparent 0,
+        transparent calc(4.166667% - 1px),
+        rgba(201, 216, 232, 0.42) calc(4.166667% - 1px),
+        rgba(201, 216, 232, 0.42) 4.166667%,
+        transparent 4.166667%,
+        transparent calc(8.333333% - 1px),
+        rgba(201, 216, 232, 0.78) calc(8.333333% - 1px),
+        rgba(201, 216, 232, 0.75) 8.333333%
+    );
+    transition: background-color 160ms ease-out, box-shadow 160ms ease-out;
+}
+
+.publish-calendar-lane:hover {
+    background-color: rgba(234, 243, 251, 0.45);
+}
+
+.publish-calendar-lane--active {
+    background-color: rgba(183, 204, 231, 0.48);
+    box-shadow: inset 0 0 0 2px var(--lippe-blue);
+}
+
+.publish-selected-title {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 5;
+}
+
 .brand-nav {
     position: sticky;
     top: 0;

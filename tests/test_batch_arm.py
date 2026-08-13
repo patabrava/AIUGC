@@ -245,6 +245,52 @@ class TestBatchArmHandler:
         assert len(client.rpc_calls) == 1
         assert client.rpc_calls[0][0] == "arm_batch_content_schedule"
 
+    def test_arm_one_eight_second_video_and_ready_blog_atomically(self):
+        storage = _make_storage(num_posts=1)
+        storage["posts"][0].update({
+            "video_metadata": {"duration_seconds": 8.0},
+            "blog_enabled": True,
+            "blog_status": "draft",
+            "blog_content": {
+                "name": "Was bei Einsamkeit wirklich hilft",
+                "body_html": "<p>Ein vollständiger Blogentwurf.</p>",
+                "preview_image_url": "https://cdn.example.com/blog-preview.jpg",
+            },
+        })
+        client = _FakeClient(storage)
+
+        from app.features.publish.arm import arm_batch_dispatch
+        result = asyncio.run(
+            arm_batch_dispatch(
+                batch_id="b1",
+                request=BatchArmRequest(
+                    week_start="2036-03-24",
+                    timezone="Europe/Berlin",
+                    slots=[SlotSpec(day="mon", time="10:00")],
+                    default_networks=["instagram"],
+                    posts=[
+                        PostArmSpec(
+                            post_id="p1",
+                            caption="Ein kurzer, geprüfter Social Caption.",
+                            blog_scheduled_at="2036-03-24T12:00:00+01:00",
+                        )
+                    ],
+                ),
+                db=client,
+            )
+        )
+
+        post = storage["posts"][0]
+        assert result["ok"] is True
+        assert result["armed_count"] == 1
+        assert result["scheduled_blog_count"] == 1
+        assert post["video_metadata"]["duration_seconds"] == 8.0
+        assert post["publish_status"] == "scheduled"
+        assert post["blog_status"] == "scheduled"
+        assert post["scheduled_at"] is not None
+        assert post["blog_scheduled_at"] is not None
+        assert client.rpc_calls[0][0] == "arm_batch_content_schedule"
+
     def test_arm_accepts_single_post_and_single_slot(self):
         storage = _make_storage(num_posts=1)
         client = _FakeClient(storage)

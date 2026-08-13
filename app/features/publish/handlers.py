@@ -45,6 +45,7 @@ from app.features.publish.schemas import (
     ConfirmPublishRequest,
     ConfirmPublishResponse,
     MetaTargetSelectionRequest,
+    PostPublishPlanDraftRequest,
     PostScheduleRequest,
     PostScheduleResponse,
     PublishResult,
@@ -1091,6 +1092,80 @@ async def update_schedule(post_id: str, request: UpdatePostScheduleRequest):
         publish_caption=request.publish_caption,
     )
     return SuccessResponse(data={"post": updated_post})
+
+
+@router.put("/posts/{post_id}/plan", response_model=SuccessResponse)
+async def save_post_publish_plan(post_id: str, request: PostPublishPlanDraftRequest):
+    """Persist one calendar item's complete draft plan without arming dispatch."""
+    post = _load_post(
+        post_id,
+        fields=(
+            "id,batch_id,video_url,blog_enabled,blog_status,blog_content,"
+            "publish_status"
+        ),
+    )
+    if not post.get("video_url"):
+        raise HTTPException(status_code=422, detail="Generate the video before saving a publish plan.")
+    if str(post.get("publish_status") or "").lower() in {"scheduled", "publishing", "published"}:
+        raise HTTPException(status_code=409, detail="This post already has an active publish schedule.")
+
+    networks = [network.value for network in request.social_networks]
+    batch = _load_batch(post["batch_id"])
+    meta_connection = _effective_meta_connection(post["batch_id"], batch.get("meta_connection"))
+    _ensure_meta_targets_for_networks(networks, meta_connection)
+
+    blog_enabled = bool(post.get("blog_enabled"))
+    blog_content = post.get("blog_content") or {}
+    if blog_enabled:
+        if not isinstance(blog_content, dict):
+            blog_content = {}
+        if not str(blog_content.get("body_html") or "").strip():
+            raise HTTPException(status_code=422, detail="Generate the blog text before saving its publication time.")
+        if not str(blog_content.get("preview_image_url") or "").strip():
+            raise HTTPException(status_code=422, detail="Generate the blog image before saving its publication time.")
+        if request.blog_scheduled_at is None:
+            raise HTTPException(status_code=422, detail="Choose a blog publication date and time.")
+    elif request.blog_scheduled_at is not None:
+        raise HTTPException(status_code=422, detail="This post does not have an enabled blog.")
+
+    update_payload: Dict[str, Any] = {
+        "scheduled_at": request.scheduled_at.isoformat(),
+        "publish_caption": request.publish_caption.strip(),
+        "social_networks": networks,
+        "publish_status": "pending",
+        "publish_results": {},
+        "platform_ids": {},
+        "blog_scheduled_at": request.blog_scheduled_at.isoformat() if request.blog_scheduled_at else None,
+    }
+    if blog_enabled:
+        # A saved item is still a draft plan. The batch arm action owns the
+        # transition to scheduled so social and blog dispatch remain atomic.
+        update_payload["blog_status"] = "draft"
+
+    response = get_supabase().client.table("posts").update(update_payload).eq("id", post_id).execute()
+    rows = response.data or []
+    if not rows:
+        raise NotFoundError("Post not found.", details={"post_id": post_id})
+
+    saved = dict(rows[0])
+    logger.info(
+        "post_publish_plan_draft_saved",
+        post_id=post_id,
+        scheduled_at=saved.get("scheduled_at"),
+        blog_scheduled_at=saved.get("blog_scheduled_at"),
+        social_networks=saved.get("social_networks"),
+    )
+    return SuccessResponse(
+        data={
+            "post_id": post_id,
+            "scheduled_at": saved.get("scheduled_at"),
+            "blog_scheduled_at": saved.get("blog_scheduled_at"),
+            "publish_caption": saved.get("publish_caption"),
+            "social_networks": saved.get("social_networks") or [],
+            "publish_status": saved.get("publish_status", "pending"),
+            "blog_status": saved.get("blog_status"),
+        }
+    )
 
 
 def _update_post_tiktok_settings_row(post_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:

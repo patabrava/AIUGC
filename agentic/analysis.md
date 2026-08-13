@@ -1,38 +1,29 @@
-# Debug Note
+# Analysis
 
-Task signal: semantic multi-take video cut regression.
+## Task Signal
 
-Route: GENERAL + EYE Debug.
+Complete the approved publishing calendar interaction model. Route: GENERAL + LIRA Design + EYE.
 
-Defect: delivered 32s Semantic UGC video shows undesirable camera/face motion around cuts; older reference appears clean.
+## Product Decision
 
-Affected batch/post: `4c758a6b-2110-41db-b685-51865fa8584f` / `573ca7cb-c052-57bb-8d3b-cbac30169504`.
+The calendar is a direct-manipulation planner. The selected queue item can be placed by clicking a day/time or dragging. Social video and blog post have explicit placement modes. Existing events can be dragged to move them. Exact inputs remain the precision and keyboard fallback.
 
-Reference delivery: semantic run/post identifier `44ec6ade-2f33-4f77-8ffb-eb31f6053981`.
+`Save item` persists one post's social and blog draft plan without arming dispatch. `Schedule all content` remains the only atomic transition that marks social and blog content scheduled. This preserves batch safety while allowing operators to save per-item work across sessions.
 
-Evidence plan:
-- obtain exact persisted take prompts, negative prompts, seeds, request metadata, raw take URLs, and pipeline manifest for affected and reference runs;
-- compare delivered and source frames around every cut;
-- distinguish provider terminal motion from composer crops/reframes and frame borrowing;
-- inspect git history for prompt/composition contract changes between the two run timestamps;
-- identify one causal chain and define a regression-proof correction with pass/fail checks.
+## Implementation Block
 
-Root cause:
-- the August 6 operator-review fallback discarded all validated trim windows after one acoustic seam missed its post-word guard by 10 ms, then concatenated four complete 8s provider takes;
-- this exposed 210–290 ms per take that transcript/tail QA had excluded, including a face dissolve and terminal camera push-in;
-- the single-frame `0.080` terminal-reset detector missed distributed motion scoring `0.075` and `0.072`, the final take was not source-tail evaluated, and the fallback bypassed delivered visual seam QA;
-- the August 3 prompt is stricter than the July reference prompt and is a contributing timing constraint, not the primary regression: requested final word near 6.5s, actual final words landed around 7.46–7.54s.
+Goal: make calendar placement, movement, individual persistence, validation, and batch scheduling unambiguous.
 
-Reference mechanism: the July delivery retained per-take head/tail trims (tail trims 0.285–1.4s), so unstable provider endings never reached its cuts.
+{files, LOC/file, deps}:
 
-Correction:
-- preserve Deepgram windows in operator-review fallback;
-- clamp every non-final take to the existing 350 ms visual-tail exclusion;
-- use the existing bounded pitch-preserving A/V retime only when an exact delivery target requires it;
-- detect terminal resets from a one-frame threshold or a two-frame cumulative threshold;
-- run delivered-boundary visual QA on transcript-safe operator-review fallbacks instead of bypassing it.
+- `templates/batches/detail/_publish_panel.html`: direct placement controls, draggable queue/events, responsive inspector, approximately 120 LOC changed.
+- `static/js/batches/detail.js`: placement, drag/drop, dirty state, item persistence, approximately 220 LOC changed.
+- `static/css/brand.css`: half-hour grid and drop state, approximately 25 LOC changed.
+- `app/features/publish/schemas.py`, `handlers.py`: one validated per-item draft-plan boundary, approximately 90 LOC; no dependencies.
+- `tests/test_publish_meta_flow.py`: UI and persistence regressions, approximately 100 LOC.
 
-Validation:
-- focused automated suite: 111 passed;
-- actual affected raw takes under detector v2: distributed resets now found in takes 1 and 2; final push-in found in take 3;
-- actual affected recomposition: 30.75s, within the 30.5–32.5s contract, with tail trims `[0.35, 0.35, 0.35, 0.29]` and no unstable raw terminal frames at the cuts. Delivered-boundary QA correctly preserves one 167 ms frozen-frame advisory at seam 1; removing it would cut through the final spoken word, so it remains explicit operator-review evidence rather than triggering an unsafe trim or silent paid retry.
+Contracts: future times, at least one connected destination, caption, blog draft text/image, TikTok readiness before batch arm, 30-minute social spacing, immutable active schedules, atomic `/publish/batches/{id}/arm` transition.
+
+Validation: JavaScript syntax, focused publish tests, real browser click placement, drag movement, keyboard placement, item save/reload persistence, batch readiness gate, desktop and narrow viewport smoke.
+
+Pass: an 8-second video with a ready blog can be placed and saved individually, reloaded without loss, moved, and presented to the unchanged atomic batch action without publishing during the test.

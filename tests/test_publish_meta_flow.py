@@ -12,7 +12,12 @@ from app.core.states import BatchState
 from app.core.errors import ThirdPartyError, ValidationError
 from app.features.batches import handlers as batch_handlers
 from app.features.publish import handlers as publish_handlers
-from app.features.publish.schemas import ConfirmPublishRequest, PostScheduleRequest, SocialNetwork
+from app.features.publish.schemas import (
+    ConfirmPublishRequest,
+    PostPublishPlanDraftRequest,
+    PostScheduleRequest,
+    SocialNetwork,
+)
 
 
 def test_publish_panel_distinguishes_tiktok_direct_and_draft_labels():
@@ -35,7 +40,7 @@ def test_publish_panel_preflights_dispatch_contract_and_preserves_validation_err
     assert "persistedLocalValues" in detail_js
     assert "persistedNetworks" in detail_js
     assert "isDispatchLocked" in detail_js
-    assert "Schedule active" in panel
+    assert "Schedule active" in detail_js
     assert "Array.isArray(payload?.detail)" in detail_js
     assert "Space videos 30 min apart" in panel
     assert ':disabled="!canArm"' in panel
@@ -48,7 +53,7 @@ def test_publish_panel_owns_final_social_and_blog_schedule():
     blog_panel = Path("templates/batches/detail/_blog_panel.html").read_text()
 
     assert "Publishing workspace" in panel
-    assert "Social and blog timing live together for each content item." in panel
+    assert "Place every social video and blog post on one calendar" in panel
     assert 'href="#blog-panel"' in panel
     assert "Review {{ blog_review_posts | length }} blog draft" in panel
     assert "Blog post" in panel
@@ -71,7 +76,64 @@ def test_publish_panel_supports_one_tiktok_confirmation_for_all_editable_posts()
     assert "editableBulkPosts" in settings_js
     assert "Promise.allSettled" in settings_js
     assert "consent_acknowledged = true" in settings_js
-    assert "Per-video TikTok override" in panel
+    assert "TikTok readiness" in panel
+    assert '_tiktok_post_settings.html' in panel
+
+
+def test_publish_panel_implements_accessible_calendar_queue_and_inspector():
+    detail_js = Path("static/js/batches/detail.js").read_text()
+    panel = Path("templates/batches/detail/_publish_panel.html").read_text()
+
+    assert "Publishing calendar" in panel
+    assert "Content queue" in panel
+    assert "Week calendar" in panel
+    assert "Selected item" in panel
+    assert 'aria-label="Weekly publication calendar"' in panel
+    assert "focus a day and press Enter" in panel
+    assert "@click.self=\"placeSelectedOnCalendar(day.iso, $event)\"" in panel
+    assert "@drop.prevent=\"dropCalendarItem(day.iso, $event)\"" in panel
+    assert "draggable=\"true\"" in panel
+    assert "Save item" in panel
+    assert "Apply item changes" not in panel
+    assert "calendarEventsForDay" in detail_js
+    assert "calendarEventStyle" in detail_js
+    assert "syncVideoDuration" in detail_js
+    assert '@loadedmetadata="syncVideoDuration(post, $event)"' in panel
+    assert "placeCalendarItem" in detail_js
+    assert "startCalendarDrag" in detail_js
+    assert "saveSelectedItem" in detail_js
+    assert "/publish/posts/${post.id}/plan" in detail_js
+    assert "openFirstCalendarIssue" in detail_js
+
+
+def test_publish_view_projects_eight_second_video_with_ready_blog():
+    post = {
+        "id": "post-8s-blog",
+        "post_type": "value",
+        "topic_title": "Was bei Einsamkeit wirklich hilft",
+        "video_url": "https://cdn.example.com/eight-second.mp4",
+        "video_metadata": {
+            "duration_seconds": 8.0,
+            "caption_video_url": "https://cdn.example.com/eight-second-captioned.mp4",
+        },
+        "seed_data": {"caption": "Ein kurzer, geprüfter Social Caption."},
+        "publish_status": "pending",
+        "blog_enabled": True,
+        "blog_status": "draft",
+        "blog_content": {
+            "name": "Was bei Einsamkeit wirklich hilft",
+            "body_html": "<p>Ein vollständiger Blogentwurf.</p>",
+            "preview_image_url": "https://cdn.example.com/blog-preview.jpg",
+        },
+    }
+
+    view = batch_handlers._build_publish_post_view(post)
+
+    assert view["videoMetadata"]["duration_seconds"] == 8.0
+    assert view["captionVideoUrl"].endswith("eight-second-captioned.mp4")
+    assert view["blogEnabled"] is True
+    assert view["blogTextReady"] is True
+    assert view["blogImageReady"] is True
 
 
 class _FakeResponse:
@@ -680,6 +742,84 @@ def test_schedule_post_rejects_missing_video_before_save(monkeypatch):
     except HTTPException as exc:
         assert exc.status_code == 422
         assert exc.detail == "Generate the video before saving a publish schedule."
+
+
+def test_save_post_publish_plan_persists_social_and_blog_as_one_draft(monkeypatch):
+    social_time = datetime.utcnow() + timedelta(days=10)
+    blog_time = social_time + timedelta(hours=2)
+    storage = {
+        "posts": [
+            {
+                "id": "post-8s-blog",
+                "batch_id": "batch-1",
+                "video_url": "https://cdn.example.com/eight-second.mp4",
+                "video_metadata": {"duration_seconds": 8.0},
+                "blog_enabled": True,
+                "blog_status": "draft",
+                "blog_content": {
+                    "body_html": "<p>Ready blog</p>",
+                    "preview_image_url": "https://cdn.example.com/blog.jpg",
+                },
+                "publish_status": "pending",
+                "publish_results": {"facebook": {"status": "failed"}},
+                "platform_ids": {"facebook": "old"},
+            }
+        ]
+    }
+    monkeypatch.setattr(publish_handlers, "get_supabase", lambda: _FakeSupabase(storage))
+    monkeypatch.setattr(publish_handlers, "_load_batch", lambda batch_id: {"id": batch_id, "meta_connection": {}})
+    monkeypatch.setattr(publish_handlers, "_effective_meta_connection", lambda *_args: {})
+    monkeypatch.setattr(publish_handlers, "_ensure_meta_targets_for_networks", lambda *_args: None)
+
+    request = PostPublishPlanDraftRequest(
+        scheduled_at=social_time,
+        publish_caption="Eight second caption",
+        social_networks=[SocialNetwork.FACEBOOK, SocialNetwork.TIKTOK],
+        blog_scheduled_at=blog_time,
+    )
+    response = asyncio.run(publish_handlers.save_post_publish_plan("post-8s-blog", request))
+
+    saved = storage["posts"][0]
+    assert saved["scheduled_at"] == request.scheduled_at.isoformat()
+    assert saved["blog_scheduled_at"] == request.blog_scheduled_at.isoformat()
+    assert saved["publish_caption"] == "Eight second caption"
+    assert saved["social_networks"] == ["facebook", "tiktok"]
+    assert saved["publish_status"] == "pending"
+    assert saved["blog_status"] == "draft"
+    assert saved["publish_results"] == {}
+    assert saved["platform_ids"] == {}
+    assert response.data["post_id"] == "post-8s-blog"
+
+
+def test_save_post_publish_plan_requires_ready_blog_content(monkeypatch):
+    monkeypatch.setattr(
+        publish_handlers,
+        "_load_post",
+        lambda *_args, **_kwargs: {
+            "id": "post-1",
+            "batch_id": "batch-1",
+            "video_url": "https://cdn.example.com/video.mp4",
+            "blog_enabled": True,
+            "blog_status": "draft",
+            "blog_content": {"body_html": "", "preview_image_url": ""},
+            "publish_status": "pending",
+        },
+    )
+    monkeypatch.setattr(publish_handlers, "_load_batch", lambda batch_id: {"id": batch_id, "meta_connection": {}})
+    monkeypatch.setattr(publish_handlers, "_effective_meta_connection", lambda *_args: {})
+    monkeypatch.setattr(publish_handlers, "_ensure_meta_targets_for_networks", lambda *_args: None)
+    request = PostPublishPlanDraftRequest(
+        scheduled_at=datetime.utcnow() + timedelta(days=10),
+        publish_caption="Caption",
+        social_networks=[SocialNetwork.FACEBOOK],
+        blog_scheduled_at=datetime.utcnow() + timedelta(days=10, hours=2),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(publish_handlers.save_post_publish_plan("post-1", request))
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail == "Generate the blog text before saving its publication time."
 
 
 def test_connect_meta_account_allows_pre_s7_batches(monkeypatch):
