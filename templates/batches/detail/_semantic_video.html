@@ -493,6 +493,8 @@
                         hx-put="/qa/{{ item.post_id }}/approve"
                         hx-vals='{"approved": true}'
                         hx-swap="none"
+                        hx-sync="closest section:drop"
+                        data-pending-label="Approving delivery…"
                         class="brand-button-primary brand-focus rounded-xl px-4 py-2 text-sm font-bold text-white"
                     >
                         Approve delivery
@@ -502,6 +504,8 @@
                         hx-put="/qa/{{ item.post_id }}/approve"
                         hx-vals='{"approved": false}'
                         hx-swap="none"
+                        hx-sync="closest section:drop"
+                        data-pending-label="Rejecting delivery…"
                         class="rounded-xl border border-red-300 bg-white px-4 py-2 text-sm font-bold text-red-700"
                     >
                         Reject delivery

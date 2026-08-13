@@ -1594,6 +1594,9 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert "htmx:afterRequest" not in source
     assert 'data-semantic-delivery-post-id="{{ item.post_id }}"' not in template_source
     assert "hx-on::after-request" not in template_source
+    assert template_source.count('hx-sync="closest section:drop"') == 2
+    assert 'data-pending-label="Approving delivery…"' in template_source
+    assert 'data-pending-label="Rejecting delivery…"' in template_source
     assert "progress.estimated_remaining_seconds" in source
     assert "progress.progress_percent" in source
     assert "cache: 'no-store'" in source

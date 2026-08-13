@@ -1,6 +1,5 @@
 import asyncio
 import os
-import threading
 from types import SimpleNamespace
 
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
@@ -14,9 +13,12 @@ os.environ.setdefault("CLOUDFLARE_R2_BUCKET_NAME", "bucket-name")
 os.environ.setdefault("CLOUDFLARE_R2_PUBLIC_BASE_URL", "https://cdn.example.com")
 os.environ.setdefault("CRON_SECRET", "cron-secret")
 
+import httpx  # noqa: E402
 import pytest  # noqa: E402
 
+from app.core.errors import FlowForgeException  # noqa: E402
 from app.features.qa import handlers as qa_handlers  # noqa: E402
+from app.features.qa.schemas import QAApprovalRequest  # noqa: E402
 
 
 class _JsonRequest:
@@ -36,60 +38,45 @@ class _HtmxJsonRequest(_JsonRequest):
     }
 
 
-class _FakeQuery:
-    def __init__(self, table_name, db):
-        self.table_name = table_name
-        self.db = db
-        self.selected_fields = None
-        self.filters = []
-        self.update_payload = None
+def _stub_decision(
+    monkeypatch,
+    *,
+    batch_state="S7_PUBLISH_PLAN",
+    batch_id="batch-1",
+    qa_auto_checks=None,
+):
+    calls = []
 
-    def select(self, fields):
-        self.selected_fields = None if fields == "*" else [field.strip() for field in fields.split(",")]
-        return self
+    async def decision(*, post_id, qa_request, correlation_id):
+        calls.append(
+            {
+                "post_id": post_id,
+                "approved": qa_request.approved,
+                "notes": qa_request.notes,
+                "correlation_id": correlation_id,
+            }
+        )
+        return (
+            {"qa_auto_checks": qa_auto_checks},
+            batch_id,
+            batch_state == "S7_PUBLISH_PLAN",
+        )
 
-    def eq(self, field, value):
-        self.filters.append((field, value))
-        return self
-
-    def update(self, payload):
-        self.update_payload = payload
-        return self
-
-    def execute(self):
-        def matches(row):
-            return all(row.get(field) == value for field, value in self.filters)
-
-        if self.update_payload is not None:
-            for row in self.db[self.table_name]:
-                if matches(row):
-                    row.update(self.update_payload)
-
-        rows = [row.copy() for row in self.db[self.table_name] if matches(row)]
-        if self.selected_fields is not None:
-            rows = [{field: row.get(field) for field in self.selected_fields} for row in rows]
-        return SimpleNamespace(data=rows)
-
-
-class _FakeSupabaseClient:
-    def __init__(self, db):
-        self.db = db
-
-    def table(self, table_name):
-        return _FakeQuery(table_name, self.db)
+    monkeypatch.setattr(qa_handlers, "_record_qa_decision", decision)
+    return calls
 
 
 @pytest.mark.asyncio
 async def test_delivery_approval_database_work_does_not_starve_event_loop(monkeypatch):
-    started = threading.Event()
-    release = threading.Event()
+    started = asyncio.Event()
+    release = asyncio.Event()
 
-    def blocking_decision(**_kwargs):
+    async def bounded_decision(**_kwargs):
         started.set()
-        assert release.wait(timeout=2)
+        await release.wait()
         return ({"qa_auto_checks": None}, "batch-1", True)
 
-    monkeypatch.setattr(qa_handlers, "_record_qa_decision_sync", blocking_decision)
+    monkeypatch.setattr(qa_handlers, "_record_qa_decision", bounded_decision)
 
     approval = asyncio.create_task(
         qa_handlers.approve_qa(
@@ -97,7 +84,7 @@ async def test_delivery_approval_database_work_does_not_starve_event_loop(monkey
             _HtmxJsonRequest({"approved": True}),
         )
     )
-    assert await asyncio.to_thread(started.wait, 1)
+    await asyncio.wait_for(started.wait(), timeout=0.1)
     event_loop_probe = asyncio.Event()
     asyncio.get_running_loop().call_soon(event_loop_probe.set)
     await asyncio.wait_for(event_loop_probe.wait(), timeout=0.1)
@@ -108,105 +95,8 @@ async def test_delivery_approval_database_work_does_not_starve_event_loop(monkey
 
 
 @pytest.mark.asyncio
-async def test_approving_last_active_video_advances_when_removed_post_exists(monkeypatch):
-    db = {
-        "batches": [{"id": "batch-1", "state": "S6_QA"}],
-        "posts": [
-            {
-                "id": "post-approved",
-                "batch_id": "batch-1",
-                "qa_pass": True,
-                "seed_data": {"script_review_status": "approved"},
-            },
-            {
-                "id": "post-final",
-                "batch_id": "batch-1",
-                "qa_pass": None,
-                "seed_data": {"script_review_status": "approved"},
-            },
-            {
-                "id": "post-removed",
-                "batch_id": "batch-1",
-                "qa_pass": None,
-                "seed_data": {"script_review_status": "removed", "video_excluded": True},
-            },
-        ],
-    }
-    fake_client = _FakeSupabaseClient(db)
-    monkeypatch.setattr(qa_handlers, "get_supabase", lambda: SimpleNamespace(client=fake_client))
-
-    response = await qa_handlers.approve_qa("post-final", _JsonRequest({"approved": True}))
-
-    assert response.data["batch_advanced"] is True
-    assert db["batches"][0]["state"] == "S7_PUBLISH_PLAN"
-    assert db["posts"][1]["qa_pass"] is True
-
-
-@pytest.mark.asyncio
-async def test_qa_approval_recovers_stale_semantic_batch_directly_to_publish(monkeypatch):
-    db = {
-        "batches": [
-            {
-                "id": "batch-1",
-                "state": "S4_SCRIPTED",
-                "creation_mode": "semantic_ugc",
-            }
-        ],
-        "posts": [
-            {
-                "id": "post-final",
-                "batch_id": "batch-1",
-                "qa_pass": None,
-                "video_prompt_json": None,
-                "video_status": "caption_completed",
-                "seed_data": {"script_review_status": "approved"},
-            }
-        ],
-    }
-    fake_client = _FakeSupabaseClient(db)
-    monkeypatch.setattr(
-        qa_handlers,
-        "get_supabase",
-        lambda: SimpleNamespace(client=fake_client),
-    )
-
-    response = await qa_handlers.approve_qa(
-        "post-final",
-        _JsonRequest({"approved": True}),
-    )
-
-    assert response.data["batch_advanced"] is True
-    assert db["batches"][0]["state"] == "S7_PUBLISH_PLAN"
-    assert db["posts"][0]["qa_pass"] is True
-
-
-@pytest.mark.asyncio
 async def test_semantic_delivery_approval_redirects_htmx_to_publish(monkeypatch):
-    db = {
-        "batches": [
-            {
-                "id": "batch-1",
-                "state": "S6_QA",
-                "creation_mode": "semantic_ugc",
-            }
-        ],
-        "posts": [
-            {
-                "id": "post-final",
-                "batch_id": "batch-1",
-                "qa_pass": None,
-                "video_prompt_json": None,
-                "video_status": "caption_completed",
-                "seed_data": {"script_review_status": "approved"},
-            }
-        ],
-    }
-    fake_client = _FakeSupabaseClient(db)
-    monkeypatch.setattr(
-        qa_handlers,
-        "get_supabase",
-        lambda: SimpleNamespace(client=fake_client),
-    )
+    calls = _stub_decision(monkeypatch)
 
     response = await qa_handlers.approve_qa(
         "post-final",
@@ -214,47 +104,22 @@ async def test_semantic_delivery_approval_redirects_htmx_to_publish(monkeypatch)
     )
 
     assert response.status_code == 200
-    assert response.headers["hx-redirect"] == (
-        "/batches/batch-1#publish-workflow"
-    )
-    assert db["batches"][0]["state"] == "S7_PUBLISH_PLAN"
+    assert response.headers["hx-redirect"] == "/batches/batch-1#publish-workflow"
+    assert calls == [
+        {
+            "post_id": "post-final",
+            "approved": True,
+            "notes": None,
+            "correlation_id": "qa_approve_post-final",
+        }
+    ]
 
 
 @pytest.mark.asyncio
-async def test_semantic_delivery_decision_redirects_htmx_to_current_post_when_batch_waits(
+async def test_semantic_delivery_decision_redirects_to_current_post_when_batch_waits(
     monkeypatch,
 ):
-    db = {
-        "batches": [
-            {
-                "id": "batch-1",
-                "state": "S6_QA",
-                "creation_mode": "semantic_ugc",
-            }
-        ],
-        "posts": [
-            {
-                "id": "post-first",
-                "batch_id": "batch-1",
-                "qa_pass": None,
-                "video_status": "caption_completed",
-                "seed_data": {"script_review_status": "approved"},
-            },
-            {
-                "id": "post-pending",
-                "batch_id": "batch-1",
-                "qa_pass": None,
-                "video_status": "caption_completed",
-                "seed_data": {"script_review_status": "approved"},
-            },
-        ],
-    }
-    fake_client = _FakeSupabaseClient(db)
-    monkeypatch.setattr(
-        qa_handlers,
-        "get_supabase",
-        lambda: SimpleNamespace(client=fake_client),
-    )
+    _stub_decision(monkeypatch, batch_state="S6_QA")
 
     response = await qa_handlers.approve_qa(
         "post-first",
@@ -265,70 +130,100 @@ async def test_semantic_delivery_decision_redirects_htmx_to_current_post_when_ba
     assert response.headers["hx-redirect"] == (
         "/batches/batch-1#semantic-video-post-post-first"
     )
-    assert db["batches"][0]["state"] == "S6_QA"
-    assert db["posts"][0]["qa_pass"] is True
 
 
 @pytest.mark.asyncio
-async def test_rejecting_video_excludes_it_and_advances_with_remaining_approved_posts(monkeypatch):
-    db = {
-        "batches": [{"id": "batch-1", "state": "S6_QA"}],
-        "posts": [
-            {
-                "id": "post-approved",
-                "batch_id": "batch-1",
-                "qa_pass": True,
-                "seed_data": {"script_review_status": "approved"},
-            },
-            {
-                "id": "post-rejected",
-                "batch_id": "batch-1",
-                "qa_pass": None,
-                "seed_data": {"script_review_status": "approved"},
-            },
-        ],
-    }
-    fake_client = _FakeSupabaseClient(db)
-    monkeypatch.setattr(qa_handlers, "get_supabase", lambda: SimpleNamespace(client=fake_client))
+async def test_non_htmx_delivery_rejection_returns_rpc_result(monkeypatch):
+    calls = _stub_decision(monkeypatch)
 
-    response = await qa_handlers.approve_qa("post-rejected", _JsonRequest({"approved": False, "notes": "Bad cut"}))
+    response = await qa_handlers.approve_qa(
+        "post-rejected",
+        _JsonRequest({"approved": False, "notes": "Bad cut"}),
+    )
 
+    assert response.data["qa_pass"] is False
+    assert response.data["qa_notes"] == "Bad cut"
+    assert response.data["qa_auto_checks"] is None
     assert response.data["batch_advanced"] is True
-    assert db["batches"][0]["state"] == "S7_PUBLISH_PLAN"
-    assert db["posts"][1]["qa_pass"] is False
-    assert db["posts"][1]["qa_notes"] == "Bad cut"
-    assert db["posts"][1]["seed_data"]["video_excluded"] is True
-    assert db["posts"][1]["seed_data"]["video_review_status"] == "rejected"
+    assert calls[0]["approved"] is False
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("actor_identity_source", ["actor_identity_anchor_images", "actor_identity_scene_reference_set"])
-async def test_approving_actor_identity_video_passes_manual_identity_gate(monkeypatch, actor_identity_source):
-    db = {
-        "batches": [{"id": "batch-1", "state": "S6_QA"}],
-        "posts": [
-            {
-                "id": "post-actor-video",
-                "batch_id": "batch-1",
-                "qa_pass": None,
-                "seed_data": {"script_review_status": "approved"},
-                "video_metadata": {"actor_identity_source": actor_identity_source},
-                "identity_gate_result": {
-                    "status": "manual_required",
-                    "reason": "Video identity requires manual review because automated face gate is not configured",
-                    "gate_type": "manual",
-                    "details": {},
+async def test_qa_rpc_retries_idempotently_on_a_fresh_transport(monkeypatch):
+    settings = SimpleNamespace(
+        supabase_url="https://example.supabase.co",
+        supabase_service_key="service-key",
+    )
+    monkeypatch.setattr(qa_handlers, "get_settings", lambda: settings)
+    calls = []
+    clients = []
+
+    class _Client:
+        def __init__(self, **_kwargs):
+            self.index = len(clients)
+            clients.append(self)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, url, *, headers, json):
+            calls.append((self.index, url, headers, json))
+            if self.index == 0:
+                raise httpx.ReadTimeout(
+                    "temporary timeout",
+                    request=httpx.Request("POST", url),
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "ok": True,
+                    "post_id": "post-1",
+                    "batch_id": "batch-1",
+                    "batch_state": "S7_PUBLISH_PLAN",
                 },
-            },
-        ],
+            )
+
+    async def no_delay(_seconds):
+        return None
+
+    monkeypatch.setattr(qa_handlers.httpx, "AsyncClient", _Client)
+    monkeypatch.setattr(qa_handlers.asyncio, "sleep", no_delay)
+
+    result = await qa_handlers._execute_qa_decision_rpc(
+        post_id="post-1",
+        qa_request=QAApprovalRequest(approved=True),
+        correlation_id="qa-test",
+    )
+
+    assert result["batch_state"] == "S7_PUBLISH_PLAN"
+    assert len(clients) == 2
+    assert [call[0] for call in calls] == [0, 1]
+    assert calls[1][1].endswith("/rest/v1/rpc/apply_post_qa_decision")
+    assert calls[1][3] == {
+        "p_post_id": "post-1",
+        "p_approved": True,
+        "p_notes": None,
     }
-    fake_client = _FakeSupabaseClient(db)
-    monkeypatch.setattr(qa_handlers, "get_supabase", lambda: SimpleNamespace(client=fake_client))
 
-    response = await qa_handlers.approve_qa("post-actor-video", _JsonRequest({"approved": True}))
 
-    assert response.data["batch_advanced"] is True
-    assert db["batches"][0]["state"] == "S7_PUBLISH_PLAN"
-    assert db["posts"][0]["qa_pass"] is True
-    assert db["posts"][0]["identity_gate_result"]["status"] == "passed"
-    assert db["posts"][0]["identity_gate_result"]["gate_type"] == "manual"
+@pytest.mark.asyncio
+async def test_qa_decision_maps_atomic_validation_result(monkeypatch):
+    async def invalid_gate(**_kwargs):
+        return {
+            "ok": False,
+            "error_code": "validation_error",
+            "message": "ActorIdentity video identity gate must pass before QA approval.",
+            "batch_id": "batch-1",
+        }
+
+    monkeypatch.setattr(qa_handlers, "_execute_qa_decision_rpc", invalid_gate)
+
+    with pytest.raises(FlowForgeException, match="identity gate must pass"):
+        await qa_handlers._record_qa_decision(
+            post_id="post-actor",
+            qa_request=QAApprovalRequest(approved=True),
+            correlation_id="qa-test",
+        )

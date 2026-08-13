@@ -252,13 +252,14 @@ def test_github_action_deploys_on_push_to_main():
     assert "appleboy/ssh-action" not in step_text
     assert "scripts/deploy/production.sh" not in step_text
     assert "Validate production deploy config" in step_text
-    assert "Require scene-image database contract before cutover" in step_text
+    assert "Require production database RPC contracts before cutover" in step_text
     assert "semantic_scene_image_jobs" in step_text
     assert (
         "?select=batch_id,expected_run_id,max_attempts,provider_attempt_count,deadline_at,heartbeat_at"
         in step_text
     )
     assert "/rpc/authorize_semantic_scene_image_provider_attempt" in step_text
+    assert "/rpc/apply_post_qa_decision" in step_text
     assert "/rpc/finalize_semantic_scene_image_job" in step_text
     assert "/rpc/heartbeat_semantic_scene_image_worker" in step_text
     assert "/rpc/probe_semantic_scene_image_queue" in step_text

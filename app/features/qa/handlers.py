@@ -6,21 +6,22 @@ Per Canon § 3.2: S6_QA state management
 """
 
 import asyncio
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Dict, Any
 import json
 import httpx
+import time
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, status, Request
 from fastapi.responses import JSONResponse
 
 from app.adapters.supabase_client import get_supabase
+from app.core.config import get_settings
 from app.core.errors import FlowForgeException, SuccessResponse, ErrorCode
 from app.core.logging import get_logger
 from app.core.video_profiles import VIDEO_STATUS_CAPTION_COMPLETED, VIDEO_STATUS_COMPLETED
-from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
-from app.features.characters.actor_identity import is_actor_identity_video_source, passed_manual_gate
 from app.features.qa.schemas import (
     AutoQAChecks,
     QAApprovalRequest,
@@ -32,6 +33,9 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/qa", tags=["qa"])
 
 _QA_VIDEO_READY_STATUSES = {VIDEO_STATUS_COMPLETED, VIDEO_STATUS_CAPTION_COMPLETED}
+_QA_DECISION_RPC_TIMEOUT_SECONDS = 6.0
+_QA_DECISION_RPC_RETRY_DELAY_SECONDS = 0.15
+_QA_DECISION_TRANSIENT_STATUSES = {502, 503, 504}
 
 
 def _is_removed_post(post: Dict[str, Any]) -> bool:
@@ -44,94 +48,116 @@ def _is_removed_post(post: Dict[str, Any]) -> bool:
     return seed_data.get("script_review_status") == "removed" or seed_data.get("video_excluded") is True
 
 
-def _json_object(value: Any) -> Dict[str, Any]:
-    if isinstance(value, dict):
-        return value
-    if isinstance(value, str):
-        try:
-            parsed = json.loads(value)
-            return parsed if isinstance(parsed, dict) else {}
-        except json.JSONDecodeError:
-            return {}
-    return {}
-
-
 def _active_posts(posts: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
     return [post for post in posts if not _is_removed_post(post)]
 
 
-def _active_posts_ready_for_publish(posts: list[Dict[str, Any]]) -> bool:
-    active_posts = _active_posts(posts)
-    if not active_posts:
-        return False
-    return all(post.get("qa_pass") is True for post in active_posts)
+def _qa_rpc_result(response: httpx.Response) -> dict[str, Any]:
+    try:
+        result = response.json()
+    except ValueError as exc:
+        raise RuntimeError("Delivery QA RPC returned invalid JSON.") from exc
+    if isinstance(result, list):
+        if len(result) != 1:
+            raise RuntimeError("Delivery QA RPC returned an unexpected result count.")
+        result = result[0]
+    if not isinstance(result, Mapping):
+        raise RuntimeError("Delivery QA RPC returned an invalid contract.")
+    return dict(result)
 
 
-def _seed_data_for_qa_decision(post: Dict[str, Any], *, approved: bool) -> Dict[str, Any]:
-    seed_data = _json_object(post.get("seed_data"))
-    if approved:
-        seed_data["video_review_status"] = "approved"
-        seed_data.pop("video_excluded", None)
-    else:
-        seed_data["video_review_status"] = "rejected"
-        seed_data["video_excluded"] = True
-    return seed_data
+async def _execute_qa_decision_rpc(
+    *,
+    post_id: str,
+    qa_request: QAApprovalRequest,
+    correlation_id: str,
+) -> dict[str, Any]:
+    """Run the idempotent QA transaction through one bounded fresh transport."""
+    settings = get_settings()
+    headers = {
+        "apikey": settings.supabase_service_key,
+        "Authorization": f"Bearer {settings.supabase_service_key}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Prefer": "return=representation",
+    }
+    payload = {
+        "p_post_id": str(post_id),
+        "p_approved": qa_request.approved,
+        "p_notes": qa_request.notes,
+    }
+    last_error: Exception | None = None
+    for attempt in range(1, 3):
+        try:
+            async with httpx.AsyncClient(follow_redirects=False, timeout=None) as client:
+                response = await asyncio.wait_for(
+                    client.post(
+                        f"{settings.supabase_url.rstrip('/')}/rest/v1/rpc/apply_post_qa_decision",
+                        headers=headers,
+                        json=payload,
+                    ),
+                    timeout=_QA_DECISION_RPC_TIMEOUT_SECONDS,
+                )
+        except (TimeoutError, httpx.RequestError) as exc:
+            last_error = exc
+            logger.warning(
+                "qa_approval_rpc_transport_retry",
+                post_id=post_id,
+                correlation_id=correlation_id,
+                attempt=attempt,
+                error_class=type(exc).__name__,
+            )
+            if attempt < 2:
+                await asyncio.sleep(_QA_DECISION_RPC_RETRY_DELAY_SECONDS)
+                continue
+            raise RuntimeError("Delivery QA database request timed out.") from exc
+
+        if response.status_code in _QA_DECISION_TRANSIENT_STATUSES and attempt < 2:
+            logger.warning(
+                "qa_approval_rpc_status_retry",
+                post_id=post_id,
+                correlation_id=correlation_id,
+                attempt=attempt,
+                status_code=response.status_code,
+            )
+            await asyncio.sleep(_QA_DECISION_RPC_RETRY_DELAY_SECONDS)
+            continue
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f"Delivery QA RPC failed with HTTP {response.status_code}."
+            )
+        return _qa_rpc_result(response)
+
+    raise RuntimeError("Delivery QA RPC failed without a response.") from last_error
 
 
-def _record_qa_decision_sync(
+async def _record_qa_decision(
     *,
     post_id: str,
     qa_request: QAApprovalRequest,
     correlation_id: str,
 ) -> tuple[Dict[str, Any], str | None, bool]:
-    """Persist one QA decision and reconcile its batch off the ASGI event loop."""
-    supabase = get_supabase().client
-    response = supabase.table("posts").select("*").eq("id", post_id).execute()
-
-    if not response.data:
+    started_at = time.monotonic()
+    result = await _execute_qa_decision_rpc(
+        post_id=post_id,
+        qa_request=qa_request,
+        correlation_id=correlation_id,
+    )
+    if result.get("ok") is not True:
+        error_code = str(result.get("error_code") or "validation_error")
+        status_code = 404 if error_code == "not_found" else 422
         raise FlowForgeException(
-            code=ErrorCode.NOT_FOUND,
-            message=f"Post {post_id} not found",
-            details={"post_id": post_id},
+            code=(ErrorCode.NOT_FOUND if status_code == 404 else ErrorCode.VALIDATION_ERROR),
+            message=str(result.get("message") or "Delivery QA decision was rejected."),
+            details={
+                "post_id": post_id,
+                "batch_id": result.get("batch_id"),
+            },
+            status_code=status_code,
         )
 
-    post = response.data[0]
-    batch_id = post.get("batch_id")
-    video_metadata = _json_object(post.get("video_metadata"))
-    identity_gate_result = _json_object(post.get("identity_gate_result"))
-    identity_gate_update = None
-    if (
-        qa_request.approved
-        and is_actor_identity_video_source(video_metadata.get("actor_identity_source"))
-    ):
-        if identity_gate_result.get("status") == "manual_required":
-            identity_gate_update = passed_manual_gate(
-                "Operator approved video identity match during QA review"
-            ).model_dump(mode="json")
-        elif identity_gate_result.get("status") != "passed":
-            raise FlowForgeException(
-                code=ErrorCode.VALIDATION_ERROR,
-                message="ActorIdentity video identity gate must pass before QA approval.",
-                details={
-                    "post_id": post_id,
-                    "identity_gate_result": identity_gate_result,
-                },
-                status_code=422,
-            )
-
-    update_data = {
-        "qa_pass": qa_request.approved,
-        "qa_notes": qa_request.notes or "",
-        "seed_data": _seed_data_for_qa_decision(
-            post,
-            approved=qa_request.approved,
-        ),
-    }
-    if identity_gate_update:
-        update_data["identity_gate_result"] = identity_gate_update
-
-    supabase.table("posts").update(update_data).eq("id", post_id).execute()
-
+    batch_id = str(result.get("batch_id") or "") or None
+    should_advance = result.get("batch_state") == "S7_PUBLISH_PLAN"
     logger.info(
         "qa_approval_recorded",
         post_id=post_id,
@@ -139,25 +165,10 @@ def _record_qa_decision_sync(
         correlation_id=correlation_id,
         approved=qa_request.approved,
         has_notes=bool(qa_request.notes),
+        batch_state=result.get("batch_state"),
+        duration_ms=round((time.monotonic() - started_at) * 1000),
     )
-
-    should_advance = False
-    if batch_id:
-        reconciled_state = reconcile_batch_video_pipeline_state(
-            batch_id=batch_id,
-            correlation_id=correlation_id,
-            supabase_client=supabase,
-        )
-        should_advance = reconciled_state == "S7_PUBLISH_PLAN"
-        if should_advance:
-            logger.info(
-                "batch_auto_advanced_to_publish",
-                batch_id=batch_id,
-                post_id=post_id,
-                correlation_id=correlation_id,
-            )
-
-    return post, batch_id, should_advance
+    return {"qa_auto_checks": result.get("qa_auto_checks")}, batch_id, should_advance
 
 
 @router.post("/{post_id}/auto-check", response_model=SuccessResponse)
@@ -313,8 +324,7 @@ async def approve_qa(post_id: str, req: Request):
 
         qa_request = QAApprovalRequest(**payload_normalized)
 
-        post, batch_id, should_advance = await asyncio.to_thread(
-            _record_qa_decision_sync,
+        post, batch_id, should_advance = await _record_qa_decision(
             post_id=post_id,
             qa_request=qa_request,
             correlation_id=correlation_id,

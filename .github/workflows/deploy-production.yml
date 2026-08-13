@@ -34,7 +34,7 @@ jobs:
           test -n "$PROD_MAGNIFIC_API_KEY" || { echo "Missing PROD_MAGNIFIC_API_KEY GitHub secret."; exit 1; }
           test -n "$PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64" || { echo "Missing PROD_GOOGLE_APPLICATION_CREDENTIALS_JSON_B64 GitHub secret."; exit 1; }
 
-      - name: Require scene-image database contract before cutover
+      - name: Require production database RPC contracts before cutover
         run: |
           python3 - <<'PY'
           import base64
@@ -95,6 +95,7 @@ jobs:
           with urllib.request.urlopen(openapi_request, timeout=20) as response:
               paths = json.loads(response.read().decode()).get("paths", {})
           required_rpcs = {
+              "/rpc/apply_post_qa_decision",
               "/rpc/renew_semantic_scene_image",
               "/rpc/authorize_semantic_scene_image_provider_attempt",
               "/rpc/reserve_semantic_scene_image_candidates",
@@ -105,10 +106,10 @@ jobs:
           missing = sorted(required_rpcs.difference(paths))
           if missing:
               raise SystemExit(
-                  "Production scene-image migration is missing required RPC contracts: "
+                  "Production database migrations are missing required RPC contracts: "
                   + ", ".join(missing)
               )
-          print("Production scene-image database contract is ready for code cutover.")
+          print("Production database RPC contracts are ready for code cutover.")
           PY
 
       - name: Resolve immutable image reference
