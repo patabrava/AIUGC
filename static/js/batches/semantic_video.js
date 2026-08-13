@@ -35,6 +35,68 @@
         window.location.reload();
     }
 
+    function navigateAfterDeliveryDecision(batchId, postId, publishReady) {
+        const target = publishReady
+            ? '#publish-workflow'
+            : `#semantic-video-post-${encodeURIComponent(postId)}`;
+        window.location.replace(`/batches/${encodeURIComponent(batchId)}${target}`);
+    }
+
+    async function reconcileDeliveryDecision(button) {
+        const batchId = button.dataset.semanticDeliveryBatchId;
+        const postId = button.dataset.semanticDeliveryPostId;
+        const root = button.closest('[data-semantic-video-controller]');
+        try {
+            const response = await fetch(`/qa/batch/${encodeURIComponent(batchId)}/status`, {
+                credentials: 'same-origin',
+                cache: 'no-store',
+                headers: {'Accept': 'application/json'},
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error('Delivery status could not be confirmed.');
+            if (payload?.data?.batch_state === 'S7_PUBLISH_PLAN') {
+                navigateAfterDeliveryDecision(batchId, postId, true);
+                return;
+            }
+            setStatus(root, 'Delivery approval did not complete. Please try once more.', true);
+        } catch (_error) {
+            setStatus(root, 'Delivery approval could not be confirmed. Reload the page before retrying.', true);
+        }
+    }
+
+    document.addEventListener('htmx:afterRequest', (event) => {
+        const trigger = event.detail?.elt || event.target;
+        const button = trigger?.closest?.('[data-semantic-delivery-decision]');
+        if (!button) return;
+
+        let serverRedirect = '';
+        try {
+            serverRedirect = event.detail?.xhr?.getResponseHeader('HX-Redirect') || '';
+        } catch (_error) {
+            serverRedirect = '';
+        }
+        if (serverRedirect) return;
+
+        const batchId = button.dataset.semanticDeliveryBatchId;
+        const postId = button.dataset.semanticDeliveryPostId;
+        if (event.detail?.successful) {
+            let payload = {};
+            try {
+                payload = JSON.parse(event.detail?.xhr?.responseText || '{}');
+            } catch (_error) {
+                payload = {};
+            }
+            navigateAfterDeliveryDecision(
+                batchId,
+                postId,
+                payload?.data?.batch_advanced === true,
+            );
+            return;
+        }
+
+        void reconcileDeliveryDecision(button);
+    });
+
     function sceneImageWorkflow(root) {
         return root.closest('[data-semantic-video-workflow]') || document;
     }

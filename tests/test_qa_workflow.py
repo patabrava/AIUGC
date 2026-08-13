@@ -19,6 +19,7 @@ import pytest  # noqa: E402
 from app.core.errors import FlowForgeException  # noqa: E402
 from app.features.qa import handlers as qa_handlers  # noqa: E402
 from app.features.qa.schemas import QAApprovalRequest  # noqa: E402
+from app.features.qa.schemas import BatchQAStatusResponse  # noqa: E402
 
 
 class _JsonRequest:
@@ -227,3 +228,18 @@ async def test_qa_decision_maps_atomic_validation_result(monkeypatch):
             qa_request=QAApprovalRequest(approved=True),
             correlation_id="qa-test",
         )
+
+
+def test_batch_qa_status_exposes_persisted_batch_state_for_client_reconciliation():
+    payload = BatchQAStatusResponse(
+        batch_id="batch-1",
+        batch_state="S7_PUBLISH_PLAN",
+        total_posts=1,
+        posts_with_videos=1,
+        posts_qa_passed=1,
+        posts_qa_pending=0,
+        all_passed=True,
+        can_advance_to_publish=True,
+    ).model_dump()
+
+    assert payload["batch_state"] == "S7_PUBLISH_PLAN"

@@ -432,6 +432,7 @@ async def get_batch_qa_status(batch_id: str):
         return SuccessResponse(
             data=BatchQAStatusResponse(
                 batch_id=batch_id,
+                batch_state=str(batch_response.data[0].get("state") or ""),
                 total_posts=total_posts,
                 posts_with_videos=posts_with_videos,
                 posts_qa_passed=posts_qa_passed,

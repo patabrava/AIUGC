@@ -494,6 +494,10 @@
                         hx-vals='{"approved": true}'
                         hx-swap="none"
                         hx-sync="closest section:drop"
+                        hx-request='{"timeout": 15000}'
+                        data-semantic-delivery-decision
+                        data-semantic-delivery-post-id="{{ item.post_id }}"
+                        data-semantic-delivery-batch-id="{{ batch.id }}"
                         data-pending-label="Approving delivery…"
                         class="brand-button-primary brand-focus rounded-xl px-4 py-2 text-sm font-bold text-white"
                     >
@@ -505,6 +509,10 @@
                         hx-vals='{"approved": false}'
                         hx-swap="none"
                         hx-sync="closest section:drop"
+                        hx-request='{"timeout": 15000}'
+                        data-semantic-delivery-decision
+                        data-semantic-delivery-post-id="{{ item.post_id }}"
+                        data-semantic-delivery-batch-id="{{ batch.id }}"
                         data-pending-label="Rejecting delivery…"
                         class="rounded-xl border border-red-300 bg-white px-4 py-2 text-sm font-bold text-red-700"
                     >

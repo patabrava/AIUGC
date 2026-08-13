@@ -87,6 +87,7 @@ class QAApprovalResponse(BaseModel):
 class BatchQAStatusResponse(BaseModel):
     """Batch QA status summary."""
     batch_id: str
+    batch_state: str
     total_posts: int
     posts_with_videos: int
     posts_qa_passed: int
@@ -98,6 +99,7 @@ class BatchQAStatusResponse(BaseModel):
         json_schema_extra = {
             "example": {
                 "batch_id": "123e4567-e89b-12d3-a456-426614174000",
+                "batch_state": "S6_QA",
                 "total_posts": 10,
                 "posts_with_videos": 10,
                 "posts_qa_passed": 8,
