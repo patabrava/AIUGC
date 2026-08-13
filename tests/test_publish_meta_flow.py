@@ -97,6 +97,11 @@ def test_publish_panel_implements_accessible_calendar_queue_and_inspector():
     assert "Apply item changes" not in panel
     assert "calendarEventsForDay" in detail_js
     assert "calendarEventStyle" in detail_js
+    assert "Array.from({ length: 7 }" in detail_js
+    assert "calendarWeekStartISO" in detail_js
+    assert "showWeekend" not in detail_js
+    assert "Monday–Sunday" in panel
+    assert "publish-calendar-grid" in panel
     assert "syncVideoDuration" in detail_js
     assert '@loadedmetadata="syncVideoDuration(post, $event)"' in panel
     assert "placeCalendarItem" in detail_js

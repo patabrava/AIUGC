@@ -604,7 +604,6 @@
             selectedPostId: null,
             showTikTokDefaults: false,
             showSelectedDetails: false,
-            showWeekend: false,
             itemFeedback: '',
             itemFeedbackError: false,
             savingItem: false,
@@ -779,11 +778,24 @@
                 }).format(date);
             },
 
+            calendarWeekStartISO(dateValue) {
+                if (!dateValue) return '';
+                const date = dateValue instanceof Date
+                    ? new Date(dateValue.getTime())
+                    : new Date(`${dateValue}T12:00:00`);
+                if (Number.isNaN(date.getTime())) return '';
+                date.setDate(date.getDate() - ((date.getDay() + 6) % 7));
+                const year = date.getFullYear();
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                return `${year}-${month}-${day}`;
+            },
+
             get calendarDays() {
                 if (!this.weekStart) return [];
-                const dayCount = this.showWeekend || this.hasWeekendEvents ? 7 : 5;
-                return Array.from({ length: dayCount }, (_value, index) => {
-                    const date = new Date(`${this.weekStart}T12:00:00`);
+                const monday = this.calendarWeekStartISO(this.weekStart);
+                return Array.from({ length: 7 }, (_value, index) => {
+                    const date = new Date(`${monday}T12:00:00`);
                     date.setDate(date.getDate() + index);
                     const iso = date.toISOString().slice(0, 10);
                     return {
@@ -791,17 +803,6 @@
                         weekday: new Intl.DateTimeFormat('en-GB', { weekday: 'short' }).format(date),
                         label: new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' }).format(date),
                     };
-                });
-            },
-
-            get hasWeekendEvents() {
-                return this.posts.some((post, index) => {
-                    const values = [this.scheduledLocalValue(index), post.blogEnabled ? post.blogScheduleLocal : ''].filter(Boolean);
-                    return values.some((value) => {
-                        const dateValue = String(value).split('T')[0];
-                        const date = new Date(`${dateValue}T12:00:00`);
-                        return !Number.isNaN(date.getTime()) && [0, 6].includes(date.getDay());
-                    });
                 });
             },
 
@@ -950,16 +951,14 @@
 
             shiftCalendarWeek(days) {
                 if (!this.weekStart) return;
-                const next = new Date(`${this.weekStart}T12:00:00`);
+                const next = new Date(`${this.calendarWeekStartISO(this.weekStart)}T12:00:00`);
                 next.setDate(next.getDate() + days);
-                this.weekStart = next.toISOString().slice(0, 10);
+                this.weekStart = this.calendarWeekStartISO(next);
             },
 
             goToCurrentWeek() {
                 const now = new Date();
-                const monday = new Date(now);
-                monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
-                this.weekStart = monday.toISOString().slice(0, 10);
+                this.weekStart = this.calendarWeekStartISO(now);
             },
 
             itemFingerprint(index) {
@@ -1364,7 +1363,7 @@
                             'X-Correlation-ID': `arm_batch_${this.batchId}`,
                         },
                         body: JSON.stringify({
-                            week_start: this.weekStart,
+                            week_start: this.calendarWeekStartISO(this.weekStart),
                             timezone: this.timezone,
                             slots: this.slots.map((s) => ({ day: dayMap[s.day], time: s.time })),
                             default_networks: this.networks,

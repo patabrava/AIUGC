@@ -63,7 +63,7 @@ The scheduling surface needs dense, legible controls and status relationships ra
 
 ## Selected design direction
 
-Calendar planner: a keyboard-accessible week canvas with paired social/blog events, a content queue, a focused item inspector, explicit TikTok readiness, and a sticky atomic batch review. The default view shows Monday through Friday; weekends can be revealed and appear automatically when they contain scheduled content.
+Calendar planner: a keyboard-accessible Monday-through-Sunday canvas with paired social/blog events, a content queue, a focused item inspector, explicit TikTok readiness, and a sticky atomic batch review. All seven days remain visible within the calendar width so every date is directly selectable without a view toggle or horizontal column scrolling.
 
 ## Validation path for later implementation
 

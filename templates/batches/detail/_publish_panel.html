@@ -111,7 +111,7 @@
                         <button type="button" @click="shiftCalendarWeek(-7)" aria-label="Previous week" class="brand-focus h-10 w-10 rounded-lg border border-[#C9D8E8] bg-white text-lg font-bold text-[#36506C]">‹</button>
                         <span class="min-w-40 text-center text-sm font-bold text-[#1C2740]" x-text="calendarRangeLabel"></span>
                         <button type="button" @click="shiftCalendarWeek(7)" aria-label="Next week" class="brand-focus h-10 w-10 rounded-lg border border-[#C9D8E8] bg-white text-lg font-bold text-[#36506C]">›</button>
-                        <button type="button" @click="showWeekend = !showWeekend" class="brand-focus min-h-10 rounded-lg border border-[#C9D8E8] bg-white px-3 py-2 text-xs font-bold text-[#36506C]" x-text="showWeekend ? 'Weekdays' : '7 days'"></button>
+                        <span class="inline-flex min-h-10 items-center rounded-lg border border-[#DCE6F0] bg-[#F7FAFD] px-3 py-2 text-xs font-bold text-[#36506C]">Monday–Sunday</span>
                     </div>
                 </div>
 
@@ -133,18 +133,18 @@
                     <button type="button" @click="spaceConflictingSlots()" class="brand-focus rounded-md border border-amber-400 bg-white px-3 py-2 text-xs font-bold text-amber-950">Space videos 30 min apart</button>
                 </div>
 
-                <div class="mt-4 overflow-x-auto rounded-xl border border-[#DCE6F0]" tabindex="0" aria-label="Weekly publication calendar">
-                    <div :class="calendarDays.length === 7 ? 'min-w-[840px]' : 'min-w-[600px]'">
-                        <div class="grid border-b border-[#DCE6F0] bg-[#F7FAFD]" :style="'grid-template-columns:58px repeat(' + calendarDays.length + ', minmax(104px, 1fr))'">
+                <div class="mt-4 overflow-hidden rounded-xl border border-[#DCE6F0]" tabindex="0" aria-label="Weekly publication calendar">
+                    <div>
+                        <div class="publish-calendar-grid grid border-b border-[#DCE6F0] bg-[#F7FAFD]">
                             <div class="border-r border-[#DCE6F0] p-2 text-[10px] font-semibold text-[#65738A]">Time</div>
                             <template x-for="day in calendarDays" :key="day.iso">
-                                <div class="border-r border-[#DCE6F0] px-2 py-2 text-center last:border-r-0">
+                                <div class="min-w-0 border-r border-[#DCE6F0] px-0.5 py-2 text-center last:border-r-0 sm:px-2">
                                     <p class="text-xs font-bold text-[#1C2740]" x-text="day.weekday"></p>
                                     <p class="mt-0.5 text-[11px] text-[#65738A]" x-text="day.label"></p>
                                 </div>
                             </template>
                         </div>
-                        <div class="grid" :style="'grid-template-columns:58px repeat(' + calendarDays.length + ', minmax(104px, 1fr))'">
+                        <div class="publish-calendar-grid grid">
                             <div class="relative h-[720px] border-r border-[#DCE6F0] bg-[#FBFCFE]">
                                 <template x-for="hour in calendarHours" :key="hour">
                                     <span class="absolute left-0 right-0 -translate-y-1/2 pr-2 text-right text-[10px] text-[#65738A]" :style="'top:' + (((hour - 8) / 12) * 100) + '%'" x-text="String(hour).padStart(2, '0') + ':00'"></span>
@@ -159,7 +159,7 @@
                                     @keydown="placeSelectedWithKeyboard(day.iso, $event)"
                                     @dragenter.prevent="dragOverDay = day.iso" @dragover.prevent="dragOverDay = day.iso"
                                     @dragleave.self="dragOverDay = null" @drop.prevent="dropCalendarItem(day.iso, $event)">
-                                    <p x-show="calendarEventCount === 0 && day.iso === calendarDays[0]?.iso" class="pointer-events-none absolute left-3 top-4 z-0 w-[calc(500%-1.5rem)] max-w-md rounded-lg border border-dashed border-[#8CB7D7] bg-white/90 p-3 text-xs leading-5 text-[#36506C]">
+                                    <p x-show="calendarEventCount === 0 && day.iso === calendarDays[0]?.iso" class="pointer-events-none absolute left-3 top-4 z-0 hidden w-[calc(500%-1.5rem)] max-w-md rounded-lg border border-dashed border-[#8CB7D7] bg-white/90 p-3 text-xs leading-5 text-[#36506C] sm:block">
                                         Select a queue item, choose Social or Blog, then click a day and time. Placements snap to 15 minutes.
                                     </p>
                                     <template x-for="event in calendarEventsForDay(day.iso)" :key="event.post.id + '-' + event.kind">
@@ -168,11 +168,12 @@
                                             class="brand-focus absolute left-1 right-1 z-10 cursor-grab overflow-hidden rounded-md border px-2 py-1 text-left shadow-sm active:cursor-grabbing"
                                             :class="event.kind === 'blog' ? 'border-[#8CB7D7] bg-[#F4F8FC] text-[#36506C]' : selectedPostId === event.post.id ? 'border-[#006AAB] bg-[#DDEFFC] text-[#003F68] ring-2 ring-[#006AAB]/25' : 'border-[#8CB7D7] bg-[#EAF3FB] text-[#004C7C]'"
                                             :aria-label="(event.kind === 'blog' ? 'Blog post' : 'Social video') + ' for ' + event.post.title + ' at ' + calendarEventTime(event)">
-                                            <span class="flex items-center justify-between gap-1 text-[10px] font-bold">
-                                                <span x-text="event.kind === 'blog' ? '▤ Blog' : '▶ Social'"></span>
-                                                <span x-text="calendarEventTime(event)"></span>
+                                            <span class="flex items-center justify-center gap-1 text-[10px] font-bold sm:justify-between">
+                                                <span class="hidden sm:inline" x-text="event.kind === 'blog' ? '▤ Blog' : '▶ Social'"></span>
+                                                <span class="sm:hidden" x-text="event.kind === 'blog' ? '▤' : '▶'"></span>
+                                                <span class="hidden lg:inline" x-text="calendarEventTime(event)"></span>
                                             </span>
-                                            <span class="mt-0.5 block truncate text-[10px] font-semibold" x-text="event.post.title"></span>
+                                            <span class="mt-0.5 hidden truncate text-[10px] font-semibold xl:block" x-text="event.post.title"></span>
                                         </button>
                                     </template>
                                 </div>
