@@ -341,7 +341,14 @@ async def approve_qa(post_id: str, req: Request):
                 "batch_advanced": should_advance
             }
         )
-        if batch_id and req.headers.get("hx-request", "").lower() == "true":
+        client_owns_navigation = (
+            req.headers.get("x-delivery-navigation-owner", "").lower() == "client"
+        )
+        if (
+            batch_id
+            and req.headers.get("hx-request", "").lower() == "true"
+            and not client_owns_navigation
+        ):
             redirect_anchor = (
                 "publish-workflow"
                 if should_advance

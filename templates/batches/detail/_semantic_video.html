@@ -495,6 +495,7 @@
                         hx-swap="none"
                         hx-sync="closest section:drop"
                         hx-request='{"timeout": 15000}'
+                        hx-headers='{"X-Delivery-Navigation-Owner": "client"}'
                         data-semantic-delivery-decision
                         data-semantic-delivery-post-id="{{ item.post_id }}"
                         data-semantic-delivery-batch-id="{{ batch.id }}"
@@ -510,6 +511,7 @@
                         hx-swap="none"
                         hx-sync="closest section:drop"
                         hx-request='{"timeout": 15000}'
+                        hx-headers='{"X-Delivery-Navigation-Owner": "client"}'
                         data-semantic-delivery-decision
                         data-semantic-delivery-post-id="{{ item.post_id }}"
                         data-semantic-delivery-batch-id="{{ batch.id }}"

@@ -1592,14 +1592,18 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert "#semantic-video-post-" in source
     assert "navigateAfterDeliveryDecision" in source
     assert "reconcileDeliveryDecision" in source
-    assert "getResponseHeader('HX-Redirect')" in source
-    assert "if (serverRedirect) return;" in source
+    assert "window.history.replaceState(" in source
+    assert "window.location.reload();" in source
+    assert "window.location.replace(" not in source
     assert "/qa/batch/${encodeURIComponent(batchId)}/status" in source
     assert "payload?.data?.batch_state === 'S7_PUBLISH_PLAN'" in source
     assert 'data-semantic-delivery-post-id="{{ item.post_id }}"' in template_source
     assert 'data-semantic-delivery-batch-id="{{ batch.id }}"' in template_source
     assert template_source.count('data-semantic-delivery-decision') == 2
     assert template_source.count('hx-request=\'{"timeout": 15000}\'') == 2
+    assert template_source.count(
+        'hx-headers=\'{"X-Delivery-Navigation-Owner": "client"}\''
+    ) == 2
     assert "hx-on::after-request" not in template_source
     assert template_source.count('hx-sync="closest section:drop"') == 2
     assert 'data-pending-label="Approving delivery…"' in template_source

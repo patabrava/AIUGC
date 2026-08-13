@@ -39,7 +39,12 @@
         const target = publishReady
             ? '#publish-workflow'
             : `#semantic-video-post-${encodeURIComponent(postId)}`;
-        window.location.replace(`/batches/${encodeURIComponent(batchId)}${target}`);
+        window.history.replaceState(
+            null,
+            '',
+            `/batches/${encodeURIComponent(batchId)}${target}`,
+        );
+        window.location.reload();
     }
 
     async function reconcileDeliveryDecision(button) {
@@ -68,14 +73,6 @@
         const trigger = event.detail?.elt || event.target;
         const button = trigger?.closest?.('[data-semantic-delivery-decision]');
         if (!button) return;
-
-        let serverRedirect = '';
-        try {
-            serverRedirect = event.detail?.xhr?.getResponseHeader('HX-Redirect') || '';
-        } catch (_error) {
-            serverRedirect = '';
-        }
-        if (serverRedirect) return;
 
         const batchId = button.dataset.semanticDeliveryBatchId;
         const postId = button.dataset.semanticDeliveryPostId;

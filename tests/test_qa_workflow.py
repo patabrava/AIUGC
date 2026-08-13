@@ -39,6 +39,14 @@ class _HtmxJsonRequest(_JsonRequest):
     }
 
 
+class _ClientNavigationHtmxJsonRequest(_JsonRequest):
+    headers = {
+        "content-type": "application/json",
+        "hx-request": "true",
+        "x-delivery-navigation-owner": "client",
+    }
+
+
 def _stub_decision(
     monkeypatch,
     *,
@@ -114,6 +122,21 @@ async def test_semantic_delivery_approval_redirects_htmx_to_publish(monkeypatch)
             "correlation_id": "qa_approve_post-final",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_semantic_delivery_client_owner_receives_state_without_redirect(
+    monkeypatch,
+):
+    _stub_decision(monkeypatch)
+
+    response = await qa_handlers.approve_qa(
+        "post-final",
+        _ClientNavigationHtmxJsonRequest({"approved": True}),
+    )
+
+    assert not hasattr(response, "headers")
+    assert response.data["batch_advanced"] is True
 
 
 @pytest.mark.asyncio
