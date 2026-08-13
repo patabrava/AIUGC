@@ -1636,6 +1636,84 @@ def test_accept_transcript_advisory_derives_the_real_spoken_word_window(
     assert saved["status"] == "transcript_qa_passed"
 
 
+def test_accepted_transcript_timing_is_rebuilt_from_raw_take_without_paid_work(
+    tmp_path,
+    monkeypatch,
+):
+    from workers.semantic_video_worker import ProductionStageRunner
+
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "run_id": "legacy-reviewed-run",
+                "status": "transcript_qa_passed",
+                "takes": [
+                    {
+                        "index": 0,
+                        "duration_seconds": 8,
+                        "status": "transcribed",
+                        "raw": {"path": str(tmp_path / "take.mp4")},
+                        "transcript": None,
+                        "transcript_qa": {
+                            "passed": True,
+                            "manual_review_accepted": True,
+                            "first_word_start_seconds": None,
+                            "final_word_end_seconds": None,
+                        },
+                        "trim_window": None,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class TimingRepairPipeline:
+        @staticmethod
+        def transcribe_and_validate_takes(path, deepgram):
+            del deepgram
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            take = payload["takes"][0]
+            take["transcript"] = {
+                "full_text": "Manuell geprüfter Text",
+                "words": [
+                    {"word": "Manuell", "start": 0.0, "end": 0.4},
+                    {"word": "Text", "start": 7.6, "end": 8.04},
+                ],
+            }
+            take["transcript_qa"] = {
+                "passed": False,
+                "first_word_start_seconds": 0.0,
+                "final_word_end_seconds": 8.04,
+            }
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            raise ValidationError("Transcript remains different from the approved script.")
+
+        @staticmethod
+        def _atomic_write_json(path, payload):
+            path.write_text(json.dumps(payload), encoding="utf-8")
+
+    runner = ProductionStageRunner(deepgram=object(), work_root=tmp_path)
+    monkeypatch.setattr(runner, "_runner", lambda: TimingRepairPipeline)
+
+    runner._repair_accepted_transcript_timing(manifest_path)  # noqa: SLF001
+
+    saved = json.loads(manifest_path.read_text(encoding="utf-8"))
+    take = saved["takes"][0]
+    assert take["transcript_qa"]["passed"] is True
+    assert take["transcript_qa"]["automated_passed"] is False
+    assert take["transcript_qa"]["manual_review_accepted"] is True
+    assert take["transcript_qa"]["first_word_start_seconds"] == 0.0
+    assert take["transcript_qa"]["final_word_end_seconds"] == 8.0
+    assert take["trim_window"] == {
+        "start_seconds": 0.0,
+        "end_seconds": 8.0,
+        "source": "deepgram_word_window",
+    }
+    assert saved["status"] == "transcript_qa_passed"
+
+
 def test_identity_advisory_becomes_an_explicit_downstream_visual_gate():
     from workers.semantic_video_worker import ProductionStageRunner
 

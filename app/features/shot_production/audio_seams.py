@@ -274,9 +274,9 @@ def _validate_take_evidence(takes: Sequence[TakeAudioEvidence]) -> Tuple[TakeAud
         if any(not math.isfinite(value) for value in values):
             raise ValidationError("Acoustic take timing values must be finite.")
         if not (
-            0.0 < take.first_word_start_seconds
+            0.0 <= take.first_word_start_seconds
             < take.final_word_end_seconds
-            < take.provider_duration_seconds
+            <= take.provider_duration_seconds
         ):
             raise ValidationError(
                 "Acoustic take word timings must fit inside provider duration.",

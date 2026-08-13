@@ -289,6 +289,8 @@ class ProductionStageRunner:
             raise ValidationError("Unsupported semantic video production stage.", {"stage": stage})
 
         manifest_path = self._materialize_manifest(run, takes)
+        if stage != "transcript_qa":
+            self._repair_accepted_transcript_timing(manifest_path)
         try:
             if stage == "transcript_qa":
                 pipeline = self._runner()
@@ -462,6 +464,92 @@ class ProductionStageRunner:
                 },
             },
         }
+
+    def _repair_accepted_transcript_timing(self, manifest_path: Path) -> None:
+        """Rebuild missing legacy word windows without resubmitting paid video."""
+        payload = self._read_manifest(manifest_path)
+        repair_indexes = {
+            int(take.get("index") or 0)
+            for take in payload.get("takes") or []
+            if isinstance(take, Mapping)
+            and isinstance(take.get("transcript_qa"), Mapping)
+            and take["transcript_qa"].get("manual_review_accepted") is True
+            and (
+                take["transcript_qa"].get("first_word_start_seconds") is None
+                or take["transcript_qa"].get("final_word_end_seconds") is None
+                or (take.get("trim_window") or {}).get("source")
+                != "deepgram_word_window"
+            )
+        }
+        if not repair_indexes:
+            return
+
+        pipeline = self._runner()
+        try:
+            pipeline.transcribe_and_validate_takes(manifest_path, self._deepgram())
+        except ValidationError:
+            # The operator already accepted the transcript mismatch. This pass
+            # exists only to recover the missing Deepgram timing evidence.
+            pass
+
+        payload = self._read_manifest(manifest_path)
+        for take in payload.get("takes") or []:
+            index = int(take.get("index") or 0)
+            if index not in repair_indexes:
+                continue
+            transcript = take.get("transcript")
+            words = transcript.get("words") if isinstance(transcript, Mapping) else None
+            if (
+                not isinstance(words, list)
+                or not words
+                or not isinstance(words[0], Mapping)
+                or not isinstance(words[-1], Mapping)
+            ):
+                raise StateTransitionError(
+                    "Accepted transcript timing repair requires Deepgram word evidence.",
+                    {"take_index": index},
+                )
+            duration_seconds = float(take.get("duration_seconds") or 0)
+            first_word_start = max(0.0, float(words[0].get("start") or 0.0))
+            final_word_end = min(
+                duration_seconds,
+                float(words[-1].get("end") or 0.0),
+            )
+            if (
+                not math.isfinite(duration_seconds)
+                or not math.isfinite(first_word_start)
+                or not math.isfinite(final_word_end)
+                or duration_seconds <= 0
+                or final_word_end <= first_word_start
+            ):
+                raise StateTransitionError(
+                    "Accepted transcript timing repair produced an invalid word window.",
+                    {"take_index": index},
+                )
+            transcript_qa = take.get("transcript_qa")
+            if not isinstance(transcript_qa, dict):
+                transcript_qa = {}
+                take["transcript_qa"] = transcript_qa
+            transcript_qa["automated_passed"] = transcript_qa.get("passed") is True
+            transcript_qa["manual_review_accepted"] = True
+            transcript_qa["passed"] = True
+            transcript_qa["first_word_start_seconds"] = first_word_start
+            transcript_qa["final_word_end_seconds"] = final_word_end
+            take["trim_window"] = {
+                "start_seconds": (
+                    max(0.0, first_word_start - 0.25) if index > 0 else 0.0
+                ),
+                "end_seconds": min(duration_seconds, final_word_end + 0.25),
+                "source": "deepgram_word_window",
+            }
+            take["status"] = "transcribed"
+        payload["status"] = "transcript_qa_passed"
+        pipeline._atomic_write_json(manifest_path, payload)  # noqa: SLF001
+        logger.warning(
+            "semantic_video_accepted_transcript_timing_repaired",
+            run_id=str(payload.get("run_id") or ""),
+            take_indexes=sorted(repair_indexes),
+        )
 
     @staticmethod
     def _apply_downstream_qa_advisory(
@@ -778,23 +866,19 @@ class ProductionStageRunner:
                     final_word_end = transcript_qa.get(
                         "final_word_end_seconds"
                     )
-                    if first_word_start is None or final_word_end is None:
-                        raise StateTransitionError(
-                            "Manual transcript review requires persisted word timestamps.",
-                            {"take_index": index},
-                        )
-                    row["trim_window"] = {
-                        "start_seconds": (
-                            max(0.0, float(first_word_start) - 0.25)
-                            if index > 0
-                            else 0.0
-                        ),
-                        "end_seconds": min(
-                            float(row["duration_seconds"]),
-                            float(final_word_end) + 0.25,
-                        ),
-                        "source": "deepgram_word_window",
-                    }
+                    if first_word_start is not None and final_word_end is not None:
+                        row["trim_window"] = {
+                            "start_seconds": (
+                                max(0.0, float(first_word_start) - 0.25)
+                                if index > 0
+                                else 0.0
+                            ),
+                            "end_seconds": min(
+                                float(row["duration_seconds"]),
+                                float(final_word_end) + 0.25,
+                            ),
+                            "source": "deepgram_word_window",
+                        }
             manifest_takes.append(row)
 
         requested_duration = int(run.get("requested_duration_seconds") or 0)

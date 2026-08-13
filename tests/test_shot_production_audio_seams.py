@@ -11,6 +11,7 @@ from app.features.shot_production.audio_seams import (
     PlannedSeam,
     PlannedTakeWindow,
     TakeAudioEvidence,
+    _validate_take_evidence,
     _exact_delivery_timing,
     _extend_delivery_windows,
     acoustic_analysis_cache_key,
@@ -77,6 +78,19 @@ def test_parse_frame_metrics_deduplicates_equal_ffprobe_timestamps():
     )
 
     assert [frame.timestamp_seconds for frame in parsed] == [0.0, 0.016]
+
+
+def test_acoustic_evidence_accepts_word_timestamps_on_provider_boundaries():
+    frames = (AudioFrameMetrics(0.0, -20.0, -12.0, 0.08, 1200.0, 0.12),)
+
+    ordered = _validate_take_evidence(
+        (
+            TakeAudioEvidence(0, 8.0, 0.0, 7.2, frames),
+            TakeAudioEvidence(1, 8.0, 0.0, 8.0, frames),
+        )
+    )
+
+    assert [take.take_index for take in ordered] == [0, 1]
 
 
 def test_parse_frame_metrics_orders_out_of_order_ffprobe_timestamps():
