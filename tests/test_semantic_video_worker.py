@@ -865,7 +865,19 @@ def test_accept_existing_delivery_manually_accepts_preserved_visual_failure():
         "manual_review_accepted": True,
         "accepted_by": "operator_accept_existing_delivery_as_is",
     }
-    assert payload["status"] == "visual_qa_passed"
+    assert payload["voice_qa"] == {
+        "passed": True,
+        "status": "not_evaluated",
+        "blocking_reasons": [],
+        "observed_differences": [],
+        "provider_passed": False,
+        "provider_blocking_reasons": [
+            "Operator accepted the existing generated delivery."
+        ],
+        "manual_review_accepted": True,
+        "accepted_by": "operator_accept_existing_delivery_as_is",
+    }
+    assert payload["status"] == "voice_qa_passed"
 
 
 def test_worker_transcript_failure_requires_retry_instead_of_entering_impossible_identity_stage():

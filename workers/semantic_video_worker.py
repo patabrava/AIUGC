@@ -587,17 +587,45 @@ class ProductionStageRunner:
                 "observed_differences": [],
             }
             payload["visual_qa"] = report
-        elif report.get("passed") is not False:
-            return
-        report["provider_passed"] = False
-        report["provider_blocking_reasons"] = list(
-            report.get("blocking_reasons") or []
+        should_accept_visual = report.get("passed") is False or (
+            accepted_by == "operator_accept_existing_delivery_as_is"
+            and report.get("passed") is not True
         )
-        report["manual_review_accepted"] = True
-        report["accepted_by"] = accepted_by
-        report["passed"] = True
-        report["blocking_reasons"] = []
-        payload["status"] = "visual_qa_passed"
+        if not should_accept_visual and accepted_by != "operator_accept_existing_delivery_as_is":
+            return
+        if should_accept_visual:
+            report["provider_passed"] = False
+            report["provider_blocking_reasons"] = list(
+                report.get("blocking_reasons") or []
+            )
+            report["manual_review_accepted"] = True
+            report["accepted_by"] = accepted_by
+            report["passed"] = True
+            report["blocking_reasons"] = []
+        if accepted_by == "operator_accept_existing_delivery_as_is":
+            voice_report = payload.get("voice_qa")
+            if not isinstance(voice_report, dict):
+                voice_report = {
+                    "passed": False,
+                    "status": "not_evaluated",
+                    "blocking_reasons": [fallback_message],
+                    "observed_differences": [],
+                }
+                payload["voice_qa"] = voice_report
+            if voice_report.get("passed") is not True:
+                voice_report["provider_passed"] = False
+                voice_report["provider_blocking_reasons"] = list(
+                    voice_report.get("blocking_reasons") or []
+                )
+                voice_report["manual_review_accepted"] = True
+                voice_report["accepted_by"] = accepted_by
+                voice_report["passed"] = True
+                voice_report["blocking_reasons"] = []
+        payload["status"] = (
+            "voice_qa_passed"
+            if accepted_by == "operator_accept_existing_delivery_as_is"
+            else "visual_qa_passed"
+        )
 
     @staticmethod
     def _runner():
