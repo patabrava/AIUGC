@@ -880,6 +880,30 @@ def test_accept_existing_delivery_manually_accepts_preserved_visual_failure():
     assert payload["status"] == "voice_qa_passed"
 
 
+def test_acoustic_precomposition_failure_reaches_advisory_materializer(tmp_path):
+    from workers.semantic_video_worker import ProductionStageRunner
+
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps({"status": "voice_qa_passed"}),
+        encoding="utf-8",
+    )
+
+    result = ProductionStageRunner(work_root=tmp_path)._qa_failure(  # noqa: SLF001
+        "acoustic_qa",
+        manifest_path,
+        [{"take_index": 0}],
+        ValidationError(
+            "Single-take active-speech cut exceeds the cadence bound.",
+            {"recommended_retry_take_indexes": [0]},
+        ),
+    )
+
+    assert result["passed"] is False
+    assert result["failed_take_indexes"] == [0]
+    assert result["artifacts"]["qa_failure"]["stage"] == "acoustic_qa"
+
+
 def test_worker_transcript_failure_requires_retry_instead_of_entering_impossible_identity_stage():
     repo = FakeRepo(stage="transcript_qa", take_count=2)
     stages = FakeStages(

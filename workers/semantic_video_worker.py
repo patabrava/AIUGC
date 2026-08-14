@@ -1010,7 +1010,11 @@ class ProductionStageRunner:
             "seam_qa_failed",
             "media_qa_failed",
         }
-        if str(payload.get("status") or "") not in quality_failure_statuses:
+        payload_status = str(payload.get("status") or "")
+        acoustic_precomposition_failure = (
+            stage == "acoustic_qa" and payload_status == "voice_qa_passed"
+        )
+        if payload_status not in quality_failure_statuses and not acoustic_precomposition_failure:
             raise exc
         failed: list[int] = []
         if stage == "transcript_qa":
