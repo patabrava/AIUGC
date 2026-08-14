@@ -3446,13 +3446,6 @@ def resume_qa_only_review(post_id: str, payload: QAReviewResumeRequest):
         raise StateTransitionError(
             "Semantic video run does not have a resumable advisory QA failure."
         )
-    if (
-        str(qa_failure.get("retry_mode") or "") == "localized_paid_take"
-        and int(run.get("requested_duration_seconds") or 0) <= 8
-    ):
-        raise StateTransitionError(
-            "Semantic video terminal speech protection requires a localized paid take retry."
-        )
     updated = resume_qa_review(
         run_id=str(run["id"]),
         expected_revision=payload.expected_revision,

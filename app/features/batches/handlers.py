@@ -991,10 +991,6 @@ def _build_semantic_video_post_projection(
         and plan_hash
         and qa_failure.get("stage")
         in {"transcript_qa", "identity_qa", "voice_qa", "acoustic_qa"}
-        and not (
-            qa_retry_mode == "localized_paid_take"
-            and int(run.get("requested_duration_seconds") or 0) <= 8
-        )
     )
     contact_sheet = (
         pipeline_manifest.get("contact_sheet")
@@ -1066,6 +1062,7 @@ def _build_semantic_video_post_projection(
         "retry_provider_seconds": retry_seconds,
         "retry_estimated_cost_usd": retry_cost,
         "qa_resume_available": qa_resume_available,
+        "qa_resume_accept_as_is": qa_retry_mode == "localized_paid_take",
         "qa_resume_stage": str(qa_failure.get("stage") or ""),
         "qa_resume_message": str(qa_failure.get("message") or ""),
         "latest_attempts": latest,

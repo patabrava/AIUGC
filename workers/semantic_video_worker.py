@@ -1220,6 +1220,18 @@ class ProductionStageRunner:
             raise StateTransitionError(
                 "Advisory single-take terminal protection requires an 8s delivery."
             )
+        artifact_manifest = run.get("artifact_manifest")
+        qa_advisory = (
+            artifact_manifest.get("qa_advisory")
+            if isinstance(artifact_manifest, Mapping)
+            else None
+        )
+        accept_existing_delivery_as_is = bool(
+            isinstance(qa_advisory, Mapping)
+            and qa_advisory.get("required") is True
+            and qa_advisory.get("stage") == "acoustic_qa"
+            and qa_advisory.get("accept_existing_delivery_as_is") is True
+        )
         trim_window = take.get("trim_window")
         transcript_qa = take.get("transcript_qa")
         if (
@@ -1245,7 +1257,7 @@ class ProductionStageRunner:
             )
         except ValueError as exc:
             raise StateTransitionError(str(exc)) from exc
-        if speech_cut_floor > protected_source_end + 1e-6:
+        if not accept_existing_delivery_as_is and speech_cut_floor > protected_source_end + 1e-6:
             raise StateTransitionError(
                 "Advisory terminal protection would cut transcript-safe context.",
                 {
@@ -1258,8 +1270,13 @@ class ProductionStageRunner:
                     "protected_source_end_seconds": protected_source_end,
                 },
             )
+        if accept_existing_delivery_as_is:
+            speech_cut_floor = float(requested_duration)
         active_cut_retime_ratio = float(requested_duration) / speech_cut_floor
-        if active_cut_retime_ratio > MAX_EXACT_DELIVERY_RETIME_RATIO + 1e-9:
+        if (
+            not accept_existing_delivery_as_is
+            and active_cut_retime_ratio > MAX_EXACT_DELIVERY_RETIME_RATIO + 1e-9
+        ):
             raise StateTransitionError(
                 "Advisory active-speech cut exceeds the cadence bound.",
                 {
@@ -1314,11 +1331,26 @@ class ProductionStageRunner:
         )
         delivery_terminal_qa.update(
             {
-                "passed": not bool(delivery_terminal_qa.get("reset_detected")),
+                "passed": (
+                    True
+                    if accept_existing_delivery_as_is
+                    else not bool(delivery_terminal_qa.get("reset_detected"))
+                ),
                 "video_sha256": stitched_hash,
                 "requires_paid_regeneration": False,
             }
         )
+        if accept_existing_delivery_as_is:
+            delivery_terminal_qa.update(
+                {
+                    "provider_passed": not bool(
+                        delivery_terminal_qa.get("reset_detected")
+                    ),
+                    "manual_review_accepted": True,
+                    "operator_review_required": True,
+                    "accepted_by": "operator_accept_existing_delivery_as_is",
+                }
+            )
         if delivery_terminal_qa["passed"] is not True:
             raise StateTransitionError(
                 "Protected advisory delivery still contains terminal camera drift.",

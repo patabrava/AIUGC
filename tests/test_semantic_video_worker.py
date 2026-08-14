@@ -1193,9 +1193,11 @@ def test_production_stage_runner_rejects_unverified_delivery_projection():
         )
 
 
+@pytest.mark.parametrize("accept_as_is", [False, True])
 def test_advisory_caption_delivery_reuses_single_take_terminal_protection(
     tmp_path,
     monkeypatch,
+    accept_as_is,
 ):
     from app.adapters import caption_renderer, video_stitcher
     from app.features.shot_production import runner as pipeline
@@ -1273,13 +1275,14 @@ def test_advisory_caption_delivery_reuses_single_take_terminal_protection(
 
     def terminal_evaluator(path):
         terminal_paths.append(Path(path).name)
+        reset_detected = Path(path).name == "raw.mp4" or accept_as_is
         return {
             "status": (
                 "reset_detected"
-                if Path(path).name == "raw.mp4"
+                if reset_detected
                 else "not_detected"
             ),
-            "reset_detected": Path(path).name == "raw.mp4",
+            "reset_detected": reset_detected,
         }
 
     class UploadStorage:
@@ -1329,24 +1332,42 @@ def test_advisory_caption_delivery_reuses_single_take_terminal_protection(
             "id": "run-1",
             "requested_duration_seconds": 8,
             "artifact_prefix": "semantic/run-1",
+            "artifact_manifest": {
+                "qa_advisory": {
+                    "required": True,
+                    "stage": "acoustic_qa",
+                    "accept_existing_delivery_as_is": True,
+                }
+            }
+            if accept_as_is
+            else {},
         },
         takes=[{"raw_artifact_sha256": raw_hash}],
     )
 
     assert stitch_calls[0]["trim_windows"] is None
     assert stitch_calls[0]["target_duration_seconds"] == 8.0
-    expected_tail_exclusion = 8.0 - 7.3 - (1024.0 / 48000.0)
+    expected_tail_exclusion = (
+        0.0 if accept_as_is else 8.0 - 7.3 - (1024.0 / 48000.0)
+    )
     assert stitch_calls[0]["terminal_tail_exclusion_seconds"] == pytest.approx(
         expected_tail_exclusion
     )
     assert terminal_paths == ["raw.mp4", "stitched-advisory.mp4"]
     assert caption_calls[0]["video_path"].endswith("stitched-advisory.mp4")
     assert caption_calls[0]["transcript"].words[-1].end == pytest.approx(
-        7.3 * (8.0 / (8.0 - expected_tail_exclusion))
+        7.3 if accept_as_is else 7.3 * (8.0 / (8.0 - expected_tail_exclusion))
     )
     saved = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert saved["delivery_terminal_qa"]["passed"] is True
-    assert saved["stitch"]["metadata"]["stitch_end_pan_protection_applied"] is True
+    if accept_as_is:
+        assert saved["delivery_terminal_qa"]["provider_passed"] is False
+        assert saved["delivery_terminal_qa"]["manual_review_accepted"] is True
+        assert saved["delivery_terminal_qa"]["accepted_by"] == (
+            "operator_accept_existing_delivery_as_is"
+        )
+    else:
+        assert saved["stitch"]["metadata"]["stitch_end_pan_protection_applied"] is True
     assert result["sha256"] == sha256(
         b"terminal-protected-captioned-video"
     ).hexdigest()

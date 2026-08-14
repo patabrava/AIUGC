@@ -4981,7 +4981,7 @@ def test_acoustic_plan_failure_can_resume_for_full_video_review(monkeypatch):
     ]
 
 
-def test_single_take_terminal_speech_failure_still_requires_paid_retry(monkeypatch):
+def test_single_take_terminal_speech_failure_can_be_accepted_without_paid_retry(monkeypatch):
     handlers, state, _storage = _install_repository(monkeypatch)
     from app.main import app
 
@@ -5001,10 +5001,15 @@ def test_single_take_terminal_speech_failure_still_requires_paid_retry(monkeypat
         }
     )
     resume_calls = []
+
+    def resume_qa_review(**kwargs):
+        resume_calls.append(kwargs)
+        return {**state["run"], "revision": 5, "stage": "acoustic_qa"}
+
     monkeypatch.setattr(
         handlers,
         "resume_qa_review",
-        lambda **kwargs: resume_calls.append(kwargs),
+        resume_qa_review,
     )
 
     response = TestClient(app, base_url="http://localhost").post(
@@ -5012,9 +5017,15 @@ def test_single_take_terminal_speech_failure_still_requires_paid_retry(monkeypat
         json={"plan_hash": "a" * 64, "expected_revision": 4},
     )
 
-    assert response.status_code == 409, response.text
-    assert "terminal speech protection" in response.json()["message"]
-    assert resume_calls == []
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["stage"] == "acoustic_qa"
+    assert resume_calls == [
+        {
+            "run_id": "run-1",
+            "expected_revision": 4,
+            "plan_hash": "a" * 64,
+        }
+    ]
 
 
 def test_candidate_reservation_queries_use_atomic_rpcs_and_map_only_conflicts():

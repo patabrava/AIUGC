@@ -27,6 +27,10 @@ DELIVERY_QA_ADVISORY_RESUME_MIGRATION = (
     ROOT
     / "supabase/migrations/20260802000200_semantic_video_delivery_qa_advisory_resume.sql"
 )
+ACCEPT_EXISTING_DELIVERY_MIGRATION = (
+    ROOT
+    / "supabase/migrations/20260814000100_semantic_video_accept_existing_delivery.sql"
+)
 WORKER_CONTRACT_FENCE_MIGRATION = (
     ROOT / "supabase/migrations/20260802000100_semantic_video_worker_contract_fence.sql"
 )
@@ -108,6 +112,17 @@ def test_delivery_qa_resume_persists_explicit_operator_advisory():
     assert "SET submission_state = 'completed'" in sql
     assert "semantic_video_approvals" not in sql
     assert "semantic_video_takes" in sql
+    assert "TO service_role" in sql
+
+
+def test_accept_existing_delivery_migration_persists_the_operator_override():
+    sql = ACCEPT_EXISTING_DELIVERY_MIGRATION.read_text(encoding="utf-8")
+
+    assert "accept_existing_delivery_as_is BOOLEAN" in sql
+    assert "'accept_existing_delivery_as_is', accept_existing_delivery_as_is" in sql
+    assert "= 'localized_paid_take'" in sql
+    assert "SET submission_state = 'completed'" in sql
+    assert "semantic_video_approvals" not in sql
     assert "TO service_role" in sql
 
 

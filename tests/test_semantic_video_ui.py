@@ -524,7 +524,7 @@ def test_generated_take_qa_failure_renders_free_resume_instead_of_paid_retry(
     assert 'data-action="approve-retry" data-cost-usd="6.40"' not in html
 
 
-def test_terminal_speech_overlap_renders_localized_paid_retry_instead_of_free_resume(
+def test_terminal_speech_overlap_renders_accept_as_is_without_paid_retry(
     monkeypatch,
 ):
     run = {
@@ -582,7 +582,8 @@ def test_terminal_speech_overlap_renders_localized_paid_retry_instead_of_free_re
     view = batch_handlers._build_batch_detail_view(_semantic_batch())
     item = view["semantic_video"]["posts"][0]
 
-    assert item["qa_resume_available"] is False
+    assert item["qa_resume_available"] is True
+    assert item["qa_resume_accept_as_is"] is True
     assert item["failed_take_indexes"] == [0]
     assert item["retry_provider_seconds"] == 8
     assert item["retry_estimated_cost_usd"] == "3.20"
@@ -590,9 +591,10 @@ def test_terminal_speech_overlap_renders_localized_paid_retry_instead_of_free_re
     html = Environment(loader=FileSystemLoader("templates")).get_template(
         "batches/detail/_semantic_video.html"
     ).render(batch=_semantic_batch(), batch_view=view)
-    assert "Retry only failed takes: 1" in html
+    assert "Generated video can be accepted as-is" in html
+    assert "Accept generated video as-is" in html
     assert 'data-action="approve-retry" data-cost-usd="3.20"' in html
-    assert "Continue with generated videos · $0.00" not in html
+    assert "Regenerate failed take · $3.20" in html
 
 
 def test_completed_semantic_panel_renders_run_artifact_urls_without_legacy_prompt(monkeypatch):
