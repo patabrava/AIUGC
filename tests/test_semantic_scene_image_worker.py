@@ -379,6 +379,17 @@ def test_process_heartbeat_blocks_claim_readiness_when_provider_auth_is_missing(
     assert repo.jobs == []
 
 
+def test_scene_image_worker_uses_the_v3_claim_contract():
+    from workers import semantic_scene_image_worker as module
+
+    worker = module.SemanticSceneImageWorker(
+        repo=FakeJobRepository(0),
+        provider_auth_probe=lambda: None,
+    )
+
+    assert worker.worker_id.startswith("semantic-scene-image-v3-")
+
+
 def test_ten_variable_batch_runs_generate_every_script_once_with_concurrency_two(
     monkeypatch,
 ):

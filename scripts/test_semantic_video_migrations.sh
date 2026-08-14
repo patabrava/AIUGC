@@ -141,6 +141,7 @@ BEGIN
      OR to_regclass('public.semantic_scene_image_worker_heartbeats') IS NULL
      OR to_regprocedure('public.enqueue_semantic_scene_image(uuid,integer,text,text)') IS NULL
      OR to_regprocedure('public.claim_semantic_scene_image(text,integer)') IS NULL
+     OR to_regprocedure('public.claim_semantic_scene_image_v3(text,integer)') IS NULL
      OR to_regprocedure('public.renew_semantic_scene_image(uuid,text,uuid,integer)') IS NULL
      OR to_regprocedure('public.authorize_semantic_scene_image_provider_attempt(uuid,text,uuid)') IS NULL
      OR to_regprocedure('public.reserve_semantic_video_candidates(uuid,integer,jsonb,text,uuid,integer)') IS NULL
@@ -158,6 +159,17 @@ BEGIN
      OR has_table_privilege('service_role', 'public.semantic_scene_image_jobs', 'DELETE')
      OR has_table_privilege('authenticated', 'public.semantic_scene_image_jobs', 'SELECT') THEN
     RAISE EXCEPTION 'Semantic scene-image queue privileges are unsafe';
+  END IF;
+  IF has_function_privilege(
+       'service_role',
+       'public.claim_semantic_scene_image(text,integer)',
+       'EXECUTE'
+     ) OR NOT has_function_privilege(
+       'service_role',
+       'public.claim_semantic_scene_image_v3(text,integer)',
+       'EXECUTE'
+     ) THEN
+    RAISE EXCEPTION 'Semantic scene-image worker claim fence is unsafe';
   END IF;
   IF NOT has_table_privilege(
        'service_role', 'public.semantic_scene_image_worker_heartbeats', 'SELECT'

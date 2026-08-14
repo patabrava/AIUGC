@@ -599,7 +599,7 @@ def claim_scene_image_job(
 ) -> Optional[dict[str, Any]]:
     response = _execute_transition_rpc(
         _transition_rpc_query(
-            function_name="claim_semantic_scene_image",
+            function_name="claim_semantic_scene_image_v3",
             payload={"p_worker_id": worker_id, "p_lease_seconds": lease_seconds},
             client=client,
             timeout_seconds=timeout_seconds,
@@ -705,6 +705,7 @@ def get_scene_image_worker_heartbeat(*, client=None) -> Optional[dict[str, Any]]
         lambda database: (
             database.table("semantic_scene_image_worker_heartbeats")
             .select("worker_id,last_seen_at,metadata")
+            .like("worker_id", "semantic-scene-image-v3-%")
             .order("last_seen_at", desc=True)
             .limit(1)
             .execute()

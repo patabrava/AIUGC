@@ -255,7 +255,7 @@ class SemanticSceneImageWorker:
             )
         )
         self.worker_id = worker_id or (
-            "semantic-scene-image-v2-"
+            "semantic-scene-image-v3-"
             f"{socket.gethostname()}-{os.getpid()}-{uuid4().hex[:8]}"
         )
         self.lease_seconds = lease_seconds
@@ -466,7 +466,7 @@ def _publish_process_heartbeat(
         provider_probe_status = "ok"
         provider_probe_error_class = None
     metadata = {
-        "contract": "semantic-scene-image-v2",
+        "contract": "semantic-scene-image-v3",
         "concurrency": concurrency,
         "active": active_count,
         "queue_probe_status": probe_status,

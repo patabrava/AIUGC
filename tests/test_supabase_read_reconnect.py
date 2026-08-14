@@ -121,7 +121,7 @@ def test_explicit_transaction_client_is_retried_without_replacement(monkeypatch)
         (
             "get_scene_image_worker_heartbeat",
             {
-                "worker_id": "semantic-scene-image-v2-test",
+                "worker_id": "semantic-scene-image-v3-test",
                 "last_seen_at": "2026-08-05T00:00:00+00:00",
                 "metadata": {"queue_probe_status": "ok"},
             },
@@ -144,6 +144,9 @@ def test_scene_image_detail_reads_reconnect_the_shared_client(
             return self
 
         def eq(self, _field, _value):
+            return self
+
+        def like(self, _field, _value):
             return self
 
         def order(self, _field, **_kwargs):

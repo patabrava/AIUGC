@@ -226,9 +226,9 @@ def _probe_scene_image_worker_health() -> tuple[bool, str | None]:
         return False, "no scene-image worker heartbeat exists"
     worker_id = str(heartbeat.get("worker_id") or "").strip()
     metadata = heartbeat.get("metadata")
-    if not worker_id.startswith("semantic-scene-image-v2-") or not isinstance(
+    if not worker_id.startswith("semantic-scene-image-v3-") or not isinstance(
         metadata, dict
-    ) or metadata.get("contract") != "semantic-scene-image-v2":
+    ) or metadata.get("contract") != "semantic-scene-image-v3":
         return False, "scene-image worker heartbeat contract is obsolete"
     if metadata.get("queue_probe_status") != "ok":
         return False, "scene-image worker cannot query its durable queue"

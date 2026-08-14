@@ -11,10 +11,10 @@ def test_scene_image_worker_readiness_accepts_a_fresh_persisted_heartbeat(
         queries,
         "get_scene_image_worker_heartbeat",
         lambda: {
-            "worker_id": "semantic-scene-image-v2-test",
+            "worker_id": "semantic-scene-image-v3-test",
             "last_seen_at": datetime.now(timezone.utc).isoformat(),
             "metadata": {
-                "contract": "semantic-scene-image-v2",
+                "contract": "semantic-scene-image-v3",
                 "queue_probe_status": "ok",
                 "queue_probe_checked_at": datetime.now(timezone.utc).isoformat(),
                 "provider_auth_probe_status": "ok",
@@ -34,12 +34,12 @@ def test_scene_image_worker_readiness_rejects_a_stale_heartbeat(monkeypatch):
         queries,
         "get_scene_image_worker_heartbeat",
         lambda: {
-            "worker_id": "semantic-scene-image-v2-stale",
+            "worker_id": "semantic-scene-image-v3-stale",
             "last_seen_at": (
                 datetime.now(timezone.utc) - timedelta(minutes=5)
             ).isoformat(),
             "metadata": {
-                "contract": "semantic-scene-image-v2",
+                "contract": "semantic-scene-image-v3",
                 "queue_probe_status": "ok",
                 "queue_probe_checked_at": datetime.now(timezone.utc).isoformat(),
                 "provider_auth_probe_status": "ok",
@@ -62,10 +62,10 @@ def test_scene_image_worker_readiness_rejects_a_stale_queue_probe(monkeypatch):
         queries,
         "get_scene_image_worker_heartbeat",
         lambda: {
-            "worker_id": "semantic-scene-image-v2-stale-probe",
+            "worker_id": "semantic-scene-image-v3-stale-probe",
             "last_seen_at": datetime.now(timezone.utc).isoformat(),
             "metadata": {
-                "contract": "semantic-scene-image-v2",
+                "contract": "semantic-scene-image-v3",
                 "queue_probe_status": "ok",
                 "queue_probe_checked_at": (
                     datetime.now(timezone.utc) - timedelta(minutes=5)
@@ -112,10 +112,10 @@ def test_scene_image_worker_readiness_rejects_a_persistent_claim_failure(
         queries,
         "get_scene_image_worker_heartbeat",
         lambda: {
-            "worker_id": "semantic-scene-image-v2-broken-claim",
+            "worker_id": "semantic-scene-image-v3-broken-claim",
             "last_seen_at": datetime.now(timezone.utc).isoformat(),
             "metadata": {
-                "contract": "semantic-scene-image-v2",
+                "contract": "semantic-scene-image-v3",
                 "queue_probe_status": "error",
                 "queue_probe_checked_at": datetime.now(timezone.utc).isoformat(),
                 "queue_probe_error_class": "APIError",
@@ -142,10 +142,10 @@ def test_scene_image_worker_readiness_rejects_missing_provider_credentials(
         queries,
         "get_scene_image_worker_heartbeat",
         lambda: {
-            "worker_id": "semantic-scene-image-v2-missing-auth",
+            "worker_id": "semantic-scene-image-v3-missing-auth",
             "last_seen_at": now,
             "metadata": {
-                "contract": "semantic-scene-image-v2",
+                "contract": "semantic-scene-image-v3",
                 "queue_probe_status": "ok",
                 "queue_probe_checked_at": now,
                 "provider_auth_probe_status": "error",

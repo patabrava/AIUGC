@@ -96,6 +96,7 @@ jobs:
               paths = json.loads(response.read().decode()).get("paths", {})
           required_rpcs = {
               "/rpc/apply_post_qa_decision",
+              "/rpc/claim_semantic_scene_image_v3",
               "/rpc/renew_semantic_scene_image",
               "/rpc/authorize_semantic_scene_image_provider_attempt",
               "/rpc/reserve_semantic_scene_image_candidates",
