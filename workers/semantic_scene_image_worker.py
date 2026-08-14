@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from typing import Any, Callable, Optional
 from uuid import uuid4
 
+from app.adapters.vertex_gemini_client import get_vertex_gemini_client
 from app.core.errors import ValidationError
 from app.core.logging import get_logger
 from app.features.semantic_videos import queries
@@ -24,6 +25,7 @@ DEFAULT_LEASE_SECONDS = 180
 DEFAULT_HEARTBEAT_SECONDS = 20.0
 DEFAULT_PROCESS_HEARTBEAT_SECONDS = 15.0
 CONTROL_RPC_TIMEOUT_SECONDS = 5.0
+PROVIDER_AUTH_PROBE_TIMEOUT_SECONDS = 5.0
 MIN_EXECUTION_BUDGET_SECONDS = 240.0
 PROVIDER_OVERHEAD_BUDGET_SECONDS = 60.0
 MAX_PROVIDER_ATTEMPT_SECONDS = 120.0
@@ -228,6 +230,7 @@ class SemanticSceneImageWorker:
         self,
         *,
         repo: Any = queries,
+        provider_auth_probe: Optional[Callable[[], None]] = None,
         worker_id: Optional[str] = None,
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
         heartbeat_seconds: float = DEFAULT_HEARTBEAT_SECONDS,
@@ -246,6 +249,11 @@ class SemanticSceneImageWorker:
                 "Scene-image lease does not cover the maximum provider lifecycle."
             )
         self.repo = repo
+        self.provider_auth_probe = provider_auth_probe or (
+            lambda: get_vertex_gemini_client().probe_credentials(
+                timeout_seconds=PROVIDER_AUTH_PROBE_TIMEOUT_SECONDS
+            )
+        )
         self.worker_id = worker_id or (
             "semantic-scene-image-v2-"
             f"{socket.gethostname()}-{os.getpid()}-{uuid4().hex[:8]}"
@@ -444,6 +452,19 @@ def _publish_process_heartbeat(
     else:
         probe_status = "ok"
         probe_error_class = None
+    try:
+        worker.provider_auth_probe()
+    except Exception as provider_probe_exc:  # noqa: BLE001
+        provider_probe_status = "error"
+        provider_probe_error_class = type(provider_probe_exc).__name__
+        logger.exception(
+            "semantic_scene_image_provider_auth_probe_failed",
+            worker_id=worker.worker_id,
+            error=str(provider_probe_exc),
+        )
+    else:
+        provider_probe_status = "ok"
+        provider_probe_error_class = None
     metadata = {
         "contract": "semantic-scene-image-v2",
         "concurrency": concurrency,
@@ -451,6 +472,9 @@ def _publish_process_heartbeat(
         "queue_probe_status": probe_status,
         "queue_probe_checked_at": probe_checked_at,
         "queue_probe_error_class": probe_error_class,
+        "provider_auth_probe_status": provider_probe_status,
+        "provider_auth_probe_checked_at": probe_checked_at,
+        "provider_auth_probe_error_class": provider_probe_error_class,
     }
     worker.repo.heartbeat_scene_image_worker(
         worker_id=worker.worker_id,
@@ -477,6 +501,7 @@ def main() -> None:
     )
     active: set[Future[dict[str, Any]]] = set()
     last_process_heartbeat = 0.0
+    provider_auth_ready = False
     with ThreadPoolExecutor(
         max_workers=concurrency,
         thread_name_prefix="semantic-scene-image",
@@ -485,19 +510,23 @@ def main() -> None:
             now = time.monotonic()
             if now - last_process_heartbeat >= DEFAULT_PROCESS_HEARTBEAT_SECONDS:
                 try:
-                    _publish_process_heartbeat(
+                    heartbeat_metadata = _publish_process_heartbeat(
                         worker,
                         active_count=len(active),
                         concurrency=concurrency,
                     )
+                    provider_auth_ready = bool(
+                        heartbeat_metadata.get("provider_auth_probe_status") == "ok"
+                    )
                 except Exception as exc:  # noqa: BLE001
+                    provider_auth_ready = False
                     logger.exception(
                         "semantic_scene_image_worker_heartbeat_failed",
                         worker_id=worker.worker_id,
                         error=str(exc),
                     )
                 last_process_heartbeat = now
-            while len(active) < concurrency:
+            while provider_auth_ready and len(active) < concurrency:
                 active.add(executor.submit(worker.tick))
             done, active = wait(active, timeout=poll_seconds, return_when=FIRST_COMPLETED)
             for future in done:

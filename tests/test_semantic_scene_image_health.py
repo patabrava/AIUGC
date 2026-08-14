@@ -17,6 +17,8 @@ def test_scene_image_worker_readiness_accepts_a_fresh_persisted_heartbeat(
                 "contract": "semantic-scene-image-v2",
                 "queue_probe_status": "ok",
                 "queue_probe_checked_at": datetime.now(timezone.utc).isoformat(),
+                "provider_auth_probe_status": "ok",
+                "provider_auth_probe_checked_at": datetime.now(timezone.utc).isoformat(),
             },
         },
     )
@@ -40,6 +42,8 @@ def test_scene_image_worker_readiness_rejects_a_stale_heartbeat(monkeypatch):
                 "contract": "semantic-scene-image-v2",
                 "queue_probe_status": "ok",
                 "queue_probe_checked_at": datetime.now(timezone.utc).isoformat(),
+                "provider_auth_probe_status": "ok",
+                "provider_auth_probe_checked_at": datetime.now(timezone.utc).isoformat(),
             },
         },
     )
@@ -66,6 +70,8 @@ def test_scene_image_worker_readiness_rejects_a_stale_queue_probe(monkeypatch):
                 "queue_probe_checked_at": (
                     datetime.now(timezone.utc) - timedelta(minutes=5)
                 ).isoformat(),
+                "provider_auth_probe_status": "ok",
+                "provider_auth_probe_checked_at": datetime.now(timezone.utc).isoformat(),
             },
         },
     )
@@ -113,6 +119,8 @@ def test_scene_image_worker_readiness_rejects_a_persistent_claim_failure(
                 "queue_probe_status": "error",
                 "queue_probe_checked_at": datetime.now(timezone.utc).isoformat(),
                 "queue_probe_error_class": "APIError",
+                "provider_auth_probe_status": "ok",
+                "provider_auth_probe_checked_at": datetime.now(timezone.utc).isoformat(),
             },
         },
     )
@@ -120,4 +128,34 @@ def test_scene_image_worker_readiness_rejects_a_persistent_claim_failure(
     assert main._probe_scene_image_worker_health() == (
         False,
         "scene-image worker cannot query its durable queue",
+    )
+
+
+def test_scene_image_worker_readiness_rejects_missing_provider_credentials(
+    monkeypatch,
+):
+    from app import main
+    from app.features.semantic_videos import queries
+
+    now = datetime.now(timezone.utc).isoformat()
+    monkeypatch.setattr(
+        queries,
+        "get_scene_image_worker_heartbeat",
+        lambda: {
+            "worker_id": "semantic-scene-image-v2-missing-auth",
+            "last_seen_at": now,
+            "metadata": {
+                "contract": "semantic-scene-image-v2",
+                "queue_probe_status": "ok",
+                "queue_probe_checked_at": now,
+                "provider_auth_probe_status": "error",
+                "provider_auth_probe_checked_at": now,
+                "provider_auth_probe_error_class": "ValidationError",
+            },
+        },
+    )
+
+    assert main._probe_scene_image_worker_health() == (
+        False,
+        "scene-image worker cannot authenticate to its image provider",
     )

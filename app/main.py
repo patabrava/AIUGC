@@ -232,6 +232,8 @@ def _probe_scene_image_worker_health() -> tuple[bool, str | None]:
         return False, "scene-image worker heartbeat contract is obsolete"
     if metadata.get("queue_probe_status") != "ok":
         return False, "scene-image worker cannot query its durable queue"
+    if metadata.get("provider_auth_probe_status") != "ok":
+        return False, "scene-image worker cannot authenticate to its image provider"
     raw_probe_at = str(metadata.get("queue_probe_checked_at") or "").strip()
     if not raw_probe_at:
         return False, "scene-image worker heartbeat has no queue probe timestamp"
@@ -246,6 +248,27 @@ def _probe_scene_image_worker_health() -> tuple[bool, str | None]:
     )
     if probe_age_seconds > _SCENE_IMAGE_WORKER_HEARTBEAT_TTL_SECONDS:
         return False, f"scene-image worker queue probe is {probe_age_seconds}s old"
+    raw_provider_probe_at = str(
+        metadata.get("provider_auth_probe_checked_at") or ""
+    ).strip()
+    if not raw_provider_probe_at:
+        return False, "scene-image worker heartbeat has no provider-auth probe timestamp"
+    try:
+        provider_probe_at = datetime.fromisoformat(
+            raw_provider_probe_at.replace("Z", "+00:00")
+        )
+    except ValueError:
+        return False, "scene-image worker provider-auth probe timestamp is invalid"
+    if provider_probe_at.tzinfo is None:
+        provider_probe_at = provider_probe_at.replace(tzinfo=timezone.utc)
+    provider_probe_age_seconds = max(
+        0, int((datetime.now(timezone.utc) - provider_probe_at).total_seconds())
+    )
+    if provider_probe_age_seconds > _SCENE_IMAGE_WORKER_HEARTBEAT_TTL_SECONDS:
+        return False, (
+            "scene-image worker provider-auth probe is "
+            f"{provider_probe_age_seconds}s old"
+        )
     raw_seen_at = str(heartbeat.get("last_seen_at") or "").strip()
     if not raw_seen_at:
         return False, "scene-image worker heartbeat has no timestamp"

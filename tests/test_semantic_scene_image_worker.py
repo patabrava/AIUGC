@@ -338,6 +338,7 @@ def test_process_heartbeat_marks_queue_probe_failure_while_claims_are_busy():
 
     repo = ProbeFailureRepository(0)
     worker = module.SemanticSceneImageWorker(repo=repo, worker_id="probe-worker")
+    worker.provider_auth_probe = lambda: None
 
     metadata = module._publish_process_heartbeat(
         worker,
@@ -348,7 +349,34 @@ def test_process_heartbeat_marks_queue_probe_failure_while_claims_are_busy():
     assert metadata["active"] == 2
     assert metadata["queue_probe_status"] == "error"
     assert metadata["queue_probe_error_class"] == "RuntimeError"
+    assert metadata["provider_auth_probe_status"] == "ok"
     assert repo.heartbeats[0]["metadata"] == metadata
+
+
+def test_process_heartbeat_blocks_claim_readiness_when_provider_auth_is_missing():
+    from workers import semantic_scene_image_worker as module
+
+    repo = FakeJobRepository(0)
+
+    def missing_credentials():
+        raise ValidationError("No Google Cloud credentials found.")
+
+    worker = module.SemanticSceneImageWorker(
+        repo=repo,
+        worker_id="missing-auth-worker",
+        provider_auth_probe=missing_credentials,
+    )
+
+    metadata = module._publish_process_heartbeat(
+        worker,
+        active_count=0,
+        concurrency=2,
+    )
+
+    assert metadata["queue_probe_status"] == "ok"
+    assert metadata["provider_auth_probe_status"] == "error"
+    assert metadata["provider_auth_probe_error_class"] == "ValidationError"
+    assert repo.jobs == []
 
 
 def test_ten_variable_batch_runs_generate_every_script_once_with_concurrency_two(

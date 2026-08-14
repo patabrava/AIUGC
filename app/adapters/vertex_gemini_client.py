@@ -774,6 +774,12 @@ class VertexGeminiClient:
             raise result["error"]
         return result["credentials"]
 
+    def probe_credentials(self, *, timeout_seconds: float = 5.0) -> None:
+        """Prove that this process can load and refresh its Vertex credentials."""
+        self._ensure_configured()
+        timeout = max(0.1, float(timeout_seconds))
+        self._get_credentials(deadline_at=time.monotonic() + timeout)
+
     def _build_headers(
         self,
         include_json: bool = False,
