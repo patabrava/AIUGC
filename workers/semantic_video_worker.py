@@ -1358,7 +1358,9 @@ class ProductionStageRunner:
             acoustic_plan=None,
             target_duration_seconds=float(requested_duration),
             terminal_tail_exclusion_seconds=(
-                float(requested_duration) - speech_cut_floor
+                None
+                if accept_existing_delivery_as_is
+                else float(requested_duration) - speech_cut_floor
             ),
         )
         stitched_path = manifest_path.parent / "stitched-advisory.mp4"

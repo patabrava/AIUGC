@@ -1318,17 +1318,16 @@ def test_advisory_caption_delivery_reuses_single_take_terminal_protection(
 
     def stitch_fn(**kwargs):
         stitch_calls.append(kwargs)
+        tail_exclusion = float(kwargs["terminal_tail_exclusion_seconds"] or 0.0)
         retained_duration = (
             float(kwargs["target_duration_seconds"])
-            - float(kwargs["terminal_tail_exclusion_seconds"])
+            - tail_exclusion
         )
         return (
             b"terminal-protected-video",
             {
                 "stitch_end_pan_protection_applied": True,
-                "stitch_end_pan_tail_exclusion_s": kwargs[
-                    "terminal_tail_exclusion_seconds"
-                ],
+                    "stitch_end_pan_tail_exclusion_s": tail_exclusion,
                 "stitch_end_pan_retime_ratio": (
                     float(kwargs["target_duration_seconds"]) / retained_duration
                 ),
@@ -1420,11 +1419,14 @@ def test_advisory_caption_delivery_reuses_single_take_terminal_protection(
     assert stitch_calls[0]["trim_windows"] is None
     assert stitch_calls[0]["target_duration_seconds"] == 8.0
     expected_tail_exclusion = (
-        0.0 if accept_as_is else 8.0 - 7.3 - (1024.0 / 48000.0)
+        None if accept_as_is else 8.0 - 7.3 - (1024.0 / 48000.0)
     )
-    assert stitch_calls[0]["terminal_tail_exclusion_seconds"] == pytest.approx(
-        expected_tail_exclusion
-    )
+    if expected_tail_exclusion is None:
+        assert stitch_calls[0]["terminal_tail_exclusion_seconds"] is None
+    else:
+        assert stitch_calls[0]["terminal_tail_exclusion_seconds"] == pytest.approx(
+            expected_tail_exclusion
+        )
     assert terminal_paths == ["raw.mp4", "stitched-advisory.mp4"]
     assert caption_calls[0]["video_path"].endswith("stitched-advisory.mp4")
     assert caption_calls[0]["transcript"].words[-1].end == pytest.approx(
