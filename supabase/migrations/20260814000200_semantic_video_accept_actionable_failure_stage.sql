@@ -1,3 +1,5 @@
+-- Localized paid-retry findings may coexist with an older identity failure in
+-- legacy runs. Accept-as-is must resume the actionable localized QA stage.
 CREATE OR REPLACE FUNCTION public.resume_semantic_video_qa_review(
   p_run_id UUID,
   p_expected_revision INTEGER,

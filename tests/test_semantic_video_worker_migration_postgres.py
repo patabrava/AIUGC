@@ -31,6 +31,10 @@ ACCEPT_EXISTING_DELIVERY_MIGRATION = (
     ROOT
     / "supabase/migrations/20260814000100_semantic_video_accept_existing_delivery.sql"
 )
+ACCEPT_ACTIONABLE_FAILURE_STAGE_MIGRATION = (
+    ROOT
+    / "supabase/migrations/20260814000200_semantic_video_accept_actionable_failure_stage.sql"
+)
 WORKER_CONTRACT_FENCE_MIGRATION = (
     ROOT / "supabase/migrations/20260802000100_semantic_video_worker_contract_fence.sql"
 )
@@ -123,6 +127,16 @@ def test_accept_existing_delivery_migration_persists_the_operator_override():
     assert "= 'localized_paid_take'" in sql
     assert "SET submission_state = 'completed'" in sql
     assert "semantic_video_approvals" not in sql
+    assert "TO service_role" in sql
+
+
+def test_accept_existing_delivery_resumes_the_actionable_localized_failure_stage():
+    sql = ACCEPT_ACTIONABLE_FAILURE_STAGE_MIGRATION.read_text(encoding="utf-8")
+
+    assert "WHEN accept_existing_delivery_as_is" in sql
+    assert "locked_run.artifact_manifest #>> '{qa_failure,stage}'" in sql
+    assert "ELSE locked_run.failure_envelope ->> 'stage'" in sql
+    assert "'accept_existing_delivery_as_is', accept_existing_delivery_as_is" in sql
     assert "TO service_role" in sql
 
 
