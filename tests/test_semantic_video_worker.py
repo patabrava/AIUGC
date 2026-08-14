@@ -832,6 +832,42 @@ def test_acoustic_qa_resume_marks_delivery_findings_as_operator_advisory():
     }
 
 
+def test_accept_existing_delivery_manually_accepts_preserved_visual_failure():
+    from workers.semantic_video_worker import ProductionStageRunner
+
+    payload = {
+        "status": "visual_qa_failed",
+        "visual_qa": {
+            "passed": False,
+            "blocking_reasons": ["actor identity differs from approved references"],
+            "observed_differences": ["face geometry changed"],
+        },
+    }
+    advisory = {
+        "required": True,
+        "stage": "acoustic_qa",
+        "failed_take_indexes": [0],
+        "paid_retry_required": False,
+        "accept_existing_delivery_as_is": True,
+    }
+
+    ProductionStageRunner._apply_downstream_qa_advisory(payload, advisory)  # noqa: SLF001
+
+    assert payload["delivery_qa_advisory"] == advisory
+    assert payload["visual_qa"] == {
+        "passed": True,
+        "blocking_reasons": [],
+        "observed_differences": ["face geometry changed"],
+        "provider_passed": False,
+        "provider_blocking_reasons": [
+            "actor identity differs from approved references"
+        ],
+        "manual_review_accepted": True,
+        "accepted_by": "operator_accept_existing_delivery_as_is",
+    }
+    assert payload["status"] == "visual_qa_passed"
+
+
 def test_worker_transcript_failure_requires_retry_instead_of_entering_impossible_identity_stage():
     repo = FakeRepo(stage="transcript_qa", take_count=2)
     stages = FakeStages(

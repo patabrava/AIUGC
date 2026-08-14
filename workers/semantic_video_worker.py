@@ -563,20 +563,26 @@ class ProductionStageRunner:
             and qa_advisory.get("stage") == "acoustic_qa"
         ):
             payload["delivery_qa_advisory"] = dict(qa_advisory)
-            return
-        if (
+            if qa_advisory.get("accept_existing_delivery_as_is") is not True:
+                return
+            accepted_by = "operator_accept_existing_delivery_as_is"
+            fallback_message = "Operator accepted the existing generated delivery."
+        elif (
             not isinstance(qa_advisory, Mapping)
             or qa_advisory.get("required") is not True
             or qa_advisory.get("stage") != "identity_qa"
         ):
             return
+        else:
+            accepted_by = "paid_generated_take_qa_advisory"
+            fallback_message = "Identity QA service unavailable."
         report = payload.get("visual_qa")
         if not isinstance(report, dict):
             report = {
                 "passed": False,
                 "status": "qa_service_unavailable",
                 "blocking_reasons": [
-                    str(qa_advisory.get("message") or "Identity QA service unavailable.")
+                    str(qa_advisory.get("message") or fallback_message)
                 ],
                 "observed_differences": [],
             }
@@ -588,7 +594,7 @@ class ProductionStageRunner:
             report.get("blocking_reasons") or []
         )
         report["manual_review_accepted"] = True
-        report["accepted_by"] = "paid_generated_take_qa_advisory"
+        report["accepted_by"] = accepted_by
         report["passed"] = True
         report["blocking_reasons"] = []
         payload["status"] = "visual_qa_passed"
