@@ -3406,6 +3406,15 @@ def approve_retry(post_id: str, payload: RetryApprovalRequest, request: Request)
 def resume_qa_only_review(post_id: str, payload: QAReviewResumeRequest):
     run = _run_or_404(post_id)
     revision = int(run.get("revision") or 0)
+    stage = str(run.get("stage") or "")
+    if stage != "retry_approval_required":
+        return SuccessResponse(
+            data={
+                "run_id": str(run["id"]),
+                "revision": revision,
+                "stage": stage,
+            }
+        )
     if revision != payload.expected_revision:
         raise StateTransitionError(
             "Semantic video QA resume revision is stale.",
@@ -3413,11 +3422,6 @@ def resume_qa_only_review(post_id: str, payload: QAReviewResumeRequest):
                 "expected_revision": payload.expected_revision,
                 "actual_revision": revision,
             },
-        )
-    if str(run.get("stage") or "") != "retry_approval_required":
-        raise StateTransitionError(
-            "Semantic video run is not awaiting QA recovery.",
-            {"stage": run.get("stage")},
         )
     if str(run.get("plan_hash") or "") != payload.plan_hash:
         raise StateTransitionError(

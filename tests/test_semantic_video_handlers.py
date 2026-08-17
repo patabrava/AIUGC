@@ -4981,6 +4981,38 @@ def test_acoustic_plan_failure_can_resume_for_full_video_review(monkeypatch):
     ]
 
 
+def test_stale_qa_resume_returns_current_completed_run_without_error(monkeypatch):
+    handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    _seed_awaiting_paid_run(state, revision=9)
+    state["run"].update(
+        {
+            "stage": "completed",
+            "plan_hash": "a" * 64,
+            "final_video_uri": "https://storage/final.mp4",
+            "final_caption_uri": "https://storage/final-captioned.mp4",
+        }
+    )
+    monkeypatch.setattr(
+        handlers,
+        "resume_qa_review",
+        lambda **_kwargs: pytest.fail("Completed QA recovery must be idempotent."),
+    )
+
+    response = TestClient(app, base_url="http://localhost").post(
+        "/semantic-videos/posts/post-1/qa-resume",
+        json={"plan_hash": "a" * 64, "expected_revision": 4},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"] == {
+        "run_id": "run-1",
+        "revision": 9,
+        "stage": "completed",
+    }
+
+
 def test_single_take_terminal_speech_failure_can_be_accepted_without_paid_retry(monkeypatch):
     handlers, state, _storage = _install_repository(monkeypatch)
     from app.main import app

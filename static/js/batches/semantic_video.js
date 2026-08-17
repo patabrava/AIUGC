@@ -904,7 +904,7 @@
         button.disabled = true;
         if (!['candidates', 'scene-image', 'plan'].includes(path)) setStatus(root, pendingMessage);
         try {
-            if (['approve', 'retry-approve'].includes(path)) {
+            if (['approve', 'retry-approve', 'qa-resume'].includes(path)) {
                 body = await synchronizePaidAction(root, path, body);
                 if (!body) return;
             }
@@ -971,7 +971,7 @@
                 return;
             }
             if (
-                ['approve', 'retry-approve'].includes(path)
+                ['approve', 'retry-approve', 'qa-resume'].includes(path)
                 && error.status === 409
                 && await reconcilePaidAction(root, path)
             ) {

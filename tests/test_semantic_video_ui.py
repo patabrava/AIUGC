@@ -1540,7 +1540,7 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert "progress.stage !== 'awaiting_reference_approval'" in source
     assert "synchronizePaidAction(root, path, body)" in source
     assert "reconcilePaidAction(root, path)" in source
-    assert "['approve', 'retry-approve'].includes(path)" in source
+    assert source.count("['approve', 'retry-approve', 'qa-resume'].includes(path)") == 2
     assert "error.status === 409" in source
     assert "path === 'approve' ? 'awaiting_paid_approval' : 'retry_approval_required'" in source
     assert "expected_revision: Number(progress.revision || 0)" in source
