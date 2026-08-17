@@ -2732,6 +2732,89 @@ def test_operator_review_delivery_preserves_transcript_safe_windows(tmp_path):
     assert saved["delivery_visual_qa"]["passed"] is True
 
 
+def test_sixteen_second_operator_review_preserves_native_cadence_above_retime_bound(
+    tmp_path,
+):
+    from app.features.shot_production.runner import compose_and_caption
+
+    manifest_path = _manifest_with_raw_takes(tmp_path)
+    payload = _read(manifest_path)
+    for position, take in enumerate(payload["takes"]):
+        take["status"] = "transcribed"
+        take["transcript_qa"] = {
+            "passed": True,
+            "first_word_start_seconds": 0.0,
+            "final_word_end_seconds": 6.19 if position else 7.4,
+        }
+        take["trim_window"] = {
+            "start_seconds": 0.0,
+            "end_seconds": 6.44 if position else 7.8,
+            "source": "deepgram_word_window",
+        }
+    payload["visual_qa"] = {"passed": True}
+    payload["voice_qa"] = {"passed": True}
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+    stitch_calls = []
+
+    def fail_plan(_evidence, **_kwargs):
+        raise ValidationError(
+            "No transcript-safe acoustic seam candidate exists.",
+            {"seam_index": 0, "recommended_retry_take_indexes": [1]},
+        )
+
+    def stitch_fn(**kwargs):
+        stitch_calls.append(kwargs)
+        return b"complete-native-cadence-review", {
+            "stitch_segment_count": 2,
+            "stitch_fps": 24.0,
+            "stitch_audio_video_duration_delta_s": 0.0,
+        }
+
+    def caption_fn(**_kwargs):
+        output = manifest_path.parent / "review-captioned.mp4"
+        output.write_bytes(b"review-captioned")
+        return str(output)
+
+    compose_and_caption(
+        manifest_path,
+        _DeepgramByCall([SCRIPT]),
+        acoustic_seams=True,
+        analyze_audio_fn=lambda _path: (),
+        plan_acoustic_fn=fail_plan,
+        normalize_preroll_fn=_fake_acoustic_preroll,
+        stitch_fn=stitch_fn,
+        caption_fn=caption_fn,
+        probe_fn=lambda _path: _valid_final_probe("14.09"),
+        visual_seam_evaluator=lambda *_args, **_kwargs: {
+            "passed": True,
+            "seams": [],
+            "failed_seam_indexes": [],
+        },
+        visual_seam_sheet_fn=lambda *_args, **_kwargs: {"frames": []},
+        operator_review_delivery=True,
+    )
+
+    saved = _read(manifest_path)
+    assert saved["status"] == "captioned"
+    assert saved["composition_mode"] == "transcript_safe_operator_review"
+    assert "target_duration_seconds" not in stitch_calls[0]
+    assert "delivery_retime_ratio" not in stitch_calls[0]
+    assert saved["media_qa"]["passed"] is True
+    assert saved["media_qa"]["provider_passed"] is False
+    assert saved["media_qa"]["paid_retry_required"] is False
+    duration_advisory = next(
+        item
+        for item in saved["delivery_review_advisories"]
+        if item["stage"] == "media_duration_qa"
+    )
+    assert duration_advisory["details"] == {
+        "content_duration_seconds": 14.09,
+        "target_duration_seconds": 16.0,
+        "required_retime_ratio": pytest.approx(16.0 / 14.09),
+        "maximum_retime_ratio": 1.1,
+    }
+
+
 @pytest.mark.parametrize(
     (
         "final_window_start",

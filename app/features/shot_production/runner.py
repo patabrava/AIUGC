@@ -2653,6 +2653,7 @@ def compose_and_caption(
     acoustic_plan = None
     operator_review_retime_ratio = None
     operator_review_target_duration = None
+    operator_review_native_cadence = False
     if acoustic_seams:
         source_visual_tail_records = []
         for position, take in enumerate(ordered[:-1]):
@@ -2888,11 +2889,6 @@ def compose_and_caption(
                             MAX_EXACT_DELIVERY_RETIME_RATIO
                         ),
                     }
-                    if requested_duration < 24.0:
-                        raise ValidationError(
-                            "Transcript-safe operator review cannot satisfy the delivery target within the cadence bound.",
-                            timing_details,
-                        )
                     _append_delivery_review_advisory(
                         payload,
                         report_kind="media_duration_qa",
@@ -2904,6 +2900,7 @@ def compose_and_caption(
                     )
                     operator_review_target_duration = None
                     operator_review_retime_ratio = None
+                    operator_review_native_cadence = True
             payload["status"] = "operator_review_composition_planned"
             payload["updated_at"] = _utc_now()
             _atomic_write_json(manifest_path, payload)
@@ -2938,8 +2935,11 @@ def compose_and_caption(
                 )
             }
             if (
-                exact_delivery_target is not None
-                or operator_review_target_duration is not None
+                not operator_review_native_cadence
+                and (
+                    exact_delivery_target is not None
+                    or operator_review_target_duration is not None
+                )
             )
             else {}
         ),
