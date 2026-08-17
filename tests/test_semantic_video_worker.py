@@ -904,6 +904,127 @@ def test_acoustic_precomposition_failure_reaches_advisory_materializer(tmp_path)
     assert result["artifacts"]["qa_failure"]["stage"] == "acoustic_qa"
 
 
+@pytest.mark.parametrize(
+    "manifest_status",
+    [None, "", 0, False, {}, [], "future_precomposition_status"],
+    ids=["missing", "empty", "zero", "false", "object", "array", "future"],
+)
+def test_acoustic_validation_failure_never_reclaims_an_unknown_manifest_status(
+    tmp_path,
+    monkeypatch,
+    manifest_status,
+):
+    from workers.semantic_video_worker import ProductionStageRunner
+
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps({"status": manifest_status}),
+        encoding="utf-8",
+    )
+
+    class FailingAcousticPipeline:
+        @staticmethod
+        def compose_and_caption(*_args, **_kwargs):
+            raise ValidationError(
+                "Transcript-safe operator review cannot satisfy the delivery target "
+                "within the cadence bound.",
+                {"recommended_retry_take_indexes": [1]},
+            )
+
+    runner = ProductionStageRunner(work_root=tmp_path)
+    monkeypatch.setattr(runner, "_runner", lambda: FailingAcousticPipeline)
+    monkeypatch.setattr(
+        runner,
+        "_materialize_manifest",
+        lambda _run, _takes: manifest_path,
+    )
+
+    result = runner.run_stage(
+        stage="acoustic_qa",
+        run={"id": "run-1"},
+        takes=[{"take_index": 0}, {"take_index": 1}],
+    )
+
+    assert result["passed"] is False
+    assert result["failed_take_indexes"] == [0, 1]
+    assert result["artifacts"]["qa_failure"] == {
+        "stage": "acoustic_qa",
+        "message": (
+            "Transcript-safe operator review cannot satisfy the delivery target "
+            "within the cadence bound."
+        ),
+        "details": {"recommended_retry_take_indexes": [1]},
+        "failed_take_indexes": [0, 1],
+    }
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ValidationError("Deterministic acoustic validation failed."),
+        StateTransitionError("Deterministic acoustic artifact state failed."),
+    ],
+    ids=["validation-error", "state-transition-error"],
+)
+def test_worker_terminalizes_every_deterministic_acoustic_exception_once(error):
+    repo = FakeRepo(stage="acoustic_qa", take_count=2)
+    vertex = FakeVertex()
+
+    class ExplodingAcousticStages(FakeStages):
+        def run_stage(self, *, stage, run, takes):
+            self.calls.append((stage, deepcopy(run), deepcopy(takes)))
+            raise error
+
+    stages = ExplodingAcousticStages()
+    worker = _worker(repo, vertex, stages)
+
+    first = worker.tick("run-1")
+    second = worker.tick("run-1")
+
+    assert first.action == "retry_approval_required"
+    assert first.stage == "retry_approval_required"
+    assert second.action == "not_claimed"
+    assert len(stages.calls) == 1
+    assert vertex.submit_calls == []
+    assert not any(event[0] == "worker_exception" for event in repo.events)
+    retry = next(event for event in repo.events if event[0] == "retry_required")
+    assert retry[1] == (0, 1)
+    assert retry[2]["qa_failure"]["retry_mode"] == "qa_only"
+    assert retry[2]["qa_failure"]["failure_type"] == "deterministic_stage_failure"
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        None,
+        [],
+        {"passed": False, "failed_take_indexes": [0], "artifacts": []},
+        {"passed": False, "failed_take_indexes": ["not-an-index"], "artifacts": {}},
+    ],
+    ids=["none", "sequence", "invalid-artifacts", "invalid-take-index"],
+)
+def test_worker_terminalizes_malformed_acoustic_stage_contract_once(result):
+    repo = FakeRepo(stage="acoustic_qa", take_count=2)
+    vertex = FakeVertex()
+
+    class MalformedAcousticStages(FakeStages):
+        def run_stage(self, *, stage, run, takes):
+            self.calls.append((stage, deepcopy(run), deepcopy(takes)))
+            return deepcopy(result)
+
+    stages = MalformedAcousticStages()
+    worker = _worker(repo, vertex, stages)
+
+    first = worker.tick("run-1")
+    second = worker.tick("run-1")
+
+    assert first.action == "retry_approval_required"
+    assert second.action == "not_claimed"
+    assert len(stages.calls) == 1
+    assert vertex.submit_calls == []
+    assert not any(event[0] == "worker_exception" for event in repo.events)
+
+
 def test_worker_transcript_failure_requires_retry_instead_of_entering_impossible_identity_stage():
     repo = FakeRepo(stage="transcript_qa", take_count=2)
     stages = FakeStages(

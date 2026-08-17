@@ -1011,10 +1011,11 @@ class ProductionStageRunner:
             "media_qa_failed",
         }
         payload_status = str(payload.get("status") or "")
-        acoustic_precomposition_failure = (
-            stage == "acoustic_qa" and payload_status == "voice_qa_passed"
-        )
-        if payload_status not in quality_failure_statuses and not acoustic_precomposition_failure:
+        # Acoustic QA owns composition and its deterministic validation gates.
+        # New pre-composition statuses must still become an actionable QA result;
+        # re-raising here leaves the run claimable at acoustic_qa forever.
+        acoustic_validation_failure = stage == "acoustic_qa"
+        if payload_status not in quality_failure_statuses and not acoustic_validation_failure:
             raise exc
         failed: list[int] = []
         if stage == "transcript_qa":
@@ -2138,10 +2139,55 @@ class SemanticVideoWorker:
                     ),
                 },
             }
+        except (ValidationError, StateTransitionError) as exc:
+            result = self._terminalize_acoustic_stage_error(stage, takes, exc)
         if not isinstance(result, Mapping):
-            raise StateTransitionError("Semantic video stage runner returned an invalid contract.")
-        artifacts = dict(result.get("artifacts") or {})
+            result = self._terminalize_acoustic_stage_error(
+                stage,
+                takes,
+                StateTransitionError(
+                    "Semantic video stage runner returned an invalid contract."
+                ),
+            )
+        raw_artifacts = result.get("artifacts")
+        if raw_artifacts is not None and not isinstance(raw_artifacts, Mapping):
+            result = self._terminalize_acoustic_stage_error(
+                stage,
+                takes,
+                StateTransitionError(
+                    "Semantic video stage runner returned invalid artifacts."
+                ),
+            )
+            raw_artifacts = result.get("artifacts")
+        artifacts = dict(raw_artifacts or {})
         if not result.get("passed"):
+            try:
+                failed_indexes = sorted(
+                    {
+                        int(index)
+                        for index in result.get("failed_take_indexes") or []
+                    }
+                )
+            except (TypeError, ValueError):
+                result = self._terminalize_acoustic_stage_error(
+                    stage,
+                    takes,
+                    StateTransitionError(
+                        "Semantic video stage runner returned invalid failed take indexes."
+                    ),
+                )
+                artifacts = dict(result["artifacts"])
+                failed_indexes = list(result["failed_take_indexes"])
+            if not failed_indexes and stage == "acoustic_qa":
+                result = self._terminalize_acoustic_stage_error(
+                    stage,
+                    takes,
+                    StateTransitionError(
+                        "Failed acoustic QA did not identify durable take indexes."
+                    ),
+                )
+                artifacts = dict(result["artifacts"])
+                failed_indexes = list(result["failed_take_indexes"])
             if self._is_single_paid_eight_second_delivery(run, takes):
                 return self._complete_advisory_delivery(
                     run=run,
@@ -2157,9 +2203,6 @@ class SemanticVideoWorker:
             # Identity and voice evaluator failures remain advisory because
             # their downstream stages can still produce a reviewable delivery.
             if stage in {"identity_qa", "voice_qa"}:
-                failed_indexes = sorted(
-                    {int(index) for index in result.get("failed_take_indexes") or []}
-                )
                 qa_failure = artifacts.get("qa_failure")
                 advisory = {
                     "required": True,
@@ -2196,7 +2239,6 @@ class SemanticVideoWorker:
                     next_stage,
                     "stage_advanced_with_qa_advisory",
                 )
-            failed_indexes = sorted({int(index) for index in result.get("failed_take_indexes") or []})
             if not failed_indexes:
                 raise StateTransitionError("Failed semantic video QA requires failed take indexes.")
             self.repo.require_retry_approval(
@@ -2234,6 +2276,48 @@ class SemanticVideoWorker:
             artifacts=artifacts,
         )
         return WorkerTickResult(run_id, next_stage, "stage_advanced")
+
+    @staticmethod
+    def _terminalize_acoustic_stage_error(
+        stage: str,
+        takes: Sequence[Mapping[str, Any]],
+        exc: Exception,
+    ) -> dict[str, Any]:
+        """Turn deterministic acoustic-stage defects into one actionable stop."""
+        if stage != "acoustic_qa":
+            raise exc
+        failed_indexes = sorted(
+            {
+                int(take["take_index"])
+                for take in takes
+                if take.get("take_index") is not None
+            }
+        )
+        if not failed_indexes:
+            raise StateTransitionError(
+                "Acoustic QA cannot terminalize without completed take indexes."
+            ) from exc
+        message = str(getattr(exc, "message", None) or exc)
+        details = getattr(exc, "details", None)
+        qa_failure = {
+            "stage": stage,
+            "message": message,
+            "details": dict(details) if isinstance(details, Mapping) else {},
+            "failed_take_indexes": failed_indexes,
+            "failure_type": "deterministic_stage_failure",
+            "retry_mode": "qa_only",
+        }
+        return {
+            "passed": False,
+            "failed_take_indexes": failed_indexes,
+            "artifacts": {
+                "qa_failure": qa_failure,
+                "guidance": (
+                    "Continue QA using the existing checksum-addressed takes; "
+                    "do not submit new paid Veo work."
+                ),
+            },
+        }
 
     @staticmethod
     def _is_single_paid_eight_second_delivery(
