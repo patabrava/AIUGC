@@ -2640,7 +2640,24 @@ def test_acoustic_duration_failure_prefers_targeted_final_take_retry(tmp_path):
     assert reset["qa_failure_history"][-1]["stage"] == "acoustic_plan"
 
 
-def test_operator_review_delivery_preserves_transcript_safe_windows(tmp_path):
+@pytest.mark.parametrize(
+    ("failure_message", "failure_details"),
+    [
+        (
+            "Acoustic duration extension exceeds the seam energy limit.",
+            {"seam_index": 0, "short_window_energy_delta_db": 12.8},
+        ),
+        (
+            "Acoustic speech loudness cannot be matched inside the gain clamp.",
+            {"active_speech_rms_range_db": 3.4},
+        ),
+    ],
+)
+def test_operator_review_delivery_preserves_transcript_safe_windows(
+    tmp_path,
+    failure_message,
+    failure_details,
+):
     from app.features.shot_production.runner import compose_and_caption
 
     manifest_path = _manifest_with_raw_takes(tmp_path)
@@ -2664,10 +2681,7 @@ def test_operator_review_delivery_preserves_transcript_safe_windows(tmp_path):
     visual_seam_calls = []
 
     def fail_plan(_evidence, **_kwargs):
-        raise ValidationError(
-            "Acoustic duration extension exceeds the seam energy limit.",
-            {"seam_index": 0, "short_window_energy_delta_db": 12.8},
-        )
+        raise ValidationError(failure_message, failure_details)
 
     def stitch_fn(**kwargs):
         stitch_calls.append(kwargs)
@@ -2703,9 +2717,8 @@ def test_operator_review_delivery_preserves_transcript_safe_windows(tmp_path):
     saved = _read(manifest_path)
     assert saved["status"] == "captioned"
     assert saved["composition_mode"] == "transcript_safe_operator_review"
-    assert saved["acoustic_plan_failure"]["details"][
-        "short_window_energy_delta_db"
-    ] == pytest.approx(12.8)
+    assert saved["acoustic_plan_failure"]["message"] == failure_message
+    assert saved["acoustic_plan_failure"]["details"] == failure_details
     assert saved["delivery_review_advisories"][0]["stage"] == "acoustic_plan"
     assert stitch_calls[0]["acoustic_plan"] is None
     assert stitch_calls[0]["trim_windows"] == [

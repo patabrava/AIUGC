@@ -2737,7 +2737,11 @@ def compose_and_caption(
                 not isinstance(raw_seam_index, bool)
                 and isinstance(raw_seam_index, int)
             )
-            if not duration_failure and not localized_seam_failure:
+            if (
+                not duration_failure
+                and not localized_seam_failure
+                and not operator_review_delivery
+            ):
                 raise
             available_take_indexes = {int(take["index"]) for take in ordered}
             failed_seam_indexes = []
