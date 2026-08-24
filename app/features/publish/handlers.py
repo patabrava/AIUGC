@@ -1455,6 +1455,10 @@ async def _publish_instagram_reel(post: Dict[str, Any], meta_connection: Dict[st
             "video_url": video_url,
             "caption": post["publish_caption"],
             "share_to_feed": "true",
+            # Every video produced by this application is AI-generated. Keep
+            # disclosure server-owned so immediate, scheduled, and retry
+            # dispatches all receive Instagram's native AI info label.
+            "is_ai_generated": "true",
             "access_token": page_token,
         },
     )
@@ -1537,7 +1541,7 @@ async def _dispatch_tiktok_post(
     *,
     tiktok_settings: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Dict[str, Any], str]:
-    """Dispatch one TikTok post through direct-post when approved settings are present."""
+    """Dispatch generated video only when TikTok can attach its native AI label."""
     settings = _load_json_object(tiktok_settings)
     if _tiktok_direct_post_ready(tiktok_connection) and settings:
         job = await publish_tiktok_direct_for_post(
@@ -1553,11 +1557,16 @@ async def _dispatch_tiktok_post(
         )
         return job, "direct"
 
-    job = await upload_tiktok_draft_for_post(
-        post["id"],
-        caption=post["publish_caption"],
+    raise ValidationError(
+        "TikTok direct posting is required so the AI-generated content label is always attached.",
+        details={
+            "post_id": post.get("id"),
+            "ai_disclosure_required": True,
+            "publish_ready": _tiktok_direct_post_ready(tiktok_connection),
+            "tiktok_settings_present": bool(settings),
+            "readiness_reason": str(tiktok_connection.get("readiness_reason") or ""),
+        },
     )
-    return job, "draft"
 
 
 async def _resolve_confirm_publish_request(

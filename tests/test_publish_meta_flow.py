@@ -20,13 +20,13 @@ from app.features.publish.schemas import (
 )
 
 
-def test_publish_panel_distinguishes_tiktok_direct_and_draft_labels():
+def test_publish_panel_distinguishes_tiktok_direct_and_unavailable_labels():
     detail_js = Path("static/js/batches/detail.js").read_text()
     panel = Path("templates/batches/detail/_publish_panel.html").read_text()
 
     assert "tiktokActionLabel" in detail_js
     assert "Post to TikTok" in detail_js
-    assert "Upload Draft" in detail_js
+    assert "TikTok unavailable" in detail_js
     assert "tiktokActionLabel" in panel
 
 
@@ -425,7 +425,7 @@ def test_dispatch_due_posts_records_network_results_individually(monkeypatch):
     assert post["publish_results"]["instagram"]["error_code"] == "validation_error"
 
 
-def test_dispatch_due_posts_uploads_tiktok_draft(monkeypatch):
+def test_dispatch_due_posts_fails_closed_when_tiktok_direct_settings_are_missing(monkeypatch):
     storage = {
         "posts": [
             {
@@ -504,15 +504,15 @@ def test_dispatch_due_posts_uploads_tiktok_draft(monkeypatch):
 
     assert result["processed"] == 1
     assert result["published"] == 0
-    assert result["failed"] == 0
+    assert result["failed"] == 1
     assert touched_batches == ["batch-1"]
 
     post = storage["posts"][0]
-    assert post["publish_status"] == "publishing"
+    assert post["publish_status"] == "failed"
     assert post["platform_ids"] == {"facebook": "fb-remote-1", "instagram": "ig-remote-1"}
-    assert post["publish_results"]["tiktok"]["status"] == "awaiting_user_action"
-    assert post["publish_results"]["tiktok"]["provider_status"] == "SEND_TO_USER_INBOX"
-    assert post["publish_results"]["tiktok"]["post_mode"] == "draft"
+    assert post["publish_results"]["tiktok"]["status"] == "failed"
+    assert post["publish_results"]["tiktok"]["details"]["ai_disclosure_required"] is True
+    assert post["publish_results"]["tiktok"]["details"]["tiktok_settings_present"] is False
 
 
 def test_dispatch_due_posts_routes_tiktok_to_direct_when_publish_ready(monkeypatch):
@@ -614,7 +614,7 @@ def test_dispatch_due_posts_routes_tiktok_to_direct_when_publish_ready(monkeypat
     assert post["publish_results"]["tiktok"]["post_mode"] == "direct"
 
 
-def test_dispatch_due_posts_tracks_tiktok_draft_as_user_action(monkeypatch):
+def test_dispatch_due_posts_fails_closed_instead_of_uploading_tiktok_draft(monkeypatch):
     storage = {
         "posts": [
             {
@@ -676,9 +676,10 @@ def test_dispatch_due_posts_tracks_tiktok_draft_as_user_action(monkeypatch):
 
     assert result["published"] == 0
     post = storage["posts"][0]
-    assert post["publish_status"] == "publishing"
+    assert post["publish_status"] == "failed"
     assert post["platform_ids"] == {}
-    assert post["publish_results"]["tiktok"]["status"] == "awaiting_user_action"
+    assert post["publish_results"]["tiktok"]["status"] == "failed"
+    assert post["publish_results"]["tiktok"]["details"]["ai_disclosure_required"] is True
 
 
 def test_tiktok_job_result_status_preserves_failed_provider_job():
@@ -1190,6 +1191,7 @@ def test_publish_instagram_reel_uses_selected_page_token(monkeypatch):
 
     assert remote_id == "ig-media-1"
     assert calls[0]["data"]["access_token"] == "page-token"
+    assert calls[0]["data"]["is_ai_generated"] == "true"
     assert calls[1]["params"]["access_token"] == "page-token"
     assert calls[2]["data"]["access_token"] == "page-token"
     assert calls[0]["url"].endswith("/ig-1/media")

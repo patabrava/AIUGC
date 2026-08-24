@@ -12,7 +12,7 @@
   - §4 Music Usage Confirmation always rendered; Branded Content Policy added when Branded Content is selected.
   - §5 Editable caption + hashtag visibility, processing notice, explicit Save / Post button, status polling already wired in the adapter.
 - A batch-level "TikTok defaults" panel (`_tiktok_batch_defaults.html`) lets the editor configure once and have those values pre-fill every TikTok-targeted post.
-- `/publish/posts/{id}/now` now branches on `tiktok_state.readiness_status`: when `publish_ready`, it calls `publish_tiktok_direct_for_post` with the full disclosure payload; otherwise it falls back to the existing draft path. Sandbox runtime keeps the draft path under the hood, but the UI is identical to the production direct-post flow.
+- `/publish/posts/{id}/now` and scheduled dispatch direct-post only when `tiktok_state.readiness_status` is `publish_ready` and complete settings are saved. Every generated video sends server-owned `post_info.is_aigc=true`. Because TikTok's draft-upload API cannot attach that native AI label, automated publishing fails closed instead of falling back to a draft.
 - Batch Arm refuses to schedule any post that lists `tiktok` in its networks without complete TikTok settings.
 
 ## Reviewer walkthrough script

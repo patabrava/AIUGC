@@ -628,7 +628,7 @@
                 const tiktok = options.tiktokState || {};
                 if (!this.networks.includes('tiktok')) return 'Publish Now';
                 if (tiktok.publish_ready) return 'Post to TikTok';
-                return 'Upload Draft';
+                return 'TikTok unavailable';
             },
 
             _buildSlots(count) {

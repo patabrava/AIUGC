@@ -251,7 +251,7 @@ class TestPublishPostNowEndpoint:
         assert result["publish_status"] == "published"
         assert result["publish_results"]["facebook"]["status"] == "published"
 
-    def test_tiktok_draft_upload_is_recorded(self, monkeypatch):
+    def test_tiktok_publish_fails_closed_without_direct_settings(self, monkeypatch):
         storage = _make_storage(networks=["tiktok"])
         monkeypatch.setattr(publish_handlers, "get_supabase", lambda: _FakeSupabase(storage))
         monkeypatch.setattr(publish_handlers, "_load_batch", lambda batch_id, fields="id,state,meta_connection": storage["batches"][0])
@@ -284,10 +284,10 @@ class TestPublishPostNowEndpoint:
 
         result = _run(publish_handlers.publish_post_now("post-1", ["tiktok"]))
 
-        assert result["publish_status"] == "publishing"
+        assert result["publish_status"] == "failed"
         assert result["platform_ids"] == {}
-        assert result["publish_results"]["tiktok"]["status"] == "awaiting_user_action"
-        assert result["publish_results"]["tiktok"]["post_mode"] == "draft"
+        assert result["publish_results"]["tiktok"]["status"] == "failed"
+        assert result["publish_results"]["tiktok"]["details"]["ai_disclosure_required"] is True
 
     def test_rejects_wrong_batch_state(self, monkeypatch):
         storage = _make_storage(batch_state="S6_QA")
@@ -376,7 +376,7 @@ class TestPostNowBatchCompletion:
 
 
 class TestPostNowTikTokRouting:
-    """When TikTok readiness is publish_ready and settings are provided, call direct-post; else draft."""
+    """Generated TikTok videos direct-post with disclosure or fail closed."""
 
     def _settings(self):
         return {
@@ -442,7 +442,7 @@ class TestPostNowTikTokRouting:
         assert result["publish_results"]["tiktok"]["post_mode"] == "direct"
         assert result["publish_results"]["tiktok"]["status"] == "published"
 
-    def test_post_now_falls_back_to_draft_when_not_publish_ready(self, monkeypatch):
+    def test_post_now_fails_closed_when_not_publish_ready(self, monkeypatch):
         storage = _make_storage(networks=["tiktok"])
         monkeypatch.setattr(publish_handlers, "get_supabase", lambda: _FakeSupabase(storage))
         monkeypatch.setattr(publish_handlers, "_load_batch", lambda batch_id, fields="id,state,meta_connection": storage["batches"][0])
@@ -486,5 +486,7 @@ class TestPostNowTikTokRouting:
             )
         )
 
-        assert captured["called"] == "draft"
-        assert result["publish_results"]["tiktok"]["post_mode"] == "draft"
+        assert "called" not in captured
+        assert result["publish_status"] == "failed"
+        assert result["publish_results"]["tiktok"]["status"] == "failed"
+        assert result["publish_results"]["tiktok"]["details"]["ai_disclosure_required"] is True
