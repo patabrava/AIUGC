@@ -104,7 +104,8 @@ _AUDIENCE_EXTERNAL_REFERENCE = re.compile(
     re.IGNORECASE,
 )
 _AUDIENCE_ANAPHORIC_OPENING = re.compile(
-    r"^(?:sie|er|es|diese?|dieses|das)\s+(?:führt|führen)\s+zu\b",
+    r"^(?:(?:sie|er|es|diese?|dieses|das)\s+(?:führt|führen)\s+zu|"
+    r"das\s+stimmt(?:\s+so)?\s+nicht)\b",
     re.IGNORECASE,
 )
 _AUDIENCE_GENERIC_PADDING = re.compile(
@@ -116,7 +117,7 @@ _AUDIENCE_GENERIC_PADDING = re.compile(
     r"so\s+ist\s+man\s+(?:immer\s+)?gut\s+unterwegs|"
     r"eine\s+sorge\s+weniger(?:\s+im\s+alltag)?|"
     r"(?:und\s+)?das\s+ist\s+(?:toll|super|großartig)"
-    r")[.!?](?=\s|$)|"
+    r")(?:[.!?](?=\s|$)|,\s+weil\b)|"
     r"\bmacht\s+den\s+alltag\s+wirklich\s+einfacher\b",
     re.IGNORECASE,
 )

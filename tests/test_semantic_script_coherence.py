@@ -287,6 +287,11 @@ def test_repetitive_audited_32_second_source_uses_family_recovery():
             "unresolved source reference",
         ),
         (
+            "Das stimmt nicht immer, denn oft bezuschussen sie nur Bürostühle, "
+            "obwohl die Zuständigkeit von der gefährdeten Erwerbsfähigkeit abhängt.",
+            "unresolved source reference",
+        ),
+        (
             "Als Rollstuhlnutzerin suchst du oft lange nach passenden Orten. "
             "Doch es gibt eine Lösung!",
             "generic padding",
@@ -324,6 +329,11 @@ def test_repetitive_audited_32_second_source_uses_family_recovery():
         (
             "Kennst du das Gefühl, wenn du denkst, eine Treppe ist einfach zu "
             "kompliziert? Das gibt mir ein echt gutes Gefühl der Freiheit.",
+            "generic padding",
+        ),
+        (
+            "Der Lift passt auch auf engen Treppen. Das gibt mir ein gutes Gefühl, "
+            "weil solche Lösungen mein Zuhause zugänglich machen.",
             "generic padding",
         ),
         (
