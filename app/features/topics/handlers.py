@@ -1131,6 +1131,8 @@ def _create_semantic_post_from_candidate(
     facts = _semantic_fact_inputs(candidate, seed_payload)
     title = str(candidate.get("title") or seed_payload.get("canonical_topic") or "").strip()
     cta = str(candidate.get("cta") or seed_payload.get("cta") or title).strip()
+    framework = str(candidate.get("framework") or seed_payload.get("framework") or "").strip()
+    hook_style = str(candidate.get("hook_style") or seed_payload.get("hook_style") or "").strip()
     research_provenance = _semantic_research_provenance(candidate)
     generated = _generate_semantic_script_for_candidate(
         candidate,
@@ -1141,6 +1143,10 @@ def _create_semantic_post_from_candidate(
         recovery_facts=_semantic_candidate_recovery_facts(candidate, post_type),
         requested_duration_seconds=contract.requested_duration_seconds,
         actor_context=_semantic_actor_context(batch),
+        framework=framework,
+        hook_style=hook_style,
+        variation_key=str(batch.get("id") or semantic_family_identity),
+        variation_index=semantic_rotation_index,
         research_provenance=research_provenance,
         source_urls=[source["url"] for source in sources],
         maximum_seconds=contract.maximum_duration_seconds,

@@ -6,6 +6,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from functools import lru_cache
 import google.auth.exceptions
+import hashlib
 import httpx
 import json
 from pathlib import Path
@@ -34,11 +35,48 @@ _RESPONSE_LABEL = re.compile(
     re.IGNORECASE,
 )
 _FINAL_TOPIC_REPAIR_ATTEMPTS = 2
-_NEAR_VALID_PADDING_PHRASES = {
-    2: "für dich",
-    3: "in deinem Alltag",
-    4: "in deinem konkreten Alltag",
+_NEAR_VALID_COMPLETION_PHRASES = {
+    2: (
+        "kurzer Hinweis",
+        "ganz konkret",
+        "wichtig dabei",
+        "zur Einordnung",
+        "einfach erklärt",
+        "vorab wichtig",
+        "entscheidend dabei",
+        "zum Verständnis",
+    ),
+    3: (
+        "gut zu wissen",
+        "für deine Planung",
+        "ein wichtiger Punkt",
+        "der entscheidende Punkt",
+        "ein kurzer Hinweis",
+        "zur besseren Einordnung",
+        "das ist wichtig",
+        "worauf es ankommt",
+    ),
+    4: (
+        "ein wichtiger Punkt vorab",
+        "das ist dabei wichtig",
+        "für deine Planung vorab",
+        "ein kurzer Hinweis dazu",
+        "der entscheidende Punkt dabei",
+        "das solltest du wissen",
+        "darauf solltest du achten",
+        "das hilft dir weiter",
+    ),
 }
+_COMPLETION_LEADIN_PATTERN = re.compile(
+    r"(^|(?<=[.!?])\s+)(?:"
+    + "|".join(
+        re.escape(phrase)
+        for phrases in _NEAR_VALID_COMPLETION_PHRASES.values()
+        for phrase in phrases
+    )
+    + r"):\s+",
+    re.IGNORECASE,
+)
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 _COMPLETE_STATEMENT_END = re.compile(r"[.!?](?:[\"'»”’)\]}]+)?$")
 _INTERNAL_FALLBACK_COPY = re.compile(
@@ -251,6 +289,10 @@ def _build_result_provenance(
     research_provenance: Optional[Mapping[str, Any]],
     source_urls: Optional[Iterable[str]],
     provider_error_type: Optional[str] = None,
+    framework: Optional[str] = None,
+    hook_style: Optional[str] = None,
+    variation_index: int = 0,
+    completion_phrases: Sequence[str] = (),
 ) -> dict[str, Any]:
     provenance: dict[str, Any] = {
         "source": source,
@@ -265,6 +307,16 @@ def _build_result_provenance(
     }
     if provider_error_type:
         provenance["provider_error_type"] = provider_error_type
+    if framework:
+        provenance["framework"] = " ".join(str(framework).split())
+    if hook_style:
+        provenance["hook_style"] = " ".join(str(hook_style).split())
+    provenance["variation_index"] = max(0, int(variation_index))
+    if completion_phrases:
+        provenance["completion_words_added"] = sum(
+            script_word_count(phrase) for phrase in completion_phrases
+        )
+        provenance["completion_phrases"] = list(completion_phrases)
     return provenance
 
 
@@ -277,6 +329,9 @@ def build_semantic_script_prompt(
     requested_duration_seconds: int,
     language: str = "Deutsch",
     actor_context: Optional[str] = None,
+    framework: Optional[str] = None,
+    hook_style: Optional[str] = None,
+    variation_index: int = 0,
     maximum_seconds: Optional[int] = None,
 ) -> str:
     """Render one of three generic family prompts with a canonical duration contract."""
@@ -336,6 +391,9 @@ def build_semantic_script_prompt(
         actor_context=(
             " ".join(str(actor_context or "").split()) or "Keine zusätzliche Vorgabe."
         ),
+        framework=" ".join(str(framework or "").split()) or "frei gewählt",
+        hook_style=" ".join(str(hook_style or "").split()) or "frei gewählt",
+        variation_index=max(0, int(variation_index)),
     )
 
 
@@ -352,37 +410,48 @@ def _strip_response_wrappers(raw_text: Any) -> str:
     return " ".join(text.split())
 
 
+def _select_completion_phrase(
+    *,
+    word_count: int,
+    variation_key: str,
+    variation_index: int,
+    beat_index: int,
+    used_phrases: set[str],
+) -> str:
+    phrases = _NEAR_VALID_COMPLETION_PHRASES[word_count]
+    digest = hashlib.sha256(
+        f"{variation_key}|{word_count}|{beat_index}".encode("utf-8")
+    ).digest()
+    offset = (
+        int.from_bytes(digest[:4], "big") + max(0, int(variation_index))
+    ) % len(phrases)
+    ordered = (*phrases[offset:], *phrases[:offset])
+    for phrase in ordered:
+        if phrase not in used_phrases:
+            return phrase
+    return ordered[0]
+
+
 def _pad_near_valid_generated_script(
     script: str,
     *,
     contract: SemanticDurationContract,
     topic_title: str,
     post_type: str,
-) -> str:
+    variation_key: str = "",
+    variation_index: int = 0,
+) -> tuple[str, tuple[str, ...]]:
     """Close a small provider word-count miss without replacing the selected topic."""
     cleaned = _strip_response_wrappers(script)
     current_word_count = script_word_count(cleaned)
     if current_word_count >= contract.minimum_words:
-        return cleaned
-    target_words_per_take = min(
-        SAFE_WORDS_PER_TAKE,
-        max(
-            _MINIMUM_COHERENT_WORDS_PER_TAKE,
-            (
-                contract.minimum_words + contract.minimum_take_count - 1
-            )
-            // contract.minimum_take_count,
-        ),
-    )
-    missing_words = (
-        target_words_per_take * contract.minimum_take_count
-        - current_word_count
-    )
-    if missing_words < 2 or missing_words > contract.minimum_take_count * 4:
-        return cleaned
+        return cleaned, ()
+    missing_words = contract.minimum_words - current_word_count
+    if missing_words < 1 or missing_words > 4:
+        return cleaned, ()
     beats = plan_editorial_beats(cleaned)
     if len(beats) != contract.minimum_take_count:
-        return cleaned
+        return cleaned, ()
     try:
         validate_semantic_script_audience_copy(
             cleaned,
@@ -390,33 +459,29 @@ def _pad_near_valid_generated_script(
             post_type=post_type,
         )
     except ValueError:
-        return cleaned
+        return cleaned, ()
 
     padded_beats = [beat.text for beat in beats]
-    remaining = missing_words
+    added_phrases: list[str] = []
+    addition_count = 3 if missing_words == 1 else missing_words
     for index, beat in enumerate(beats):
-        if remaining <= 0:
-            break
         headroom = SAFE_WORDS_PER_TAKE - script_word_count(beat.text)
-        if remaining % 4 == 1 and remaining >= 5:
-            preferred_count = 3
-        else:
-            preferred_count = min(4, remaining)
-        addition_count = min(preferred_count, headroom)
-        if remaining - addition_count == 1 and addition_count > 2:
-            addition_count -= 1
-        if addition_count < 2:
+        if headroom < addition_count:
             continue
-        phrase = _NEAR_VALID_PADDING_PHRASES[addition_count]
-        match = re.search(r"([.!?][\"'»”’)\]}]*)$", beat.text)
-        if not match:
-            return cleaned
-        padded_beats[index] = (
-            f"{beat.text[:match.start()].rstrip()} {phrase}{match.group(1)}"
+        phrase = _select_completion_phrase(
+            word_count=addition_count,
+            variation_key=variation_key,
+            variation_index=variation_index,
+            beat_index=index,
+            used_phrases=set(),
         )
-        remaining -= addition_count
-    if remaining:
-        return cleaned
+        if not _COMPLETE_STATEMENT_END.search(beat.text):
+            return cleaned, ()
+        padded_beats[index] = f"{phrase[0].upper()}{phrase[1:]}: {beat.text}"
+        added_phrases.append(phrase)
+        break
+    if not added_phrases:
+        return cleaned, ()
     padded = " ".join(padded_beats)
     try:
         validate_semantic_script(
@@ -430,8 +495,8 @@ def _pad_near_valid_generated_script(
             post_type=post_type,
         )
     except ValueError:
-        return cleaned
-    return padded
+        return cleaned, ()
+    return padded, tuple(added_phrases)
 
 
 def _build_semantic_repair_prompt(
@@ -718,7 +783,10 @@ def validate_semantic_script_audience_copy(
             "Semantic UGC script contains internal fallback copy and is not audience-safe: "
             f"{match.group(0)!r}."
         )
-    scaffold_match = _AUDIENCE_COPY_SCAFFOLDING.search(cleaned)
+    scaffold_source = _COMPLETION_LEADIN_PATTERN.sub(
+        lambda match: match.group(1), cleaned
+    )
+    scaffold_match = _AUDIENCE_COPY_SCAFFOLDING.search(scaffold_source)
     if scaffold_match:
         raise ValueError(
             "Semantic UGC script contains recovery scaffolding instead of audience copy: "
@@ -1787,6 +1855,10 @@ def generate_semantic_script(
     llm_client: Optional[Any] = None,
     language: str = "Deutsch",
     actor_context: Optional[str] = None,
+    framework: Optional[str] = None,
+    hook_style: Optional[str] = None,
+    variation_key: Optional[str] = None,
+    variation_index: int = 0,
     maximum_seconds: Optional[int] = None,
     research_provenance: Optional[Mapping[str, Any]] = None,
     source_urls: Optional[Iterable[str]] = None,
@@ -1856,6 +1928,9 @@ def generate_semantic_script(
         requested_duration_seconds=requested_duration_seconds,
         language=language,
         actor_context=actor_context,
+        framework=framework,
+        hook_style=hook_style,
+        variation_index=variation_index,
         maximum_seconds=contract.maximum_duration_seconds,
     )
 
@@ -1888,12 +1963,13 @@ def generate_semantic_script(
             ),
         )
 
-    script = _strip_response_wrappers(raw_text)
-    script = _pad_near_valid_generated_script(
-        script,
+    script, completion_phrases = _pad_near_valid_generated_script(
+        _strip_response_wrappers(raw_text),
         contract=contract,
         topic_title=title,
         post_type=normalized_post_type,
+        variation_key=str(variation_key or ""),
+        variation_index=variation_index,
     )
     source = "gemini"
     try:
@@ -1941,12 +2017,13 @@ def generate_semantic_script(
                     provider_error_type=type(exc).__name__,
                 ),
             )
-        repaired_script = _strip_response_wrappers(repaired_raw_text)
-        repaired_script = _pad_near_valid_generated_script(
-            repaired_script,
+        repaired_script, repaired_completion_phrases = _pad_near_valid_generated_script(
+            _strip_response_wrappers(repaired_raw_text),
             contract=contract,
             topic_title=title,
             post_type=normalized_post_type,
+            variation_key=str(variation_key or ""),
+            variation_index=variation_index,
         )
         try:
             validate_semantic_script(
@@ -1992,12 +2069,13 @@ def generate_semantic_script(
                         provider_error_type=type(exc).__name__,
                     ),
                 )
-            recovery_script = _strip_response_wrappers(recovery_raw_text)
-            recovery_script = _pad_near_valid_generated_script(
-                recovery_script,
+            recovery_script, recovery_completion_phrases = _pad_near_valid_generated_script(
+                _strip_response_wrappers(recovery_raw_text),
                 contract=contract,
                 topic_title=title,
                 post_type=normalized_post_type,
+                variation_key=str(variation_key or ""),
+                variation_index=variation_index,
             )
             try:
                 validate_semantic_script(
@@ -2047,14 +2125,13 @@ def generate_semantic_script(
                                 provider_error_type=type(exc).__name__,
                             ),
                         )
-                    final_repair_script = _strip_response_wrappers(
-                        final_repair_raw_text
-                    )
-                    final_repair_script = _pad_near_valid_generated_script(
-                        final_repair_script,
+                    final_repair_script, final_completion_phrases = _pad_near_valid_generated_script(
+                        _strip_response_wrappers(final_repair_raw_text),
                         contract=contract,
                         topic_title=title,
                         post_type=normalized_post_type,
+                        variation_key=str(variation_key or ""),
+                        variation_index=variation_index,
                     )
                     try:
                         validate_semantic_script(
@@ -2073,6 +2150,7 @@ def generate_semantic_script(
                         continue
                     script = final_repair_script
                     source = "gemini_repair"
+                    completion_phrases = final_completion_phrases
                     break
                 else:
                     script, source = _build_ranked_fallback_script(
@@ -2083,12 +2161,15 @@ def generate_semantic_script(
                         recovery_facts=recovery_fact_values,
                         contract=contract,
                     )
+                    completion_phrases = ()
             else:
                 script = recovery_script
                 source = "gemini_recovery"
+                completion_phrases = recovery_completion_phrases
         else:
             script = repaired_script
             source = "gemini_repair"
+            completion_phrases = repaired_completion_phrases
     return SemanticScriptResult(
         script=script,
         contract_hash=contract.contract_hash,
@@ -2097,6 +2178,10 @@ def generate_semantic_script(
             post_type=normalized_post_type,
             research_provenance=research_provenance,
             source_urls=source_urls,
+            framework=framework,
+            hook_style=hook_style,
+            variation_index=variation_index,
+            completion_phrases=completion_phrases,
         ),
     )
 

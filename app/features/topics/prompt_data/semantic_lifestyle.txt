@@ -7,6 +7,13 @@ THEMA: {title}
 CTA-VORGABE: {cta}
 ACTOR-KONTEXT: {actor_context}
 
+WEICHE KREATIVE RICHTUNG:
+- Framework: {framework}
+- Hook-Stil: {hook_style}
+- Variationsslot: {variation_index}
+Nutze diese Richtung nur für Einstieg, Perspektive und Rhythmus. Fakten, Dauer und Natürlichkeit haben Vorrang.
+- Verbinde zwei vollständige Hauptsätze nie nur mit einem Komma; nutze Punkt, Semikolon oder eine passende Konjunktion.
+
 FAKTEN:
 {facts}
 

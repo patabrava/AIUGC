@@ -615,9 +615,84 @@ def test_near_valid_provider_script_is_padded_without_family_recovery():
         result.script,
         requested_duration_seconds=32,
     )
-    assert validation.word_count == 64
+    assert validation.minimum_words <= validation.word_count <= validation.minimum_words + 2
     assert result.provenance["source"] == "gemini"
+    assert result.provenance["completion_words_added"] <= 3
+    assert "in deinem Alltag" not in result.script
+    assert "in deinem konkreten Alltag" not in result.script
+    assert "für dich" not in result.provenance["completion_phrases"]
     assert client.calls == 1
+
+
+@pytest.mark.parametrize(
+    ("post_type", "recovery_source"),
+    [
+        ("value", VALUE_RECOVERY_SOURCE),
+        ("lifestyle", LIFESTYLE_RECOVERY_SOURCE),
+        ("product", PRODUCT_RECOVERY_SOURCE),
+    ],
+)
+def test_near_valid_completion_rotates_without_extra_provider_calls(
+    post_type,
+    recovery_source,
+):
+    near_valid_script = " ".join(_sentence(index, 15) for index in range(4))
+    completions = []
+
+    class _NearValidLLM:
+        def __init__(self):
+            self.calls = 0
+
+        def generate_gemini_text(self, **_kwargs):
+            self.calls += 1
+            return near_valid_script
+
+    for variation_index in range(7):
+        client = _NearValidLLM()
+        result = generate_semantic_script(
+            post_type=post_type,
+            title="Spontane Wege mit verlässlichem Plan B",
+            cta="Speichere dir den Hinweis.",
+            facts=["Ein vorab geprüfter Plan B verhindert unnötige Umwege."],
+            recovery_facts=[recovery_source],
+            requested_duration_seconds=32,
+            llm_client=client,
+            framework="Testimonial",
+            hook_style="persönliche Beobachtung",
+            variation_key="stable-family",
+            variation_index=variation_index,
+        )
+        assert client.calls == 1
+        assert result.provenance["framework"] == "Testimonial"
+        assert result.provenance["hook_style"] == "persönliche Beobachtung"
+        assert len(result.provenance["completion_phrases"]) == 1
+        assert all(
+            f"{phrase[0].upper()}{phrase[1:]}:" in result.script
+            for phrase in result.provenance["completion_phrases"]
+        )
+        completions.append(tuple(result.provenance["completion_phrases"]))
+
+    assert len(set(completions)) == 7
+
+
+def test_prompt_carries_existing_creative_metadata_as_soft_direction():
+    prompt = build_semantic_script_prompt(
+        post_type="value",
+        title="Defekte Aufzüge früh erkennen",
+        cta="Prüfe deine Route vor der Abfahrt.",
+        facts=["Live-Meldungen zeigen bekannte Aufzugstörungen vor Reisebeginn."],
+        requested_duration_seconds=16,
+        framework="PAL",
+        hook_style="Mythos und Faktenkonflikt",
+        variation_index=3,
+    )
+
+    assert "WEICHE KREATIVE RICHTUNG" in prompt
+    assert "Framework: PAL" in prompt
+    assert "Hook-Stil: Mythos und Faktenkonflikt" in prompt
+    assert "Variationsslot: 3" in prompt
+    assert "Fakten, Dauer und Natürlichkeit haben Vorrang" in prompt
+    assert "zwei vollständige Hauptsätze nie nur mit einem Komma" in prompt
 
 
 @pytest.mark.parametrize(
