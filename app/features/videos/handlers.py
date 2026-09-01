@@ -1394,7 +1394,10 @@ def _extended_action_without_embedded_dialogue(action: Optional[str], script: st
     if not cleaned:
         return None
     lowered = cleaned.lower()
-    if "she says" in lowered or "dialogue:" in lowered:
+    # "she says" is the marker the pre-2026 action default used. Stored prompts still
+    # carry it, so keep matching it alongside the actor-neutral phrasing.
+    embedded_dialogue_markers = ("the actor says", "she says", "he says", "dialogue:")
+    if any(marker in lowered for marker in embedded_dialogue_markers):
         return None
     script_words = [word for word in str(script or "").split() if word]
     if len(script_words) >= 8:

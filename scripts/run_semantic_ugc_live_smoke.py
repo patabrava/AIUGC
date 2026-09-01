@@ -37,14 +37,15 @@ ABSOLUTE_BUDGET_CAP_USD = Decimal("17.70")
 DEFAULT_SEED = 240712
 MANIFEST_NAME = "manifest.json"
 PROMPT_TEMPLATE = (
-    "Treat the supplied first frame as the sole visual truth. Keep the same adult woman's "
+    "Treat the supplied first frame as the sole visual truth. Keep the same adult actor's "
     "identity and hair, cream knit sweater, room, posture, camera position, and framing exactly "
     "as shown. Continue as restrained, natural phone-camera AI UGC with a subtle conversational "
     "expression, subtle blinking, minimal head movement, and no polished commercial performance. "
-    "Use a warm adult German female voice, speaking native German with natural conversational "
-    "pacing and close smartphone microphone sound. She says exactly this German beat once: "
+    "Use a warm adult German voice matching the person visible in the first frame, speaking native "
+    "German with natural conversational "
+    "pacing and close smartphone microphone sound. The actor says exactly this German beat once: "
     "“{beat}” Do not speak any other words or any English. After the final word, naturally stop "
-    "speaking, close her mouth, and keep quiet eye contact. Do not freeze or perform an artificial "
+    "speaking, close the mouth, and keep quiet eye contact. Do not freeze or perform an artificial "
     "end pose. Keep every frame completely free of on-screen text: no captions, subtitles, logos, "
     "watermarks, letters, symbols, or gibberish glyphs."
 )

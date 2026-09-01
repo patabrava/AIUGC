@@ -58,14 +58,14 @@ EXTENDED_CONTINUATION_AUDIO_BLOCK = (
 )
 
 STANDARD_FINAL_ENDING_DIRECTIVE = (
-    "After the final spoken word, speech stops completely. She does not begin a new word or "
-    "syllable. Her mouth comes to rest, she holds a gentle smile, and remains still for a brief "
+    "After the final spoken word, speech stops completely. The actor does not begin a new word or "
+    "syllable. The mouth comes to rest, the actor holds a gentle smile, and remains still for a brief "
     "moment before the clip ends."
 )
 
 EXTENDED_FINAL_ENDING_DIRECTIVE = (
-    "After the final spoken word, speech stops completely. She does not begin a new word or "
-    "syllable. Her mouth closes and comes fully to rest, she holds a gentle smile, and remains "
+    "After the final spoken word, speech stops completely. The actor does not begin a new word or "
+    "syllable. The mouth closes and comes fully to rest, the actor holds a gentle smile, and remains "
     "still for a brief moment before the clip ends."
 )
 
@@ -156,11 +156,11 @@ LEAN_LIGHT_BASE_PROMPT_TEMPLATE = (
     "Scene:\n"
     "{scene}\n\n"
     "Action:\n"
-    "Use the submitted approved matched reference images as the visual source for the same woman, wardrobe, "
+    "Use the submitted approved matched reference images as the visual source for the same person, wardrobe, "
     "wheelchair framing, and room layout. Preserve the same face, facial proportions, skin texture, hair identity, "
     "age, cream sweater, neutral trousers, room anchors, and lighting from the reference images while following the "
     "Scene block exactly. "
-    "The woman remains seated and speaks directly to camera in one continuous natural smartphone "
+    "The actor remains seated and speaks directly to camera in one continuous natural smartphone "
     "take. Do not invent a new face, hairstyle, or age. Use small natural hand gestures and subtle "
     "upper-body nods while speaking.\n\n"
     "Language:\n"
@@ -181,11 +181,11 @@ REFERENCE_SCENE_BASE_PROMPT_TEMPLATE = (
     "Scene:\n"
     "{scene}\n\n"
     "Action:\n"
-    "Use the submitted approved matched reference images as the visual source for the same woman, wardrobe, "
+    "Use the submitted approved matched reference images as the visual source for the same person, wardrobe, "
     "wheelchair framing, and room layout. Preserve the same face, facial proportions, skin texture, hair identity, "
     "age, cream sweater, neutral trousers, room anchors, and lighting from the reference images while following the "
     "Scene block exactly. "
-    "The woman remains seated and speaks directly to camera in one continuous natural smartphone "
+    "The actor remains seated and speaks directly to camera in one continuous natural smartphone "
     "take. Do not invent a new face, hairstyle, or age. Use small natural hand gestures and subtle "
     "upper-body nods while speaking.{anchor_motion_direction}\n\n"
     "Cinematography:\n"
@@ -200,7 +200,7 @@ REFERENCE_SCENE_BASE_PROMPT_TEMPLATE = (
 
 LEAN_LIGHT_CONTINUATION_PROMPT_TEMPLATE = (
     "Action:\n"
-    "Continue from the previous generated segment with the same referenced woman, same wheelchair "
+    "Continue from the previous generated segment with the same referenced actor, same wheelchair "
     "setup, same room, same wardrobe, same lighting, same camera position, and same speaking rhythm. "
     "Do not redesign the person or the environment. Continue as one seamless smartphone take.\n\n"
     "Language:\n"
@@ -251,7 +251,7 @@ MID_EXTENSION_CONTINUITY = (
 )
 
 SEGMENTED_I2V_CONTINUITY = (
-    "Continue from the supplied first frame as the same seated woman in the same room, wardrobe, "
+    "Continue from the supplied first frame as the same seated actor in the same room, wardrobe, "
     "lighting, same camera distance, and same medium vertical smartphone composition. Maintain the "
     "established body scale, seated posture, table position, window position, face, hair, and clothing. "
     "Deliver the dialogue with small natural mouth movement, subtle head movement, and restrained hand "
@@ -260,7 +260,7 @@ SEGMENTED_I2V_CONTINUITY = (
 
 SEGMENTED_I2V_NON_FINAL_ENDING_DIRECTIVE = (
     "Finish this take's dialogue cleanly before the clip ends. Do not start the next word or "
-    "syllable. Her mouth closes fully, her face rests naturally, and she holds a brief listening "
+    "syllable. The mouth closes fully, the face rests naturally, and the actor holds a brief listening "
     "expression so the next cut can land cleanly."
 )
 
@@ -290,6 +290,10 @@ LEAN_FINAL_AUDIO_BLOCK = (
     "Let the room tone settle briefly after the final word."
 )
 
+# These three are written character definitions, not leaked assumptions about whoever
+# the batch actor happens to be: they describe a persona for prompts that have no
+# reference images, and _resolve_character_value compares stored prompts against them
+# to detect an untouched default. Reference-driven copy names no gender; these do.
 DEFAULT_CHARACTER = (
     "38-year-old German woman with shoulder-length light brown hair with subtle blonde "
     "highlights, softly layered and resting around the shoulders; hazel almond-shaped eyes; "
@@ -470,8 +474,8 @@ def _get_prompt_contract(prompt_mode: str) -> Dict[str, str]:
     if prompt_mode == "extended_base_or_continuation":
         return {
             "action_direction": (
-                "Seated in a wheelchair, she delivers the line directly to camera in one continuous "
-                "take. She speaks with brisk but natural pacing, clear articulation, and no dramatic "
+                "Seated in a wheelchair, the actor delivers the line directly to camera in one continuous "
+                "take, speaking with brisk but natural pacing, clear articulation, and no dramatic "
                 "pauses, using small natural hand gestures and subtle upper-body nods while speaking."
             ),
             "audio_block": EXTENDED_CONTINUATION_AUDIO_BLOCK,
@@ -480,8 +484,8 @@ def _get_prompt_contract(prompt_mode: str) -> Dict[str, str]:
     if prompt_mode == "extended_final":
         return {
             "action_direction": (
-                "Seated in a wheelchair, she delivers the line directly to camera in one continuous "
-                "take. She speaks with brisk but natural pacing, clear articulation, and controlled "
+                "Seated in a wheelchair, the actor delivers the line directly to camera in one continuous "
+                "take, speaking with brisk but natural pacing, clear articulation, and controlled "
                 "energy, using small natural hand gestures and subtle upper-body nods while speaking."
             ),
             "audio_block": STANDARD_FINAL_AUDIO_BLOCK,
@@ -489,8 +493,8 @@ def _get_prompt_contract(prompt_mode: str) -> Dict[str, str]:
         }
     return {
         "action_direction": (
-            "Seated in a wheelchair, she delivers the line directly to camera in one continuous take. "
-            "She speaks at a natural conversational pace, using small natural hand gestures and subtle "
+            "Seated in a wheelchair, the actor delivers the line directly to camera in one continuous take, "
+            "speaking at a natural conversational pace, using small natural hand gestures and subtle "
             "upper-body nods while speaking."
         ),
         "audio_block": STANDARD_FINAL_AUDIO_BLOCK,
@@ -672,8 +676,8 @@ def build_video_prompt_from_seed(
             break
 
     action_value = (
-        "Seated in a wheelchair in the bedroom, she speaks directly to camera in one continuous "
-        "take. She speaks at a natural conversational pace, uses small natural hand gestures and "
+        "Seated in a wheelchair in the bedroom, the actor speaks directly to camera in one continuous "
+        "take, at a natural conversational pace, using small natural hand gestures and "
         "subtle upper-body nods while speaking, then holds a gentle smile and remains still briefly "
         "after the spoken line."
     )

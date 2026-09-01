@@ -18,7 +18,10 @@ from app.features.shot_frames.wheelchair_scene_plate import (
 )
 
 
-VISUAL_CONTRACT_VERSION = "semantic_visual_contract_v1"
+# v4 de-genders the seated framing contract so the actor's appearance is resolved
+# only from the immutable identity references. v1 described the original actress
+# literally, which fought the references whenever the batch actor changed.
+VISUAL_CONTRACT_VERSION = "semantic_visual_contract_v4"
 STANDING_VISUAL_CONTRACT_VERSION = "semantic_visual_contract_v3"
 DEFAULT_PRESENTATION_MODE = "wheelchair_seated"
 STANDING_PRESENTATION_MODE = "standing_presenter"

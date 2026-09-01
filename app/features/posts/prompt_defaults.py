@@ -13,6 +13,8 @@ DEFAULT_SCENE_BODY = (
 
 DEFAULT_SCENE = f"Scene: {DEFAULT_SCENE_BODY}"
 
+# Frozen historical text. It is compared against stored prompts to recognize legacy
+# batches, so its wording cannot be modernized without breaking that detection.
 LEGACY_SCENE = (
     "Scene: The woman is sitting on a wheelchair in a brightly lit modern bedroom with pink walls. "
     "Clean, minimal décor. Natural daylight streams through an unseen window camera-right, "

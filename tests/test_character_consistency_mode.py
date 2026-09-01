@@ -402,7 +402,7 @@ def test_character_consistency_prompt_treats_lora_scene_stills_as_visual_source(
     )
 
     assert "approved matched reference images" in prompt
-    assert "visual source for the same woman, wardrobe, wheelchair framing, and room layout" in prompt
+    assert "visual source for the same person, wardrobe, wheelchair framing, and room layout" in prompt
     assert "only as the woman identity source" not in prompt
     assert "canonical scene reference image" not in prompt
     assert "Home living room advice scene A" in prompt
@@ -600,7 +600,7 @@ def test_character_consistency_prompt_uses_lora_scene_stills_as_reference_roles(
     )
 
     assert "approved matched reference images" in prompt
-    assert "visual source for the same woman, wardrobe, wheelchair framing, and room layout" in prompt
+    assert "visual source for the same person, wardrobe, wheelchair framing, and room layout" in prompt
     assert "canonical scene reference image" not in prompt
     assert "Home living room advice scene A" in prompt
 

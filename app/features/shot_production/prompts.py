@@ -163,55 +163,25 @@ def build_veo_take_prompt(
     standing = bool(
         visual_contract and visual_contract.get("presentation_mode") == "standing_presenter"
     )
-    if not standing:
-        return "\n".join(
-            (
-                f"Cinematography: one continuous, unedited {beat.provider_duration_seconds}-second vertical "
-                "smartphone UGC take, animated from the supplied first frame. Raw unfiltered front-camera look "
-                "with modern smartphone HDR auto-tone, preserved natural skin texture, and deep depth of field.",
-                "Camera: handheld arm's-length front-camera framing at the source frame's exact angle and "
-                "composition, held by the woman herself. Her arm stays locked at one fixed length for the "
-                "entire take, so the phone holds a constant distance from her face: her head fills exactly "
-                "the same fraction of the frame in the first and final frames, and every background object "
-                "keeps exactly the same on-screen size from start to finish. Continuous low-amplitude "
-                "handheld micro-motion runs through the whole take: small irregular sideways drift, subtle "
-                "roll, faint breathing rise and fall, and occasional tiny wrist corrections. That motion is "
-                "sideways and rotational only, stays under two percent of frame width, and always drifts "
-                "back toward the source framing.",
-                f"Visual continuity: {_visual_contract_text(visual_contract)}",
-                "Subject motion: the seated woman speaks directly to the lens with accurate native-German lip and "
-                "jaw movement, a restrained conversational expression, irregular natural blinking, quiet breathing, "
-                "and minimal speech-coupled head movement. Her shoulders, torso, seated posture, and visible body "
-                "stay settled in place; the only movement in the frame beyond her speech is the handheld motion of "
-                "the phone itself. Her hands retain the exact visibility and relaxed resting positions established "
-                "by the source frame. She communicates through speech and facial expression while her hands remain "
-                "at rest.",
-                "Performance interpretation: the dialogue is spoken advice only. Every reference to hands, support, "
-                "wheelchair frames, doors, pulling, pushing, or movement remains speech content rather than a physical "
-                "cue. Both hands remain relaxed in their exact source-frame resting positions for the full take.",
-                f"Timing: she begins speaking promptly and delivers the dialogue once at a natural conversational pace, "
-                f"targeting the final spoken word around {final_word_target:.1f} seconds.",
-                "Cut-ready ending: after the final syllable, her speech articulation resolves naturally while she "
-                "remains conversationally engaged with the lens, as if the next sentence will follow immediately. "
-                "Preserve the same seated posture, shoulder position, gaze direction, subject scale, and resting "
-                "hand positions through the final frame, with her arm still at the same fixed length. Subtle "
-                "breathing, natural blinking, and the same unchanged handheld phone motion carry on through the "
-                "final frame. Maintain fluid living presence without a concluding gesture, completion "
-                "expression, or held end pose.",
-                f"Dialogue: “{dialogue}”",
-                "Audio: one warm adult female voice speaking native German with a natural conversational cadence and "
-                "consistent vocal identity. Clean close smartphone-microphone sound with quiet natural ambience "
-                "consistent with the source-frame location. The dialogue is the complete spoken performance.",
-            )
-        )
+    posture = "standing" if standing else "seated"
+    # The two presentation modes differ only in posture and in which spoken nouns must
+    # not be acted out, so they share one body of copy. They were duplicated branches
+    # until a de-gendering edit reached only one of them and left the other describing
+    # the wrong person mid-take.
+    spoken_cue_subjects = (
+        "chairs, sitting, wheelchairs, movement, or walking"
+        if standing
+        else "hands, support, wheelchair frames, doors, pulling, pushing, or movement"
+    )
     return "\n".join(
         (
             f"Cinematography: one continuous, unedited {beat.provider_duration_seconds}-second vertical "
             "smartphone UGC take, animated from the supplied first frame. Raw unfiltered front-camera look "
             "with modern smartphone HDR auto-tone, preserved natural skin texture, and deep depth of field.",
             "Camera: handheld arm's-length front-camera framing at the source frame's exact angle and "
-            "composition, held by the standing man himself. His arm stays locked at one fixed length for the "
-            f"entire take, so the phone holds a constant distance from his face: his head fills exactly "
+            f"composition, held by the {posture} actor rather than by a second person. The actor's arm stays "
+            "locked at one fixed length for the entire take, so the phone holds a constant distance from the "
+            "face: the head fills exactly "
             "the same fraction of the frame in the first and final frames, and every background object "
             "keeps exactly the same on-screen size from start to finish. Continuous low-amplitude "
             "handheld micro-motion runs through the whole take: small irregular sideways drift, subtle "
@@ -219,29 +189,32 @@ def build_veo_take_prompt(
             "sideways and rotational only, stays under two percent of frame width, and always drifts "
             "back toward the source framing.",
             f"Visual continuity: {_visual_contract_text(visual_contract)}",
-            "Subject motion: the standing man speaks directly to the lens with accurate native-German lip and "
+            f"Subject motion: the {posture} actor speaks directly to the lens with accurate native-German lip and "
             "jaw movement, a restrained conversational expression, irregular natural blinking, quiet breathing, "
-            "and minimal speech-coupled head movement. His shoulders, torso, standing posture, and visible body "
-            "stay settled in place; the only movement in the frame beyond his speech is the handheld motion of "
-            "the phone itself. His hands retain the exact visibility and relaxed resting positions established "
-            "by the source frame. He communicates through speech and facial expression while his hands remain "
-            "at rest.",
-            "Performance interpretation: the dialogue is spoken advice only. Every reference to chairs, sitting, "
-            "wheelchairs, movement, or walking "
-            "remains speech content rather than a physical "
+            f"and minimal speech-coupled head movement. The shoulders, torso, {posture} posture, and visible body "
+            "stay settled in place; the only movement in the frame beyond the speech is the handheld motion of "
+            "the phone itself. The hands retain the exact visibility and relaxed resting positions established "
+            "by the source frame. The actor communicates through speech and facial expression while the hands "
+            "remain at rest.",
+            "Performance interpretation: the dialogue is spoken advice only. Every reference to "
+            f"{spoken_cue_subjects} remains speech content rather than a physical "
             "cue. Both hands remain relaxed in their exact source-frame resting positions for the full take.",
-            f"Timing: he begins speaking promptly and delivers the dialogue once at a natural conversational pace, "
-            f"targeting the final spoken word around {final_word_target:.1f} seconds.",
-            "Cut-ready ending: after the final syllable, her speech articulation resolves naturally while she "
-            "remains conversationally engaged with the lens, as if the next sentence will follow immediately. "
-            "Preserve the same standing posture, shoulder position, gaze direction, subject scale, and resting "
-            "hand positions through the final frame, with his arm still at the same fixed length. Subtle "
+            "Timing: the actor begins speaking promptly and delivers the dialogue once at a natural "
+            f"conversational pace, targeting the final spoken word around {final_word_target:.1f} seconds.",
+            "Cut-ready ending: after the final syllable, the speech articulation resolves naturally while the "
+            "actor remains conversationally engaged with the lens, as if the next sentence will follow "
+            f"immediately. Preserve the same {posture} posture, shoulder position, gaze direction, subject "
+            "scale, and resting "
+            "hand positions through the final frame, with the arm still at the same fixed length. Subtle "
             "breathing, natural blinking, and the same unchanged handheld phone motion carry on through the "
             "final frame. Maintain fluid living presence without a concluding gesture, completion "
             "expression, or held end pose.",
             f"Dialogue: “{dialogue}”",
-            "Audio: one warm adult male voice speaking native German with a natural conversational cadence and "
-            "consistent vocal identity. Clean close smartphone-microphone sound with quiet natural ambience "
+            # The source frame already shows who is speaking. Naming a voice gender here
+            # would reintroduce the coupling that made presentation mode imply gender.
+            "Audio: one warm adult voice whose vocal character matches the person visible in the supplied "
+            "source frame, speaking native German with a natural conversational cadence and consistent vocal "
+            "identity. Clean close smartphone-microphone sound with quiet natural ambience "
             "consistent with the source-frame location. The dialogue is the complete spoken performance.",
         )
     )

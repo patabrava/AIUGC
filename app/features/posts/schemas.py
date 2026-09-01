@@ -26,7 +26,7 @@ class VideoPrompt(BaseModel):
         description="Character definition"
     )
     action: str = Field(
-        default="Action: Seated in a wheelchair in the bedroom, she speaks directly to camera in one continuous take. She speaks at a natural conversational pace, uses small natural hand gestures and subtle upper-body nods while speaking, then holds a gentle smile and remains still briefly at the end of the line. She says: ENTER SCRIPT FROM POST HERE",
+        default="Action: Seated in a wheelchair in the bedroom, the actor speaks directly to camera in one continuous take, at a natural conversational pace, using small natural hand gestures and subtle upper-body nods while speaking, then holds a gentle smile and remains still briefly at the end of the line. The actor says: ENTER SCRIPT FROM POST HERE",
         description="Action description"
     )
     style: str = Field(
@@ -42,7 +42,7 @@ class VideoPrompt(BaseModel):
         description="Cinematography notes"
     )
     lighting: str = Field(
-        default="Lighting: Bright, soft, diffuse frontal light  illuminating her face evenly. Soft shadows are visible behind her.",
+        default="Lighting: Bright, soft, diffuse frontal light  illuminating the actor's face evenly. Soft shadows are visible behind the actor.",
         description="Lighting description"
     )
     color_and_grade: str = Field(
