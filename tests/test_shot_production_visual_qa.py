@@ -131,6 +131,25 @@ def test_visual_qa_blocks_when_same_manual_wheelchair_is_not_visible_and_consist
     assert "cropped" in prompt
 
 
+def test_visual_qa_uses_standing_contract_without_requiring_a_wheelchair():
+    from app.features.shot_production.visual_qa import evaluate_visual_consistency
+
+    llm = _FakeLLM(_response())
+    report = evaluate_visual_consistency(
+        _image(b"approved-standing-master"),
+        _image(b"standing-contact-sheet", "image/jpeg"),
+        llm_client=llm,
+        presentation_mode="standing_presenter",
+    )
+
+    assert report.passed is True
+    prompt = llm.calls[0]["prompt"]
+    assert "standing-presenter" in prompt
+    assert "remain standing throughout" in prompt
+    assert "No wheelchair, mobility device, chair" in prompt
+    assert "legacy field name wheelchair_consistent" in prompt
+
+
 @pytest.mark.parametrize(
     "failed_component",
     [

@@ -9,10 +9,9 @@
     data-batch-state="{{ batch.state }}"
     {% if batch_view.should_poll_prompts or batch_view.should_poll_videos or batch_view.should_poll_publish %}
     hx-get="/batches/{{ batch.id }}"
-    hx-trigger="every 30s [document.visibilityState === 'visible']"
+    hx-trigger="every 15s"
     hx-swap="outerHTML"
     hx-select="#batch-detail-root"
-    hx-sync="this:drop"
     {% endif %}
     hx-on::before-request="if (window.batchDetailExpanded || window.isBatchDetailPlaybackActive?.() || window.isBlogPanelEditing?.()) { event.preventDefault(); }"
 >

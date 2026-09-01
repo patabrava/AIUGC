@@ -9,6 +9,7 @@ from time import sleep
 import pytest
 from PIL import Image, ImageDraw
 
+from app.core.errors import ValidationError
 from app.features.semantic_videos.visual_contract import SEMANTIC_WARDROBES
 from app.features.shot_frames.service import ShotFrameReference
 from app.features.shot_production.planner import EditorialBeat
@@ -1451,3 +1452,196 @@ def test_visual_contract_hash_changes_with_location_or_outfit_but_not_actor_refe
     assert original["contract_hash"] != changed["contract_hash"]
     assert "actor_references" not in original
     assert original["wheelchair_description"] == changed["wheelchair_description"]
+
+
+def test_standing_visual_contract_is_fenced_from_legacy_wheelchair_contract():
+    from app.features.semantic_videos.visual_contract import (
+        build_scene_plate_generation_contract,
+        build_visual_contract,
+        validate_visual_contract,
+    )
+
+    reference = {
+        "presentation_mode": "standing_presenter",
+        "scene_key": "home_office_advice_a",
+        "scene_description": "the exact supplied home office",
+        "wardrobe_key": "custom",
+        "wardrobe_description": "navy blazer over a plain white shirt",
+        "actor_references": [
+            {
+                "role": "actor_front",
+                "storage_uri": "https://cdn/front.png",
+                "mime_type": "image/png",
+                "byte_length": 5,
+                "sha256": "c" * 64,
+            }
+        ],
+        "location_reference": {
+            "role": "location",
+            "storage_uri": "https://cdn/home-office.png",
+            "sha256": "a" * 64,
+        },
+    }
+
+    standing = build_visual_contract(reference)
+    seated = build_visual_contract({**reference, "presentation_mode": "wheelchair_seated"})
+    standing_generation = build_scene_plate_generation_contract(
+        actor_reference_fingerprint="b" * 64,
+        presentation_mode="standing_presenter",
+    )
+    seated_generation = build_scene_plate_generation_contract(
+        actor_reference_fingerprint="b" * 64,
+    )
+
+    assert standing["version"] == "semantic_visual_contract_v3"
+    assert standing["presentation_mode"] == "standing_presenter"
+    assert standing["master_source_mode"] == "actor_front_passthrough"
+    assert standing["actor_front_sha256"] == "c" * 64
+    assert "wheelchair_description" not in standing
+    assert "stands upright" in standing["body_presentation_description"]
+    assert validate_visual_contract(standing) == standing
+    assert standing["contract_hash"] != seated["contract_hash"]
+    assert standing_generation["contract_hash"] != seated_generation["contract_hash"]
+    assert standing_generation["standing_prompt_contract_version"] == "standing-presenter-v3"
+    assert standing_generation["model"] == "actor-front-passthrough-v1"
+
+
+def test_standing_master_requires_exact_actor_front_uri_mime_length_and_hash():
+    from app.features.semantic_videos.handlers import _assert_scene_plate_master
+    from app.features.semantic_videos.visual_contract import (
+        SCENE_IDENTITY_COMPONENT_FIELDS,
+        build_actor_reference_fingerprint,
+        build_scene_plate_generation_contract,
+        build_visual_contract,
+    )
+
+    actor_front_bytes = b"sascha-front"
+    actor_front_hash = sha256(actor_front_bytes).hexdigest()
+    reference = {
+        "presentation_mode": "standing_presenter",
+        "scene_key": "home_office_advice_a",
+        "scene_description": "the exact supplied home office",
+        "wardrobe_key": "custom",
+        "wardrobe_description": "navy blazer over a plain white shirt",
+        "actor_references": [
+            {
+                "role": "actor_front",
+                "storage_uri": "https://cdn/sascha-front.jpg",
+                "mime_type": "image/jpeg",
+                "byte_length": len(actor_front_bytes),
+                "sha256": actor_front_hash,
+            },
+            {
+                "role": "actor_three_quarter",
+                "storage_uri": "https://cdn/sascha-support.png",
+                "mime_type": "image/png",
+                "byte_length": 7,
+                "sha256": sha256(b"support").hexdigest(),
+            },
+        ],
+        "location_reference": {
+            "role": "location",
+            "storage_uri": "https://cdn/location.png",
+            "mime_type": "image/png",
+            "byte_length": 8,
+            "sha256": "3" * 64,
+        },
+    }
+    fingerprint = build_actor_reference_fingerprint(reference["actor_references"])
+    generation = build_scene_plate_generation_contract(
+        actor_reference_fingerprint=fingerprint,
+        presentation_mode="standing_presenter",
+    )
+    visual = build_visual_contract(reference)
+    reference.update(
+        actor_reference_fingerprint=fingerprint,
+        scene_plate_generation_contract=generation,
+        visual_contract=visual,
+    )
+    master = {
+        **reference["actor_references"][0],
+        "index": 1,
+        "provider_model": generation["model"],
+        "visual_contract_hash": visual["contract_hash"],
+        "generation_contract_hash": generation["contract_hash"],
+        "actor_reference_fingerprint": fingerprint,
+        "identity_gate_result": {
+            "status": "passed",
+            "passed": True,
+            "confidence": 1.0,
+            "component_results": {
+                field: True for field in SCENE_IDENTITY_COMPONENT_FIELDS
+            },
+            "blocking_reasons": [],
+            "candidate_sha256": actor_front_hash,
+            "evaluated_actor_reference_fingerprint": fingerprint,
+            "evaluator_model": generation["identity_evaluator_model"],
+            "evaluator_contract_version": generation[
+                "identity_evaluator_contract_version"
+            ],
+            "evidence_mode": "actor_front_byte_identity",
+        },
+        "derivation_mode": "actor_front_passthrough",
+        "canonical_anchor_id": None,
+        "canonical_anchor_sha256": None,
+    }
+
+    _assert_scene_plate_master(
+        reference_snapshot=reference,
+        master_snapshot=master,
+    )
+    for field, changed in (
+        ("storage_uri", "https://cdn/copied.jpg"),
+        ("mime_type", "image/png"),
+        ("byte_length", len(actor_front_bytes) + 1),
+        ("sha256", "f" * 64),
+    ):
+        altered = {**master, field: changed}
+        with pytest.raises(ValidationError):
+            _assert_scene_plate_master(
+                reference_snapshot=reference,
+                master_snapshot=altered,
+            )
+
+
+def test_standing_scene_and_veo_prompts_forbid_wheelchairs_without_forbidding_standing():
+    from app.features.shot_frames.wheelchair_scene_plate import (
+        build_canonical_scene_plate_prompt,
+    )
+    from app.features.shot_production.prompts import (
+        STANDING_EFFECTIVE_NEGATIVE_PROMPT,
+        build_veo_take_prompt,
+    )
+
+    scene_prompt = build_canonical_scene_plate_prompt(
+        scene="the exact supplied home office",
+        wardrobe="navy blazer over a plain white shirt",
+        presentation_mode="standing_presenter",
+    )
+    contract = {
+        "presentation_mode": "standing_presenter",
+        "scene_description": "the exact supplied home office",
+        "wardrobe_description": "navy blazer over a plain white shirt",
+        "body_presentation_description": "the actor stands upright",
+        "framing_description": "tight standing chest-up selfie",
+    }
+    beat = EditorialBeat(
+        index=0,
+        text="Ich bin ein Deepfake. Doch diese Zahlen stammen aus dem echten Arbeitsalltag.",
+        word_count=12,
+        estimated_speech_seconds=6.0,
+        provider_duration_seconds=8,
+    )
+    veo_prompt = build_veo_take_prompt(beat, visual_contract=contract)
+
+    assert "same adult man" in scene_prompt
+    assert "stands upright" in scene_prompt
+    assert "wheelchair, mobility device, chair, seated pose" in scene_prompt
+    assert "eyeglasses are mandatory" in scene_prompt
+    assert "waist-up crop" in scene_prompt
+    assert "standing man speaks" in veo_prompt
+    assert "adult male voice" in veo_prompt
+    assert "same standing posture" in veo_prompt
+    assert "standing," not in STANDING_EFFECTIVE_NEGATIVE_PROMPT.lower()
+    assert "wheelchair" in STANDING_EFFECTIVE_NEGATIVE_PROMPT.lower()
+    assert "sitting" in STANDING_EFFECTIVE_NEGATIVE_PROMPT.lower()

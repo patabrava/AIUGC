@@ -17,6 +17,7 @@ from app.core.errors import FlowForgeException, SuccessResponse, ValidationError
 from app.core.logging import get_logger
 from app.core.video_profiles import (
     resolve_manual_target_length_tier,
+    script_word_count,
     validate_script_duration_contract,
 )
 from app.features.posts.prompt_builder import (
@@ -35,8 +36,10 @@ from app.features.characters.actor_identity import (
     is_semantic_ugc_mode,
 )
 from app.features.characters.scene_reference import get_scene_bible
+from app.features.shot_production.duration import build_semantic_duration_contract
 from app.features.shot_production.planner import plan_editorial_beats
 from app.features.topics.semantic_scripts import validate_semantic_script
+from app.features.semantic_videos.visual_contract import normalize_presentation_mode
 from app.features.posts.schemas import UpdatePromptRequest
 from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
 from app.core.states import BatchState
@@ -55,6 +58,7 @@ class UpdateScriptRequest(BaseModel):
     )
     semantic_scene_key: Optional[str] = Field(default=None, max_length=120)
     semantic_wardrobe_description: Optional[str] = Field(default=None, max_length=240)
+    semantic_presentation_mode: Optional[str] = Field(default=None, max_length=40)
 
 
 class UpdateScriptReviewRequest(BaseModel):
@@ -62,6 +66,7 @@ class UpdateScriptReviewRequest(BaseModel):
     action: str = Field(..., description="Review action: approved, removed, or reset")
     semantic_scene_key: Optional[str] = Field(default=None, max_length=120)
     semantic_wardrobe_description: Optional[str] = Field(default=None, max_length=240)
+    semantic_presentation_mode: Optional[str] = Field(default=None, max_length=40)
 
 
 def _parse_json_document(value):
@@ -265,6 +270,7 @@ def _apply_semantic_visual_overrides(
     *,
     submitted_scene_key: Optional[str],
     submitted_wardrobe_description: Optional[str],
+    submitted_presentation_mode: Optional[str],
 ) -> None:
     visual_changed = False
     if submitted_scene_key is not None:
@@ -297,9 +303,43 @@ def _apply_semantic_visual_overrides(
             seed_data.pop("semantic_wardrobe_description", None)
         visual_changed = True
 
+    if submitted_presentation_mode is not None:
+        presentation_mode = normalize_presentation_mode(submitted_presentation_mode)
+        if seed_data.get("semantic_presentation_mode") != presentation_mode:
+            seed_data["semantic_presentation_mode"] = presentation_mode
+            visual_changed = True
+
     if visual_changed:
         seed_data.pop("semantic_reference_snapshot", None)
         seed_data.pop("semantic_master_snapshot", None)
+
+
+def _semantic_duration_contract_message(
+    *,
+    script_text: str,
+    requested_duration_seconds: object,
+    error: Exception,
+) -> str:
+    """Name the concrete contract miss so the reviewer can fix the script."""
+    try:
+        contract = build_semantic_duration_contract(int(requested_duration_seconds))
+    except (TypeError, ValueError):
+        return (
+            "This batch has no valid Semantic UGC target duration, "
+            "so the script cannot be approved."
+        )
+
+    word_count = script_word_count(script_text)
+    if not contract.minimum_words <= word_count <= contract.maximum_words:
+        return (
+            f"This {contract.requested_duration_seconds}s script needs "
+            f"{contract.minimum_words}-{contract.maximum_words} words; "
+            f"it has {word_count}."
+        )
+    return (
+        f"This {contract.requested_duration_seconds}s script does not satisfy "
+        f"its duration contract. {error}"
+    )
 
 
 def _apply_script_text_update(
@@ -310,6 +350,7 @@ def _apply_script_text_update(
     submitted_post_type: Optional[str],
     submitted_semantic_scene_key: Optional[str] = None,
     submitted_semantic_wardrobe_description: Optional[str] = None,
+    submitted_semantic_presentation_mode: Optional[str] = None,
     supabase_client,
     require_valid_duration: bool = False,
     review_status: str = "pending",
@@ -339,6 +380,7 @@ def _apply_script_text_update(
             seed_data,
             submitted_scene_key=submitted_semantic_scene_key,
             submitted_wardrobe_description=submitted_semantic_wardrobe_description,
+            submitted_presentation_mode=submitted_semantic_presentation_mode,
         )
         requested_duration_seconds = (
             batch_settings.get("target_duration_seconds")
@@ -354,7 +396,11 @@ def _apply_script_text_update(
             seed_data.pop("semantic_planned_take_count", None)
             if require_valid_duration:
                 raise ValidationError(
-                    "Semantic UGC script does not satisfy its duration contract.",
+                    _semantic_duration_contract_message(
+                        script_text=script_text,
+                        requested_duration_seconds=requested_duration_seconds,
+                        error=exc,
+                    ),
                     {
                         "post_id": post.get("id"),
                         "target_duration_seconds": requested_duration_seconds,
@@ -591,6 +637,7 @@ async def update_post_script(post_id: str, request: Request):
             submitted_post_type = payload.post_type
             submitted_semantic_scene_key = payload.semantic_scene_key
             submitted_semantic_wardrobe_description = payload.semantic_wardrobe_description
+            submitted_semantic_presentation_mode = payload.semantic_presentation_mode
         else:
             form = await request.form()
             script_text = str(form.get("script_text", "")).strip()
@@ -609,6 +656,10 @@ async def update_post_script(post_id: str, request: Request):
             submitted_semantic_wardrobe_description = (
                 None if submitted_wardrobe_raw is None else str(submitted_wardrobe_raw)
             )
+            submitted_presentation_raw = form.get("semantic_presentation_mode", None)
+            submitted_semantic_presentation_mode = (
+                None if submitted_presentation_raw is None else str(submitted_presentation_raw)
+            )
         
         supabase = get_supabase().client
         
@@ -622,6 +673,7 @@ async def update_post_script(post_id: str, request: Request):
             submitted_semantic_wardrobe_description=(
                 submitted_semantic_wardrobe_description
             ),
+            submitted_semantic_presentation_mode=submitted_semantic_presentation_mode,
             supabase_client=supabase,
             require_valid_duration=False,
         )
@@ -662,6 +714,7 @@ def _update_post_script_review_sync(
     submitted_post_type: Optional[str],
     submitted_semantic_scene_key: Optional[str],
     submitted_semantic_wardrobe_description: Optional[str],
+    submitted_semantic_presentation_mode: Optional[str],
 ) -> SuccessResponse:
     """Execute the synchronous Supabase review transaction outside the ASGI loop."""
     supabase = get_supabase().client
@@ -679,6 +732,7 @@ def _update_post_script_review_sync(
                 submitted_semantic_wardrobe_description=(
                     submitted_semantic_wardrobe_description
                 ),
+                submitted_semantic_presentation_mode=submitted_semantic_presentation_mode,
                 supabase_client=supabase,
                 require_valid_duration=True,
                 review_status="approved",
@@ -736,12 +790,14 @@ async def update_post_script_review(post_id: str, request: Request):
         submitted_post_type = None
         submitted_semantic_scene_key = None
         submitted_semantic_wardrobe_description = None
+        submitted_semantic_presentation_mode = None
         if "application/json" in content_type:
             data = await request.json()
             payload = UpdateScriptReviewRequest.model_validate(data)
             action = payload.action
             submitted_semantic_scene_key = payload.semantic_scene_key
             submitted_semantic_wardrobe_description = payload.semantic_wardrobe_description
+            submitted_semantic_presentation_mode = payload.semantic_presentation_mode
         else:
             form = await request.form()
             action = str(form.get("action", "")).strip()
@@ -756,6 +812,10 @@ async def update_post_script_review(post_id: str, request: Request):
             submitted_wardrobe_raw = form.get("semantic_wardrobe_description", None)
             submitted_semantic_wardrobe_description = (
                 None if submitted_wardrobe_raw is None else str(submitted_wardrobe_raw)
+            )
+            submitted_presentation_raw = form.get("semantic_presentation_mode", None)
+            submitted_semantic_presentation_mode = (
+                None if submitted_presentation_raw is None else str(submitted_presentation_raw)
             )
 
         allowed_actions = {"approved", "removed", "reset"}
@@ -773,6 +833,7 @@ async def update_post_script_review(post_id: str, request: Request):
             submitted_post_type=submitted_post_type,
             submitted_semantic_scene_key=submitted_semantic_scene_key,
             submitted_semantic_wardrobe_description=submitted_semantic_wardrobe_description,
+            submitted_semantic_presentation_mode=submitted_semantic_presentation_mode,
         )
 
     except FlowForgeException:

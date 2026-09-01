@@ -158,7 +158,7 @@ class CandidateResponse(BaseModel):
     actor_reference_fingerprint: str
     generation_contract_hash: str
     identity_gate_result: dict[str, Any]
-    derivation_mode: Literal["bootstrap", "canonical_anchor"]
+    derivation_mode: Literal["bootstrap", "canonical_anchor", "actor_front_passthrough"]
     canonical_anchor_id: Optional[str] = None
     canonical_anchor_sha256: Optional[str] = None
     canonical_anchor_source_run_id: Optional[str] = None

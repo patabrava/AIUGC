@@ -206,6 +206,7 @@ class ProductionStageRunner:
     """Bridge persisted runs into the existing audited shot-production pipeline."""
 
     _MANIFEST_GLOBAL_KEYS = (
+        "presentation_mode",
         "contact_sheet",
         "actor_identity_qa",
         "scene_continuity_qa",
@@ -968,6 +969,15 @@ class ProductionStageRunner:
                 "mime_type": str(master.get("mime_type") or "image/png"),
             },
             "actor_references": actor_references,
+            "presentation_mode": str(
+                (
+                    reference_snapshot.get("visual_contract")
+                    if isinstance(reference_snapshot, Mapping)
+                    and isinstance(reference_snapshot.get("visual_contract"), Mapping)
+                    else {}
+                ).get("presentation_mode")
+                or "wheelchair_seated"
+            ),
             "script": manifest_script,
             "takes": manifest_takes,
         }

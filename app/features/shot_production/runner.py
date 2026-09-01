@@ -1495,11 +1495,14 @@ def run_visual_qa(
             else identity_minimum_confidence
         ),
     )
+    scene_kwargs = {"llm_client": llm_client, "model": scene_model}
+    presentation_mode = str(payload.get("presentation_mode") or "wheelchair_seated")
+    if presentation_mode != "wheelchair_seated":
+        scene_kwargs["presentation_mode"] = presentation_mode
     scene_report = scene_evaluator(
         {"mime_type": payload["approved_master"]["mime_type"], "image_bytes": master_path.read_bytes()},
         {"mime_type": "image/jpeg", "image_bytes": contact_path.read_bytes()},
-        llm_client=llm_client,
-        model=scene_model,
+        **scene_kwargs,
     )
     actor_payload = asdict(identity_report)
     scene_payload = asdict(scene_report)

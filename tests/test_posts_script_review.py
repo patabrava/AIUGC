@@ -4,6 +4,8 @@ import os
 from copy import deepcopy
 from pathlib import Path
 
+import pytest
+
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "test-key")
 os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
@@ -25,6 +27,24 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_REVIEW_MIGRATION = (
     ROOT / "supabase/migrations/20260812000000_atomic_script_review.sql"
 )
+
+
+def test_standing_presentation_override_invalidates_prior_visual_snapshots():
+    seed_data = {
+        "semantic_reference_snapshot": {"contract_hash": "old"},
+        "semantic_master_snapshot": {"sha256": "old"},
+    }
+
+    posts_handlers._apply_semantic_visual_overrides(
+        seed_data,
+        submitted_scene_key=None,
+        submitted_wardrobe_description=None,
+        submitted_presentation_mode="standing_presenter",
+    )
+
+    assert seed_data["semantic_presentation_mode"] == "standing_presenter"
+    assert "semantic_reference_snapshot" not in seed_data
+    assert "semantic_master_snapshot" not in seed_data
 
 
 class _FakeResponse:
@@ -486,6 +506,7 @@ def test_approve_manual_semantic_script_persists_scene_and_outfit_overrides(monk
             "post_type": "value",
             "semantic_scene_key": "garden_patio_a",
             "semantic_wardrobe_description": "navy cotton blouse with a round neckline",
+            "semantic_presentation_mode": "standing_presenter",
         },
     )
 
@@ -498,6 +519,7 @@ def test_approve_manual_semantic_script_persists_scene_and_outfit_overrides(monk
     assert seed_data["semantic_wardrobe_description"] == (
         "navy cotton blouse with a round neckline"
     )
+    assert seed_data["semantic_presentation_mode"] == "standing_presenter"
     assert seed_data["semantic_planned_take_count"] == 2
 
 
@@ -535,6 +557,141 @@ def test_manual_semantic_script_rejects_unknown_scene_override(monkeypatch):
 
     assert response.status_code == 422, response.text
     assert storage["posts"][0]["seed_data"]["script"] == "old"
+
+
+def _manual_semantic_storage(post_id: str, seconds: int) -> dict:
+    return {
+        "posts": [
+            {
+                "id": post_id,
+                "batch_id": f"batch-semantic-{seconds}s",
+                "post_type": "value",
+                "seed_data": {
+                    "manual_draft": True,
+                    "script": "",
+                    "script_review_status": "pending",
+                },
+                "video_prompt_json": None,
+                "video_status": "pending",
+            }
+        ],
+        "batches": [
+            {
+                "id": f"batch-semantic-{seconds}s",
+                "state": "S2_SEEDED",
+                "creation_mode": "manual_semantic_ugc",
+                "target_length_tier": None,
+                "target_duration_seconds": seconds,
+            }
+        ],
+    }
+
+
+def test_short_eight_second_semantic_script_names_the_word_envelope_miss(monkeypatch):
+    storage = _manual_semantic_storage("post-semantic-8s-short", 8)
+    monkeypatch.setattr(posts_handlers, "get_supabase", lambda: _FakeSupabase(storage))
+
+    response = TestClient(app, base_url="http://localhost").put(
+        "/posts/post-semantic-8s-short/script-review",
+        data={
+            "action": "approved",
+            "script_text": (
+                "Hey, kauft Lippe sofort. Es ist der beste Treppenlift auf der Welt."
+            ),
+            "post_type": "value",
+        },
+    )
+
+    assert response.status_code == 422, response.text
+    # The reviewer must learn what to change, not just that a contract failed.
+    assert response.json()["message"] == (
+        "This 8s script needs 14-18 words; it has 12."
+    )
+    assert storage["posts"][0]["seed_data"]["script_review_status"] == "pending"
+
+
+def test_eight_second_semantic_script_inside_word_envelope_is_approved(monkeypatch):
+    script = (
+        "Lippe baut den besten Treppenlift der Welt und bringt dich jeden Tag "
+        "sicher nach oben."
+    )
+    storage = _manual_semantic_storage("post-semantic-8s-valid", 8)
+    monkeypatch.setattr(posts_handlers, "get_supabase", lambda: _FakeSupabase(storage))
+
+    response = TestClient(app, base_url="http://localhost").put(
+        "/posts/post-semantic-8s-valid/script-review",
+        data={"action": "approved", "script_text": script, "post_type": "value"},
+    )
+
+    assert response.status_code == 200, response.text
+    seed_data = storage["posts"][0]["seed_data"]
+    assert seed_data["script_review_status"] == "approved"
+    assert seed_data["semantic_script_word_count"] == 15
+    assert seed_data["semantic_planned_take_count"] == 1
+    assert seed_data["semantic_duration_contract"]["requested_duration_seconds"] == 8
+
+
+def _planner_safe_manual_script(seconds: int) -> str:
+    sentence_banks = [
+        "Geprüfte Aufzugsmeldungen zeigen früh verlässliche Alternativen für spontane Termine ohne unnötige Wartezeit und hektische Rückwege heute deutlich",
+        "Breite Wendeflächen erleichtern sichere Richtungswechsel im engen Eingangsbereich und bewahren täglich wertvolle Kraft bei jedem Besuch zuverlässig",
+        "Aktuelle Baustellenhinweise verhindern überraschende Sperrungen während wichtiger Fahrten und nennen erreichbare Ersatzrouten rechtzeitig vor der Abreise klar",
+        "Gespeicherte Ansprechpartner organisieren passende Unterstützung direkt sobald technische Störungen auftreten oder fremde Hilfe kurzfristig notwendig wird unkompliziert",
+        "Niedrige Bedienelemente ermöglichen selbstständige Nutzung zuhause weil Tasten bequem erreichbar bleiben und klare Symbole jeden Schritt verständlich begleiten",
+        "Rutschfeste Bodenflächen geben dem Rollstuhl stabilen Halt beim Einsteigen und senken das Risiko gefährlicher Bewegungen auf nassen Wegen",
+        "Regelmäßige Wartung erhält die zuverlässige Funktion langfristig erkennt Verschleiß früh und schützt geplante Abläufe vor vermeidbaren Ausfällen wirksam",
+        "Früh gebuchte Mobilitätshilfen sichern ruhige Bahnreisen nennen eindeutige Treffpunkte und vermeiden belastende Suche auf unbekannten Bahnsteigen zuverlässig",
+    ]
+    contract = posts_handlers.build_semantic_duration_contract(seconds)
+    base_words, extra_words = divmod(
+        contract.minimum_words,
+        contract.minimum_take_count,
+    )
+    counts = [
+        base_words + (1 if index < extra_words else 0)
+        for index in range(contract.minimum_take_count)
+    ]
+    return " ".join(
+        f"{' '.join(sentence_banks[index].split()[:word_count])}."
+        for index, word_count in enumerate(counts)
+    )
+
+
+@pytest.mark.parametrize("seconds", range(8, 61))
+def test_manual_semantic_script_approval_accepts_every_supported_duration(
+    monkeypatch,
+    seconds,
+):
+    post_id = f"post-semantic-{seconds}s-valid"
+    storage = _manual_semantic_storage(post_id, seconds)
+    monkeypatch.setattr(posts_handlers, "get_supabase", lambda: _FakeSupabase(storage))
+    script = _planner_safe_manual_script(seconds)
+
+    response = TestClient(app, base_url="http://localhost").put(
+        f"/posts/{post_id}/script-review",
+        data={"action": "approved", "script_text": script, "post_type": "value"},
+    )
+
+    assert response.status_code == 200, response.text
+    seed_data = storage["posts"][0]["seed_data"]
+    contract = posts_handlers.build_semantic_duration_contract(seconds)
+    assert seed_data["script_review_status"] == "approved"
+    assert seed_data["semantic_script_word_count"] == contract.minimum_words
+    assert seed_data["semantic_planned_take_count"] == contract.minimum_take_count
+    assert seed_data["semantic_duration_contract"]["requested_duration_seconds"] == seconds
+
+
+def test_semantic_contract_message_reports_missing_batch_duration():
+    message = posts_handlers._semantic_duration_contract_message(
+        script_text="Ein Satz ohne gültige Batch-Dauer.",
+        requested_duration_seconds=None,
+        error=TypeError("int() argument must be a string"),
+    )
+
+    assert message == (
+        "This batch has no valid Semantic UGC target duration, "
+        "so the script cannot be approved."
+    )
 
 
 def test_update_prompt_bootstraps_from_seed_when_prompt_row_missing(monkeypatch):

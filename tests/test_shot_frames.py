@@ -35,6 +35,33 @@ def _reference(role: str, payload: bytes, mime_type: str = "image/png"):
     return ShotFrameReference(role=role, mime_type=mime_type, image_bytes=payload)
 
 
+def test_standing_scene_master_passes_actor_front_bytes_without_provider_call():
+    from app.features.shot_frames.wheelchair_scene_plate import (
+        generate_scene_plate_candidates,
+    )
+
+    client = FakeLLMClient()
+    result = generate_scene_plate_candidates(
+        actor_references=[
+            _reference("actor_front", b"exact-sascha", "image/jpeg"),
+            _reference("actor_three_quarter", b"support"),
+        ],
+        location_reference=_reference("location", b"location"),
+        scene="unused because actor_front remains the visual authority",
+        wardrobe="unused because actor_front remains the visual authority",
+        presentation_mode="standing_presenter",
+        candidate_count=1,
+        llm_client=client,
+        image_model="actor-front-passthrough-v1",
+    )
+
+    assert result.derivation_mode == "actor_front_passthrough"
+    assert result.candidates[0].image_bytes == b"exact-sascha"
+    assert result.candidates[0].mime_type == "image/jpeg"
+    assert result.candidates[0].provider_model == "actor-front-passthrough-v1"
+    assert client.image_calls == []
+
+
 def test_raw_camera_system_prompt_is_preserved_as_prompt_writer_instruction():
     from app.features.shot_frames.service import load_raw_camera_system_prompt
 

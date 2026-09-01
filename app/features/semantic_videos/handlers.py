@@ -92,13 +92,17 @@ from app.features.semantic_videos.schemas import (
 )
 from app.features.semantic_videos.service import compile_semantic_video_plan
 from app.features.semantic_videos.visual_contract import (
+    ACTOR_FRONT_PASSTHROUGH_MODE,
+    ACTOR_FRONT_PASSTHROUGH_MODEL,
     build_actor_reference_fingerprint,
     build_scene_plate_generation_contract,
     build_visual_contract,
+    SCENE_IDENTITY_COMPONENT_FIELDS,
     SCENE_IDENTITY_EVALUATOR_CONTRACT_VERSION,
     validate_scene_plate_generation_contract,
     validate_scene_identity_gate,
     validate_visual_contract,
+    normalize_presentation_mode,
 )
 
 
@@ -109,6 +113,10 @@ logger = get_logger(__name__)
 _SCENE_PLATE_AUDIT_TEXT = (
     "Wheelchair scene plate generated from two immutable actor references and one "
     "actor-free location before any Veo request."
+)
+_STANDING_SCENE_PLATE_AUDIT_TEXT = (
+    "Standing-presenter master passed through byte-for-byte from the immutable actor_front "
+    "reference before any Veo request."
 )
 _TYPICAL_EIGHT_SECOND_VEO_SECONDS = 180
 _TYPICAL_SCENE_PLATE_SECONDS = 75
@@ -284,6 +292,13 @@ def _generation_progress(
 
     if stage == "completed":
         return 100, elapsed, 0, "Video ready. No additional generation is pending."
+    if stage == "awaiting_paid_approval":
+        return (
+            5,
+            elapsed,
+            None,
+            "The free Veo plan is ready. No paid Veo generation has started.",
+        )
     if stage == "generating":
         submitted = any(
             str(take.get("submission_state") or "") == "submitted" for take in takes
@@ -775,7 +790,23 @@ def _assert_scene_plate_master(
         str(row.get("sha256") or "").strip().lower()
         for row in [*actor_rows, location]
     }
-    if master_hash in source_hashes:
+    actor_front = actor_rows[0]
+    derivation_mode = str(master_snapshot.get("derivation_mode") or "").strip()
+    if derivation_mode == ACTOR_FRONT_PASSTHROUGH_MODE:
+        exact_actor_front_fields = (
+            str(master_snapshot.get("storage_uri") or "").strip()
+            == str(actor_front.get("storage_uri") or "").strip()
+            and str(master_snapshot.get("mime_type") or "").lower()
+            == str(actor_front.get("mime_type") or "").lower()
+            and int(master_snapshot.get("byte_length") or 0)
+            == int(actor_front.get("byte_length") or 0)
+            and master_hash == str(actor_front.get("sha256") or "").strip().lower()
+        )
+        if not exact_actor_front_fields:
+            raise ValidationError(
+                "Standing presenter master must preserve actor_front URI, MIME type, byte length, and SHA-256 exactly."
+            )
+    elif master_hash in source_hashes:
         raise ValidationError("Semantic scene plate cannot be an unchanged source reference.")
     if str(master_snapshot.get("visual_contract_hash") or "").lower() != visual_contract[
         "contract_hash"
@@ -786,11 +817,21 @@ def _assert_scene_plate_master(
         != actor_reference_fingerprint
     ):
         raise ValidationError("Semantic scene plate actor-reference lineage is invalid.")
-    derivation_mode = str(master_snapshot.get("derivation_mode") or "").strip()
-    if derivation_mode not in {"bootstrap", "canonical_anchor"}:
+    if derivation_mode not in {
+        "bootstrap",
+        "canonical_anchor",
+        ACTOR_FRONT_PASSTHROUGH_MODE,
+    }:
         raise ValidationError("Semantic scene plate derivation lineage is invalid.")
     canonical_anchor = reference_snapshot.get("canonical_anchor")
-    if derivation_mode == "bootstrap":
+    if derivation_mode == ACTOR_FRONT_PASSTHROUGH_MODE:
+        if master_snapshot.get("canonical_anchor_id") not in (None, "") or master_snapshot.get(
+            "canonical_anchor_sha256"
+        ) not in (None, ""):
+            raise ValidationError(
+                "Actor-front passthrough cannot claim a generated canonical anchor."
+            )
+    elif derivation_mode == "bootstrap":
         if master_snapshot.get("canonical_anchor_id") not in (None, "") or master_snapshot.get(
             "canonical_anchor_sha256"
         ) not in (None, ""):
@@ -1013,6 +1054,7 @@ def _reference_source_identity(reference: dict[str, Any]) -> dict[str, Any]:
         "scene_description": str(reference.get("scene_description") or ""),
         "wardrobe_key": str(reference.get("wardrobe_key") or ""),
         "wardrobe_description": str(reference.get("wardrobe_description") or ""),
+        "presentation_mode": str(reference.get("presentation_mode") or "wheelchair_seated"),
         "actor_reference_uris": [str(row["storage_uri"]) for row in actor_rows],
         "location_reference_uri": str(location_row["storage_uri"]),
     }
@@ -1107,7 +1149,8 @@ def _assert_candidate_lineage_current(run: Mapping[str, Any]) -> None:
         return
     derivation_mode = str(master.get("derivation_mode") or "")
     if (
-        derivation_mode not in {"bootstrap", "canonical_anchor"}
+        derivation_mode
+        not in {"bootstrap", "canonical_anchor", ACTOR_FRONT_PASSTHROUGH_MODE}
         or str(master.get("actor_reference_fingerprint") or "").lower()
         != fingerprint
         or str(master.get("visual_contract_hash") or "").lower()
@@ -1422,6 +1465,15 @@ def generate_candidates(
 
     _script, _script_snapshot = _approved_script(context["post"])
     reference = deepcopy(context.get("reference") or {})
+    post_seed = (
+        context["post"].get("seed_data")
+        if isinstance(context["post"].get("seed_data"), Mapping)
+        else {}
+    )
+    reference["presentation_mode"] = normalize_presentation_mode(
+        post_seed.get("semantic_presentation_mode")
+        or reference.get("presentation_mode")
+    )
     actor_rows, location_row = _ordered_reference_rows(reference)
 
     def download_reference(
@@ -1470,16 +1522,20 @@ def generate_candidates(
         raise ValidationError("Semantic scene-plate generation requires an actor identity.")
     generation_contract = build_scene_plate_generation_contract(
         actor_reference_fingerprint=actor_reference_fingerprint,
+        presentation_mode=str(reference.get("presentation_mode") or "wheelchair_seated"),
         settings=settings,
     )
-    anchor = scene_image_repository_read(
-        lambda: get_actor_scene_plate_anchor(
-            actor_identity_id=actor_identity_id,
-            actor_reference_fingerprint=actor_reference_fingerprint,
-            generation_contract_hash=generation_contract["contract_hash"],
-        ),
-        operation="actor-anchor",
-    )
+    passthrough_master = generation_contract["model"] == ACTOR_FRONT_PASSTHROUGH_MODEL
+    anchor = None
+    if not passthrough_master:
+        anchor = scene_image_repository_read(
+            lambda: get_actor_scene_plate_anchor(
+                actor_identity_id=actor_identity_id,
+                actor_reference_fingerprint=actor_reference_fingerprint,
+                generation_contract_hash=generation_contract["contract_hash"],
+            ),
+            operation="actor-anchor",
+        )
     canonical_scene_plate = None
     canonical_anchor_snapshot = None
     if anchor is not None:
@@ -1508,6 +1564,13 @@ def generate_candidates(
         persisted_reference.pop("canonical_anchor", None)
     visual_contract = build_visual_contract(persisted_reference)
     persisted_reference["visual_contract"] = visual_contract
+    logger.info(
+        "semantic_scene_presentation_contract_frozen",
+        post_id=post_id,
+        presentation_mode=persisted_reference["presentation_mode"],
+        visual_contract_version=visual_contract["version"],
+        generation_contract_hash=generation_contract["contract_hash"],
+    )
     persisted_reference.pop("master", None)
     reservation_token = str(uuid4())
     reservation_owner = str(
@@ -1552,7 +1615,11 @@ def generate_candidates(
         getattr(request.state, "correlation_id", "semantic-scene-plates")
     )
     expected_derivation_mode = (
-        "canonical_anchor" if canonical_anchor_snapshot is not None else "bootstrap"
+        ACTOR_FRONT_PASSTHROUGH_MODE
+        if passthrough_master
+        else "canonical_anchor"
+        if canonical_anchor_snapshot is not None
+        else "bootstrap"
     )
     partial_candidates_lock = Lock()
     partial_candidates_by_index: dict[int, dict[str, Any]] = {}
@@ -1671,47 +1738,75 @@ def generate_candidates(
                 {"mime_type": candidate_mime_type},
             )
         candidate_extension = "png" if candidate_mime_type == "image/png" else "jpg"
-        if str(candidate.provider_model) != settings.semantic_scene_plate_model:
+        if str(candidate.provider_model) != generation_contract["model"]:
             raise StateTransitionError(
                 "Semantic scene-plate provider returned an unexpected model.",
                 {
-                    "expected_model": settings.semantic_scene_plate_model,
+                    "expected_model": generation_contract["model"],
                     "actual_model": candidate.provider_model,
                 },
             )
         try:
-            resolved_identity_report = identity_report or evaluate_scene_plate_identity(
-                {
-                    "mime_type": actor_front_snapshot["mime_type"],
-                    "image_bytes": actor_front.image_bytes,
-                    "byte_length": actor_front_snapshot["byte_length"],
-                    "sha256": actor_front_snapshot["sha256"],
-                },
-                {
-                    "mime_type": actor_three_quarter_snapshot["mime_type"],
-                    "image_bytes": actor_three_quarter.image_bytes,
-                    "byte_length": actor_three_quarter_snapshot["byte_length"],
-                    "sha256": actor_three_quarter_snapshot["sha256"],
-                },
-                {
-                    "mime_type": candidate.mime_type,
-                    "image_bytes": candidate.image_bytes,
-                    "byte_length": len(candidate.image_bytes),
-                    "sha256": candidate_hash,
-                },
-                model=settings.semantic_scene_identity_gate_model,
-                minimum_confidence=settings.semantic_scene_identity_min_confidence,
-                location=settings.semantic_scene_identity_gate_location,
-                deadline_at=scene_image_deadline_at,
-                execution_guard=assert_scene_execution,
-            )
-            identity_gate_result = scene_identity_result_metadata(
-                resolved_identity_report,
-                evaluator_model=settings.semantic_scene_identity_gate_model,
-                actor_reference_fingerprint=actor_reference_fingerprint,
-                candidate_sha256=candidate_hash,
-            )
+            if expected_derivation_mode == ACTOR_FRONT_PASSTHROUGH_MODE:
+                if (
+                    candidate_hash != actor_front_snapshot["sha256"]
+                    or candidate.mime_type != actor_front_snapshot["mime_type"]
+                    or len(candidate.image_bytes) != actor_front_snapshot["byte_length"]
+                ):
+                    raise StateTransitionError(
+                        "Standing presenter master changed the immutable actor_front bytes."
+                    )
+                identity_gate_result = {
+                    "status": "passed",
+                    "passed": True,
+                    "confidence": 1.0,
+                    "component_results": {
+                        field: True for field in SCENE_IDENTITY_COMPONENT_FIELDS
+                    },
+                    "blocking_reasons": [],
+                    "candidate_sha256": candidate_hash,
+                    "evaluated_actor_reference_fingerprint": actor_reference_fingerprint,
+                    "evaluator_model": generation_contract[
+                        "identity_evaluator_model"
+                    ],
+                    "evaluator_contract_version": SCENE_IDENTITY_EVALUATOR_CONTRACT_VERSION,
+                    "evidence_mode": "actor_front_byte_identity",
+                }
+            else:
+                resolved_identity_report = identity_report or evaluate_scene_plate_identity(
+                    {
+                        "mime_type": actor_front_snapshot["mime_type"],
+                        "image_bytes": actor_front.image_bytes,
+                        "byte_length": actor_front_snapshot["byte_length"],
+                        "sha256": actor_front_snapshot["sha256"],
+                    },
+                    {
+                        "mime_type": actor_three_quarter_snapshot["mime_type"],
+                        "image_bytes": actor_three_quarter.image_bytes,
+                        "byte_length": actor_three_quarter_snapshot["byte_length"],
+                        "sha256": actor_three_quarter_snapshot["sha256"],
+                    },
+                    {
+                        "mime_type": candidate.mime_type,
+                        "image_bytes": candidate.image_bytes,
+                        "byte_length": len(candidate.image_bytes),
+                        "sha256": candidate_hash,
+                    },
+                    model=settings.semantic_scene_identity_gate_model,
+                    minimum_confidence=settings.semantic_scene_identity_min_confidence,
+                    location=settings.semantic_scene_identity_gate_location,
+                    deadline_at=scene_image_deadline_at,
+                    execution_guard=assert_scene_execution,
+                )
+                identity_gate_result = scene_identity_result_metadata(
+                    resolved_identity_report,
+                    evaluator_model=settings.semantic_scene_identity_gate_model,
+                    actor_reference_fingerprint=actor_reference_fingerprint,
+                    candidate_sha256=candidate_hash,
+                )
         except Exception as exc:  # each candidate fails closed without discarding siblings
+            if expected_derivation_mode == ACTOR_FRONT_PASSTHROUGH_MODE:
+                raise
             if (
                 isinstance(exc, ThirdPartyError)
                 and exc.details.get("reason_code") == "scene_image_deadline"
@@ -1735,14 +1830,21 @@ def generate_candidates(
             f"candidate-{int(candidate.index)}-{candidate_hash}."
             f"{candidate_extension}"
         )
-        upload_target = storage.prepare_image_upload(
-            file_name=file_name,
-            object_key=stable_object_key,
+        upload_target = (
+            {
+                "url": actor_front_snapshot["storage_uri"],
+                "storage_key": actor_front_snapshot.get("storage_key"),
+            }
+            if expected_derivation_mode == ACTOR_FRONT_PASSTHROUGH_MODE
+            else storage.prepare_image_upload(
+                file_name=file_name,
+                object_key=stable_object_key,
+            )
         )
         candidate_checkpoint = {
             "index": int(candidate.index),
             "storage_uri": str(upload_target["url"]),
-            "storage_key": str(upload_target["storage_key"]),
+            "storage_key": upload_target.get("storage_key"),
             "mime_type": candidate_mime_type,
             "byte_length": len(candidate.image_bytes),
             "sha256": candidate_hash,
@@ -1781,17 +1883,21 @@ def generate_candidates(
             required=True,
         )
         assert_scene_execution()
-        uploaded = storage.upload_image(
-            image_bytes=candidate.image_bytes,
-            file_name=file_name,
-            correlation_id=correlation_id,
-            content_type=candidate_mime_type,
-            object_key=stable_object_key,
-            timeout_seconds=scene_image_stage_timeout_seconds(
-                cap_seconds=20.0,
-                reserve_seconds=15.0,
-                minimum_seconds=2.0,
-            ),
+        uploaded = (
+            upload_target
+            if expected_derivation_mode == ACTOR_FRONT_PASSTHROUGH_MODE
+            else storage.upload_image(
+                image_bytes=candidate.image_bytes,
+                file_name=file_name,
+                correlation_id=correlation_id,
+                content_type=candidate_mime_type,
+                object_key=stable_object_key,
+                timeout_seconds=scene_image_stage_timeout_seconds(
+                    cap_seconds=20.0,
+                    reserve_seconds=15.0,
+                    minimum_seconds=2.0,
+                ),
+            )
         )
         persisted_candidate = {
             **{
@@ -1850,7 +1956,7 @@ def generate_candidates(
         if (
             isinstance(row, Mapping)
             and 1 <= int(row.get("index") or 0) <= payload.candidate_count
-            and str(row.get("provider_model") or "") == settings.semantic_scene_plate_model
+            and str(row.get("provider_model") or "") == generation_contract["model"]
             and str(row.get("visual_contract_hash") or "") == visual_contract["contract_hash"]
             and str(row.get("actor_reference_fingerprint") or "")
             == actor_reference_fingerprint
@@ -1955,8 +2061,11 @@ def generate_candidates(
             canonical_scene_plate=canonical_scene_plate,
             scene=visual_contract["scene_description"],
             wardrobe=visual_contract["wardrobe_description"],
+            presentation_mode=str(
+                visual_contract.get("presentation_mode") or "wheelchair_seated"
+            ),
             candidate_count=payload.candidate_count,
-            image_model=settings.semantic_scene_plate_model,
+            image_model=generation_contract["model"],
             image_size=settings.semantic_scene_plate_image_size,
             traffic_key=str(reserved["id"]),
             initial_candidates=initial_candidates,
@@ -2040,6 +2149,11 @@ def generate_candidates(
             "saving_candidates",
             {"candidate_count": len(candidates)},
         )
+        audit_text = (
+            _STANDING_SCENE_PLATE_AUDIT_TEXT
+            if visual_contract.get("presentation_mode") == "standing_presenter"
+            else _SCENE_PLATE_AUDIT_TEXT
+        )
         master_snapshot = {
             "candidates": candidates,
             "visual_contract": visual_contract,
@@ -2063,9 +2177,9 @@ def generate_candidates(
                 if canonical_anchor_snapshot is not None
                 else None
             ),
-            "prompt_writer_system_prompt": _SCENE_PLATE_AUDIT_TEXT,
+            "prompt_writer_system_prompt": audit_text,
             "prompt_writer_system_prompt_sha256": sha256(
-                _SCENE_PLATE_AUDIT_TEXT.encode("utf-8")
+                audit_text.encode("utf-8")
             ).hexdigest(),
             "prompt_writer_output": generated.prompts[0],
             "composition_prompt": generated.prompts[0],
@@ -2468,6 +2582,31 @@ def _scene_image_job_matches_run(
     )
 
 
+def _scene_image_run_has_finalized_candidates(run: Optional[Mapping[str, Any]]) -> bool:
+    """Return whether the run projection contains this job's durable image result.
+
+    The queue job and run are read through separate no-store requests. A poll can
+    therefore observe the queue's committed ``completed`` status immediately
+    before the matching run update becomes visible. Keep the queue projection
+    authoritative during that short handoff instead of projecting the old run as
+    idle and letting the browser settle a successful image as failed.
+    """
+    if not isinstance(run, Mapping):
+        return False
+    master_snapshot = run.get("master_snapshot")
+    candidates = (
+        master_snapshot.get("candidates")
+        if isinstance(master_snapshot, Mapping)
+        and isinstance(master_snapshot.get("candidates"), list)
+        else []
+    )
+    if len(candidates) not in {1, 3}:
+        return False
+    progress = run.get("candidate_generation_progress")
+    phase = str(progress.get("phase") or "").strip() if isinstance(progress, Mapping) else ""
+    return phase in {"", "ready"}
+
+
 @router.get("/{post_id}/progress", response_model=SuccessResponse)
 def get_progress(post_id: str, request: Request, response: Response):
     if "text/html" in request.headers.get("accept", ""):
@@ -2482,9 +2621,13 @@ def get_progress(post_id: str, request: Request, response: Response):
     run = get_run_by_post(post_id)
     job = get_scene_image_job(post_id, timeout_seconds=5.0)
     job_status = str((job or {}).get("status") or "")
-    job_is_current_operation = job_status in {"queued", "processing", "failed"}
     job_matches_run = bool(
         job and _scene_image_job_matches_run(job=job, run=run)
+    )
+    job_is_current_operation = job_status in {"queued", "processing", "failed"} or (
+        job_status == "completed"
+        and job_matches_run
+        and not _scene_image_run_has_finalized_candidates(run)
     )
     if job and job_matches_run and (
         job_is_current_operation or (job_status == "completed" and not run)

@@ -1511,6 +1511,62 @@ def test_semantic_s2_script_editor_uses_live_16s_duration_contract_guidance(
     assert "Statements ready" in html
 
 
+def test_semantic_script_review_card_counts_words_against_the_live_contract():
+    # A reviewer must see the 8s word shortfall before "Approve script" rejects it.
+    env = Environment(loader=FileSystemLoader("templates"))
+    html = env.get_template("batches/detail/_semantic_script_review_card.html").render(
+        post={
+            "id": "post-8s",
+            "post_type": "value",
+            "topic_title": "Manual Draft 1",
+            "topic_rotation": None,
+            "caption_source_links": [],
+            "blog_enabled": False,
+            "seed_data": {
+                "script": (
+                    "Hey, kauft Lippe sofort. Es ist der beste Treppenlift auf der Welt."
+                ),
+                "script_review_status": "pending",
+            },
+        },
+        batch_view={
+            "semantic_video": {
+                "duration_contract": {
+                    "requested_duration_seconds": 8,
+                    "minimum_words": 14,
+                    "maximum_words": 18,
+                    "minimum_semantic_blocks": 1,
+                }
+            }
+        },
+    )
+
+    assert "8s target" in html
+    assert "14–18 words" in html
+    assert "at least 1 complete statement" in html
+    assert 'x-text="wordCount"' in html
+    assert 'x-text="completeStatementCount"' in html
+    assert 'x-text="contractStatus"' in html
+    assert 'x-text="wordGapLabel"' in html
+    assert "words missing" in html
+    assert "to reach the minimum of" in html
+    assert "Approval also checks each 8-second beat" in html
+    assert 'name="semantic_presentation_mode"' in html
+    assert 'value="wheelchair_seated" selected' in html
+    assert 'value="standing_presenter"' in html
+    assert "reuse the canonical actor image" in html
+
+
+def test_script_approval_keeps_the_server_correction_visible():
+    source = open("static/js/batches/detail.js", encoding="utf-8").read()
+
+    assert "function scriptReviewErrorMessage(event)" in source
+    assert "event.detail?.xhr?.responseText" in source
+    assert "scriptReviewErrorMessage(event)" in source
+    assert "persistent: true" in source
+    assert "text-red-700" in source
+
+
 def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     source = open("static/js/batches/semantic_video.js", encoding="utf-8").read()
     template_source = open(
@@ -1568,6 +1624,10 @@ def test_semantic_controller_confirms_exact_cost_and_polls_progress():
     assert "if (progress.plan_hash) {" in source
     assert "continue;" in source
     assert "results.push({ok: true" in source
+    assert "const PLAN_RECONCILIATION_DELAYS_MS = [0, 500, 1000];" in source
+    assert "async function reconcilePlanBuild(root)" in source
+    assert "if (await reconcilePlanBuild(root))" in source
+    assert "A lost plan response is reconciled through the durable progress read." in source
     assert "results.every((result) => result.ok)" in source
     assert "results.filter((result) => result.ok)" in source
     assert "The successful plans were preserved." in source

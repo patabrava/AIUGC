@@ -4,6 +4,7 @@
     const sceneImageButtonDomainDisabled = new WeakMap();
     const scheduledWorkflowReloads = new WeakSet();
     const SCENE_IMAGE_POST_TIMEOUT_MS = 15000;
+    const PLAN_RECONCILIATION_DELAYS_MS = [0, 500, 1000];
     const RUN_PROGRESS_STAGES = [
         'generating',
         'transcript_qa',
@@ -250,6 +251,26 @@
         target.classList.toggle('text-[#1C2740]', !isError);
     }
 
+    async function reconcilePlanBuild(root) {
+        for (let attempt = 0; attempt < PLAN_RECONCILIATION_DELAYS_MS.length; attempt += 1) {
+            if (PLAN_RECONCILIATION_DELAYS_MS[attempt] > 0) {
+                await new Promise((resolve) => window.setTimeout(
+                    resolve,
+                    PLAN_RECONCILIATION_DELAYS_MS[attempt],
+                ));
+            }
+            try {
+                const progress = await fetchCurrentProgress(root);
+                if (!root.isConnected || !progress) return false;
+                updateProgress(root, progress);
+                if (progress.plan_hash) return true;
+            } catch (_error) {
+                // A lost plan response is reconciled through the durable progress read.
+            }
+        }
+        return false;
+    }
+
     async function approveReadyBatchPlans(workflow, button) {
         const expectedCount = Number(button.dataset.readyCount || 0);
         const cost = button.dataset.costUsd || '0.00';
@@ -374,6 +395,10 @@
                 );
                 results.push({ok: true, root, button, feedbackState});
             } catch (error) {
+                if (await reconcilePlanBuild(root)) {
+                    results.push({ok: true, root, button, feedbackState});
+                    continue;
+                }
                 window.endActionFeedback(button, feedbackState);
                 button.disabled = false;
                 showPlanError(root, error.message);

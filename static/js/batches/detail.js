@@ -188,13 +188,28 @@
         return document.getElementById(`post-${postId}`);
     }
 
-    function showScriptSaveStatus(card, message) {
+    function showScriptSaveStatus(card, message, { error = false, persistent = false } = {}) {
         const status = card?.querySelector('[data-script-save-status]');
         if (!status) return;
         status.textContent = message;
+        status.classList.toggle('text-emerald-700', !error);
+        status.classList.toggle('text-red-700', error);
+        if (persistent) return;
         window.setTimeout(() => {
             if (status.textContent === message) status.textContent = '';
         }, 3000);
+    }
+
+    function scriptReviewErrorMessage(event) {
+        try {
+            const payload = JSON.parse(event.detail?.xhr?.responseText || '{}');
+            if (payload?.message) return payload.message;
+            if (typeof payload?.detail === 'string') return payload.detail;
+            if (payload?.detail?.message) return payload.detail.message;
+        } catch (_error) {
+            // Fall through to the stable generic message.
+        }
+        return 'Approval failed';
     }
 
     window.handleScriptSaveResponse = function (event, postId) {
@@ -218,7 +233,10 @@
                 approveButton.disabled = false;
                 approveButton.textContent = 'Approve script';
             }
-            showScriptSaveStatus(card, 'Approval failed');
+            showScriptSaveStatus(card, scriptReviewErrorMessage(event), {
+                error: true,
+                persistent: true,
+            });
             return;
         }
         let data = {};

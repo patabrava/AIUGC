@@ -41,6 +41,21 @@ FRAMING_CONTRACT = (
     "deep depth of field, and modern smartphone HDR auto-tone. The wheelchair may fall outside "
     "this crop."
 )
+STANDING_PRESENTATION_CONTRACT = (
+    "The same adult actor stands upright throughout with a natural balanced stance, level shoulders, "
+    "and relaxed posture. No wheelchair, mobility device, chair, stool, or seated support is present."
+)
+STANDING_FRAMING_CONTRACT = (
+    "Use a vertical 9:16 arm's-length front-camera framing at eye level, as if the standing actor is "
+    "holding the phone. Keep the actor square to the lens and identity-readable in a waist-up crop: the top "
+    "edge sits just above the hair and the bottom edge falls below the waist. Show enough upright torso and "
+    "room geometry that his unsupported standing position is unmistakable. Preserve raw modern smartphone "
+    "perspective, deep depth of field, slight natural roll, and quiet handheld imperfection."
+)
+DEFAULT_PRESENTATION_MODE = "wheelchair_seated"
+STANDING_PRESENTATION_MODE = "standing_presenter"
+ACTOR_FRONT_PASSTHROUGH_MODEL = "actor-front-passthrough-v1"
+ACTOR_FRONT_PASSTHROUGH_MODE = "actor_front_passthrough"
 _REFERENCE_ROLES = ("identity_primary", "identity_support", "location")
 _CANDIDATE_VARIATIONS = (
     (
@@ -59,6 +74,23 @@ _CANDIDATE_VARIATIONS = (
         "square to the lens, the phone rolled about three degrees counter-clockwise and "
         "raised higher so the downward angle is obvious. Her head sits clearly left of "
         "frame center, with a small natural head tilt to her left."
+    ),
+)
+_STANDING_CANDIDATE_VARIATIONS = (
+    (
+        "Candidate 1 composition: he faces the phone straight on with his shoulders square to the lens, "
+        "the phone rolled about four degrees counter-clockwise so the horizon is visibly tilted. His head "
+        "sits clearly left of frame center."
+    ),
+    (
+        "Candidate 2 composition: he faces the phone straight on with his shoulders square to the lens, "
+        "the phone rolled about five degrees clockwise and held a little lower. His head sits clearly right "
+        "of frame center, with a small natural head tilt to his right."
+    ),
+    (
+        "Candidate 3 composition: he faces the phone straight on with his shoulders square to the lens, "
+        "the phone rolled about three degrees counter-clockwise and raised slightly higher. His head sits "
+        "clearly left of frame center, with a small natural head tilt to his left."
     ),
 )
 _MAX_DIVERSITY_ATTEMPTS = 3
@@ -287,7 +319,35 @@ def build_canonical_scene_plate_prompt(
     scene: str,
     wardrobe: str,
     variation_directive: str = "",
+    presentation_mode: str = DEFAULT_PRESENTATION_MODE,
 ) -> str:
+    if presentation_mode == STANDING_PRESENTATION_MODE:
+        return (
+            "Create one photorealistic vertical start image using all three supplied images with fixed roles. "
+            "Image 1 is the PRIMARY ACTOR IDENTITY reference. Image 2 is the SAME ACTOR from another view and "
+            "is supporting identity evidence only. Image 3 is the ACTOR-FREE LOCATION reference. Place exactly "
+            "the same adult man from Images 1 and 2 inside Image 3. Preserve his exact facial geometry, hairline, "
+            "hair, apparent age, body proportions, and ordinary camera-file skin texture with visible "
+            "pores, natural tonal variation, natural under-eye and lip texture, mild facial asymmetry, and realistic "
+            "hairline flyaways. Images 1 and 2 provide identity only: do not copy their clothing. Replace every "
+            "visible upper-body garment with the requested outfit below; its garment type and color must be "
+            "unmistakable. He must wear the same rectangular dark-rimmed prescription eyeglasses visible in both "
+            "identity references; preserve their exact shape, scale, color, and position. The eyeglasses are "
+            "mandatory and unobscured. Do not average him into a new face. "
+            f"{STANDING_PRESENTATION_CONTRACT} {STANDING_FRAMING_CONTRACT} "
+            f"His upper-body outfit is exactly: {wardrobe}. The location is exactly: {scene}. "
+            "Use natural available light and a quiet conversational expression immediately before speaking, with "
+            "his mouth closed. Keep the raw unfiltered front-camera look and natural skin texture. Render no other "
+            "person, text, logo, watermark, wheelchair, mobility device, chair, seated pose, sitting pose, walking "
+            "pose, beauty retouching, poreless skin, glamour lighting, CGI smoothness, face averaging, wide shot, "
+            "full-body shot, missing eyeglasses, different eyewear, sunglasses, or contact-lens appearance. "
+            f"{variation_directive}"
+        )
+    if presentation_mode != DEFAULT_PRESENTATION_MODE:
+        raise ValidationError(
+            "Scene-plate presentation mode is unsupported.",
+            {"presentation_mode": presentation_mode},
+        )
     return (
         "Create one photorealistic vertical start image using all three supplied images with fixed roles. "
         "Image 1 is the PRIMARY ACTOR IDENTITY reference. Image 2 is the SAME ACTOR from another view and "
@@ -317,7 +377,32 @@ def build_derived_scene_plate_prompt(
     scene: str,
     wardrobe: str,
     variation_directive: str = "",
+    presentation_mode: str = DEFAULT_PRESENTATION_MODE,
 ) -> str:
+    if presentation_mode == STANDING_PRESENTATION_MODE:
+        return (
+            "Create one photorealistic vertical start image using all three supplied images with fixed roles. "
+            "Image 1 is the canonical scene plate and is authoritative for the exact standing man, facial geometry, "
+            "scale, and upright posture. Image 2 is the unchanged front identity reference and exists only to prevent "
+            "facial drift. Image 3 is the ACTOR-FREE LOCATION reference. Preserve the exact man from Images 1 and 2, "
+            "his standing pose, camera height, camera distance, and face size from Image 1. He must wear the same "
+            "rectangular dark-rimmed prescription eyeglasses from the front identity reference; preserve their exact "
+            "shape, scale, color, and position. The eyeglasses are mandatory and unobscured. Image 1's "
+            "clothing is not authoritative: replace every visible upper-body garment with the requested outfit. "
+            f"{STANDING_PRESENTATION_CONTRACT} {STANDING_FRAMING_CONTRACT} "
+            f"Keep the actor-free location exactly: {scene}; and the upper-body outfit exactly: {wardrobe}. "
+            "Keep his mouth closed with a quiet conversational expression and preserve natural camera-file skin "
+            "texture. Render no other person, text, logo, watermark, wheelchair, mobility device, chair, seated pose, "
+            "sitting pose, walking pose, wide shot, full-body shot, beauty retouching, poreless skin, glamour lighting, "
+            "CGI smoothness, face averaging, motion blur, missing eyeglasses, different eyewear, sunglasses, or "
+            "contact-lens appearance. "
+            f"{variation_directive}"
+        )
+    if presentation_mode != DEFAULT_PRESENTATION_MODE:
+        raise ValidationError(
+            "Scene-plate presentation mode is unsupported.",
+            {"presentation_mode": presentation_mode},
+        )
     return (
         "Create one photorealistic vertical start image using all three supplied images with fixed roles. "
         "Image 1 is the canonical scene plate and is the authoritative source for the exact woman, exact "
@@ -342,9 +427,16 @@ def build_derived_scene_plate_prompt(
     )
 
 
-def _variation_directive(*, index: int, attempt: int) -> str:
+def _variation_directive(
+    *, index: int, attempt: int, presentation_mode: str = DEFAULT_PRESENTATION_MODE
+) -> str:
+    variations = (
+        _STANDING_CANDIDATE_VARIATIONS
+        if presentation_mode == STANDING_PRESENTATION_MODE
+        else _CANDIDATE_VARIATIONS
+    )
     try:
-        directive = _CANDIDATE_VARIATIONS[index - 1]
+        directive = variations[index - 1]
     except IndexError as exc:
         raise ValidationError(
             "Semantic scene-plate candidate index is outside the variation contract.",
@@ -356,7 +448,7 @@ def _variation_directive(*, index: int, attempt: int) -> str:
         f"{directive} DIVERSITY RECOVERY ATTEMPT {attempt}: the prior render was "
         "perceptually indistinguishable from another option. Make the specified roll, "
         "phone height, and off-center placement unmistakably visible while keeping her "
-        "square to the lens and preserving actor identity, wheelchair, outfit, room, "
+        "square to the lens and preserving actor identity, presentation posture, outfit, room, "
         "face size, and crop."
     )
 
@@ -609,6 +701,7 @@ def generate_scene_plate_bundle(
     image_model: str,
     image_size: str,
     traffic_key: Optional[str],
+    presentation_mode: str = DEFAULT_PRESENTATION_MODE,
 ) -> list[dict[str, Any]]:
     """Render multiple standalone plates in one provider round trip."""
     if len(prompts) < 2:
@@ -618,7 +711,8 @@ def generate_scene_plate_bundle(
         "response, in the numbered order below. Do not create a collage, contact sheet, "
         "grid, split screen, triptych, or borders. Every output must be a complete "
         "independent vertical 9:16 photograph at the requested resolution. Keep the exact "
-        "same actor identity, wheelchair, wardrobe, and location across all outputs while "
+        f"same actor identity, {'standing posture' if presentation_mode == STANDING_PRESENTATION_MODE else 'wheelchair'}, "
+        "wardrobe, and location across all outputs while "
         "applying the numbered camera variation for each image.\n\n"
         + "\n\n".join(
             f"OUTPUT IMAGE {index}:\n{prompt}"
@@ -712,6 +806,7 @@ def generate_scene_plate_candidates(
     canonical_scene_plate: Optional[ShotFrameReference] = None,
     scene: str,
     wardrobe: str,
+    presentation_mode: str = DEFAULT_PRESENTATION_MODE,
     candidate_count: int = 3,
     llm_client: Optional[Any] = None,
     image_model: str = "gemini-3.1-flash-image",
@@ -745,6 +840,39 @@ def generate_scene_plate_candidates(
     if location_reference.role != "location":
         raise ValidationError("Scene-plate location reference must use the location role.")
 
+    if image_model == ACTOR_FRONT_PASSTHROUGH_MODEL:
+        if presentation_mode != STANDING_PRESENTATION_MODE:
+            raise ValidationError(
+                "Actor-front passthrough is available only for standing presenters."
+            )
+        if candidate_count != 1:
+            raise ValidationError(
+                "Actor-front passthrough produces exactly one immutable master."
+            )
+        if canonical_scene_plate is not None:
+            raise ValidationError(
+                "Actor-front passthrough cannot derive from a generated canonical anchor."
+            )
+        prompt = (
+            "Use the immutable actor_front image bytes unchanged as the standing "
+            "presenter master. Preserve its face, expression, glasses, wardrobe, "
+            "background, framing, MIME type, byte length, and SHA-256 exactly."
+        )
+        candidate = ScenePlateCandidate(
+            index=1,
+            image_bytes=actor_references[0].image_bytes,
+            mime_type=actor_references[0].mime_type,
+            provider_model=image_model,
+            prompt=prompt,
+        )
+        if candidate_ready_callback is not None:
+            candidate_ready_callback(candidate)
+        return ScenePlateGenerationResult(
+            candidates=(candidate,),
+            prompts=(prompt,),
+            derivation_mode=ACTOR_FRONT_PASSTHROUGH_MODE,
+        )
+
     client = llm_client or get_llm_client()
     if canonical_scene_plate is not None:
         if canonical_scene_plate.role != "canonical_scene_plate":
@@ -764,7 +892,11 @@ def generate_scene_plate_candidates(
         specification: tuple[int, int],
     ) -> tuple[tuple[ShotFrameReference, ...], str]:
         index, attempt = specification
-        variation_directive = _variation_directive(index=index, attempt=attempt)
+        variation_directive = _variation_directive(
+            index=index,
+            attempt=attempt,
+            presentation_mode=presentation_mode,
+        )
         if derivation_mode == "bootstrap":
             references = (
                 _as_role(actor_references[0], "identity_primary"),
@@ -775,6 +907,7 @@ def generate_scene_plate_candidates(
                 scene=scene,
                 wardrobe=wardrobe,
                 variation_directive=variation_directive,
+                presentation_mode=presentation_mode,
             )
         else:
             references = (
@@ -786,6 +919,7 @@ def generate_scene_plate_candidates(
                 scene=scene,
                 wardrobe=wardrobe,
                 variation_directive=variation_directive,
+                presentation_mode=presentation_mode,
             )
         return references, prompt
 
@@ -923,6 +1057,7 @@ def generate_scene_plate_candidates(
                         image_model=image_model,
                         image_size=image_size,
                         traffic_key=traffic_key,
+                        presentation_mode=presentation_mode,
                     )
                     break
                 except ThirdPartyError as exc:
@@ -1046,6 +1181,8 @@ def generate_scene_plate_candidates(
 
 __all__ = [
     "FRAMING_CONTRACT",
+    "STANDING_FRAMING_CONTRACT",
+    "STANDING_PRESENTATION_CONTRACT",
     "WHEELCHAIR_VISUAL_CONTRACT",
     "ScenePlateCandidate",
     "ScenePlateGenerationResult",

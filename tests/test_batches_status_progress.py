@@ -1118,14 +1118,15 @@ def test_build_batch_detail_view_polls_while_publish_is_in_flight():
     assert view["should_poll_publish"] is True
 
 
-def test_batch_detail_template_uses_slower_refresh_interval():
+def test_batch_detail_template_preserves_proven_refresh_interval():
     from pathlib import Path
 
     repo_root = Path(__file__).resolve().parents[1]
     template = (repo_root / "templates/batches/detail.html").read_text(encoding="utf-8")
     assert 'hx-trigger="every 5s"' not in template
-    assert 'hx-trigger="every 30s [document.visibilityState === \'visible\']"' in template
-    assert 'hx-sync="this:drop"' in template
+    assert 'hx-trigger="every 15s"' in template
+    assert 'document.visibilityState' not in template
+    assert 'hx-sync="this:drop"' not in template
 
 
 def test_topic_run_card_uses_slower_refresh_interval():
@@ -1534,7 +1535,7 @@ def test_batch_detail_templates_compile_without_syntax_errors():
     batch_detail_template = Path("templates/batches/detail.html").read_text()
     run_card_template = Path("templates/topics/partials/run_card.html").read_text()
 
-    assert 'hx-trigger="every 30s [document.visibilityState === \'visible\']"' in batch_detail_template
+    assert 'hx-trigger="every 15s"' in batch_detail_template
     assert 'hx-trigger="load, every 15s"' in run_card_template
 
 

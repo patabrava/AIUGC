@@ -18,7 +18,10 @@ from app.features.scenes.queries import (
     require_canonical_scene_asset,
     resolve_canonical_scene_key,
 )
-from app.features.semantic_videos.visual_contract import select_semantic_wardrobe
+from app.features.semantic_videos.visual_contract import (
+    normalize_presentation_mode,
+    select_semantic_wardrobe,
+)
 
 
 _SEMANTIC_TOPIC_FIELDS = (
@@ -357,6 +360,10 @@ def _complete_semantic_reference(
     )
     completed["wardrobe_key"] = wardrobe_key
     completed["wardrobe_description"] = wardrobe_description
+    completed["presentation_mode"] = normalize_presentation_mode(
+        completed.get("presentation_mode")
+        or seed_data.get("semantic_presentation_mode")
+    )
     return completed
 
 
@@ -408,6 +415,7 @@ def load_semantic_video_context(post_id: str, *, client=None) -> dict[str, Any]:
             ("semantic_scene_description", "scene_description"),
             ("semantic_wardrobe_key", "wardrobe_key"),
             ("semantic_wardrobe_description", "wardrobe_description"),
+            ("semantic_presentation_mode", "presentation_mode"),
         ):
             if str(seed_data.get(source_key) or "").strip():
                 reference[target_key] = str(seed_data[source_key]).strip()

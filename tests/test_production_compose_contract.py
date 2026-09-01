@@ -54,12 +54,12 @@ def test_example_production_env_lists_required_live_keys():
 def test_production_vertex_config_targets_current_google_cloud_identity():
     workflow_text = WORKFLOW_PATH.read_text(encoding="utf-8")
 
-    assert '"VERTEX_AI_PROJECT_ID": "project-6ab7d1a4-0839-4bc3-8af"' in workflow_text
+    assert '"VERTEX_AI_PROJECT_ID": "project-99c2957b-20cd-400b-b25"' in workflow_text
     assert (
         '"VERTEX_AI_OUTPUT_GCS_URI": '
-        '"gs://project-6ab7d1a4-0839-4bc3-8af-vertex-output/"'
+        '"gs://project-99c2957b-20cd-400b-b25-vertex-output/"'
     ) in workflow_text
-    assert '"VERTEX_REQUIRED_PRINCIPAL_EMAIL": "sarahlippe80@gmail.com"' in workflow_text
+    assert '"VERTEX_REQUIRED_PRINCIPAL_EMAIL": "sarahlippe800@gmail.com"' in workflow_text
     assert "project-402e0012-e068-462f-acf" not in workflow_text
 
 

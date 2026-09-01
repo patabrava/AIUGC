@@ -56,17 +56,94 @@
         hx-on::after-request="window.handleScriptSaveResponse(event, '{{ post.id }}')"
     >
         <label for="script-text-{{ post.id }}" class="block text-sm font-bold text-[#1C2740]">Spoken script</label>
-        <textarea
-            id="script-text-{{ post.id }}"
-            name="script_text"
-            rows="{{ [4, (((script | default('') | length) // 48) + 1)] | max }}"
-            maxlength="900"
-            class="brand-focus w-full rounded-xl border border-[#1C2740]/20 px-3 py-3 text-sm text-[#1C2740]"
-        >{{ script }}</textarea>
-        <p class="text-xs text-[#1C2740]/65">
-            {{ duration.requested_duration_seconds }}s target · {{ duration.minimum_words }}–{{ duration.maximum_words }} words ·
-            at least {{ duration.minimum_semantic_blocks }} complete statement{% if duration.minimum_semantic_blocks != 1 %}s{% endif %}
-        </p>
+        <div
+            x-data="{
+                text: {{ script | default('', true) | tojson | forceescape }},
+                minimumWords: {{ duration.minimum_words | default(0) }},
+                maximumWords: {{ duration.maximum_words | default(0) }},
+                minimumStatements: {{ duration.minimum_semantic_blocks | default(0) }},
+                get wordCount() {
+                    const matches = (this.text || '').match(/[A-Za-zÀ-ÿ0-9ÄÖÜäöüß]+(?:[.-][A-Za-zÀ-ÿ0-9ÄÖÜäöüß]+)*/g);
+                    return matches ? matches.length : 0;
+                },
+                get completeStatementCount() {
+                    const normalized = (this.text || '').replace(/[»”’)}\]]+(?=\s|$)/g, '');
+                    const matches = normalized.match(/[.!?]+(?=\s|$)/g);
+                    return matches ? matches.length : 0;
+                },
+                get wordsReady() {
+                    if (!this.maximumWords) return true;
+                    return this.wordCount >= this.minimumWords && this.wordCount <= this.maximumWords;
+                },
+                get statementsReady() {
+                    return this.completeStatementCount >= this.minimumStatements;
+                },
+                get wordsMissing() {
+                    if (!this.maximumWords) return 0;
+                    return Math.max(0, this.minimumWords - this.wordCount);
+                },
+                get wordsOver() {
+                    if (!this.maximumWords) return 0;
+                    return Math.max(0, this.wordCount - this.maximumWords);
+                },
+                get wordGapLabel() {
+                    if (this.wordsMissing) return this.wordsMissing + (this.wordsMissing === 1 ? ' word missing' : ' words missing');
+                    if (this.wordsOver) return this.wordsOver + (this.wordsOver === 1 ? ' word too many' : ' words too many');
+                    return 'Word count ready';
+                },
+                get contractStatus() {
+                    if (!this.maximumWords) return '';
+                    if (this.wordsMissing) return 'Write ' + this.wordsMissing + ' more ' + (this.wordsMissing === 1 ? 'word' : 'words') + ' to reach the minimum of ' + this.minimumWords + '.';
+                    if (this.wordsOver) return 'Cut ' + this.wordsOver + ' ' + (this.wordsOver === 1 ? 'word' : 'words') + ' to stay under the maximum of ' + this.maximumWords + '.';
+                    if (!this.statementsReady) {
+                        const missing = this.minimumStatements - this.completeStatementCount;
+                        return 'End ' + missing + ' more ' + (missing === 1 ? 'sentence' : 'sentences') + ' with . ! or ? to reach ' + this.minimumStatements + ' complete ' + (this.minimumStatements === 1 ? 'statement' : 'statements') + '.';
+                    }
+                    return 'Word and sentence counts are ready. Approval also checks each 8-second beat.';
+                }
+            }"
+            class="space-y-2"
+        >
+            <textarea
+                id="script-text-{{ post.id }}"
+                name="script_text"
+                rows="{{ [4, (((script | default('') | length) // 48) + 1)] | max }}"
+                maxlength="900"
+                x-on:input="text = $event.target.value"
+                class="brand-focus w-full rounded-xl border border-[#1C2740]/20 px-3 py-3 text-sm text-[#1C2740]"
+            >{{ script }}</textarea>
+            <div
+                class="rounded-xl border px-3 py-2"
+                :class="(wordsReady && statementsReady) ? 'border-emerald-300 bg-emerald-50' : 'border-amber-300 bg-amber-50'"
+                aria-live="polite"
+            >
+                <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                    <p class="text-sm font-bold" :class="wordsReady ? 'text-emerald-800' : 'text-amber-800'">
+                        <span x-text="wordCount"></span>/{{ duration.minimum_words }}–{{ duration.maximum_words }} words
+                    </p>
+                    <p class="text-sm font-bold" :class="wordsReady ? 'text-emerald-800' : 'text-amber-800'" x-text="wordGapLabel"></p>
+                </div>
+                <p class="mt-1 text-xs" :class="(wordsReady && statementsReady) ? 'text-emerald-800' : 'text-amber-800'" x-text="contractStatus"></p>
+                <p class="mt-1 text-xs text-[#1C2740]/65">
+                    {{ duration.requested_duration_seconds }}s target ·
+                    <span x-text="completeStatementCount"></span>/at least {{ duration.minimum_semantic_blocks }} complete statement{% if duration.minimum_semantic_blocks != 1 %}s{% endif %}
+                </p>
+            </div>
+        </div>
+        <div class="rounded-xl border border-[#006AAB]/15 bg-[#006AAB]/5 px-3 py-3">
+            <label for="presentation-mode-{{ post.id }}" class="block text-sm font-bold text-[#1C2740]">Presenter format</label>
+            <select
+                id="presentation-mode-{{ post.id }}"
+                name="semantic_presentation_mode"
+                class="brand-focus mt-2 w-full rounded-xl border border-[#1C2740]/20 bg-white px-3 py-2 text-sm text-[#1C2740]"
+            >
+                <option value="wheelchair_seated" {% if seed.get('semantic_presentation_mode', 'wheelchair_seated') == 'wheelchair_seated' %}selected{% endif %}>Seated wheelchair scene · generate a new scene plate</option>
+                <option value="standing_presenter" {% if seed.get('semantic_presentation_mode') == 'standing_presenter' %}selected{% endif %}>Standing presenter · reuse the canonical actor image</option>
+            </select>
+            <p class="mt-1 text-xs text-[#1C2740]/65">
+                Standing presenter preserves the approved frontal actor reference unchanged and skips scene-image synthesis.
+            </p>
+        </div>
         <div class="flex flex-wrap items-center justify-between gap-3">
             <div class="flex flex-wrap gap-2">
             <button type="submit" class="brand-focus rounded-xl border border-[#006AAB] px-4 py-2 text-sm font-bold text-[#006AAB]">

@@ -2313,6 +2313,23 @@ def test_progress_endpoint_distinguishes_active_post_generation_from_queue(monke
     )
 
 
+def test_progress_endpoint_does_not_claim_paid_generation_before_approval(monkeypatch):
+    _handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    client = TestClient(app, base_url="http://localhost")
+    _seed_awaiting_paid_run(state)
+
+    payload = client.get("/semantic-videos/posts/post-1/progress").json()["data"]
+
+    assert payload["stage"] == "awaiting_paid_approval"
+    assert payload["progress_percent"] == 5
+    assert payload["estimated_remaining_seconds"] is None
+    assert payload["status_message"] == (
+        "The free Veo plan is ready. No paid Veo generation has started."
+    )
+
+
 def test_progress_endpoint_reports_scene_plate_generation_state(monkeypatch):
     _handlers, state, _storage = _install_repository(monkeypatch)
     from app.main import app
@@ -2743,6 +2760,47 @@ def test_progress_endpoint_makes_terminal_scene_job_explicit_and_retryable(monke
     assert payload["candidate_generation_phase"] == "failed"
     assert payload["stage"] == "scene_image_failed"
     assert payload["status_message"] == "The renderer timed out safely. Retry this script."
+
+
+def test_progress_endpoint_keeps_completed_queue_handoff_live_until_run_is_ready(
+    monkeypatch,
+):
+    handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+
+    _seed_awaiting_paid_run(state)
+    state["run"]["stage"] = "awaiting_reference_approval"
+    state["run"]["master_snapshot"] = {}
+    state["run"]["candidate_generation_progress"] = {
+        "phase": "ready",
+        "details": {"candidate_count": 1},
+    }
+    monkeypatch.setattr(
+        handlers,
+        "get_scene_image_job",
+        lambda _post_id, **_kwargs: {
+            "id": "job-completed",
+            "status": "completed",
+            "expected_run_id": state["run"]["id"],
+            "run_id": state["run"]["id"],
+            "expected_revision": state["run"]["revision"],
+            "created_at": "2026-08-05T05:00:00+00:00",
+            "finished_at": "2026-08-05T05:01:00+00:00",
+        },
+    )
+
+    client = TestClient(app, base_url="http://localhost")
+    handoff = client.get("/semantic-videos/posts/post-1/progress").json()["data"]
+
+    assert handoff["scene_image_job_status"] == "completed"
+    assert handoff["candidate_generation_status"] == "generating"
+    assert handoff["stage"] == "scene_image_generating"
+
+    state["run"]["master_snapshot"] = {"candidates": [{"index": 1}]}
+    ready = client.get("/semantic-videos/posts/post-1/progress").json()["data"]
+
+    assert ready["candidate_generation_status"] == "ready"
+    assert ready["stage"] == "awaiting_reference_approval"
 
 
 def test_failed_unlinked_scene_job_does_not_expose_a_terminal_run_revision(

@@ -60,6 +60,39 @@ Return JSON only, without Markdown or commentary, using exactly this shape:
 }
 Use booleans for every component, a confidence number from 0 through 1, and arrays of strings for both lists."""
 
+_STANDING_VISUAL_QA_PROMPT = """Image 1 is the approved standing-presenter scene-plate master reference.
+Image 2 is the labeled multi-frame contact sheet extracted from the generated takes.
+
+Compare only the supplied references and judge whether they preserve the exact wardrobe and location/background
+shown in the approved scene plate, the same upright standing presentation, stable UGC framing, and no visual
+artifacts. Actor identity is evaluated separately against the immutable original actor references. The actor must
+remain standing throughout. No wheelchair, mobility device, chair, stool, seated pose, or sitting pose may appear,
+and the actor must not walk. The output schema retains the legacy field name wheelchair_consistent for database
+compatibility; in this standing-presenter mode set wheelchair_consistent=true only when the actor remains standing
+and every prohibited mobility/seating element is absent. Set it false for sitting, walking, or any wheelchair,
+mobility device, chair, or stool. Inspect every labeled frame carefully, especially the lower third. Set
+no_artifacts=false if a raw frame contains baked-in captions, subtitles, logos, watermarks, letters, symbols,
+malformed glyphs, or gibberish text; contact-sheet labels above frames are QA metadata and are not artifacts.
+
+For framing_stable, allow small fixed crop differences between takes plus natural speaking head movement, blinking,
+expression changes, and continuous low-amplitude handheld micro-motion. Fail framing only for a material composition
+change or deliberate directional pan, tilt, dolly, orbit, push-in, pull-back, zoom, or reframe. Compare every
+delivered-tail frame with the preceding final-word frame. Report every observed difference. This is scene-continuity
+comparison only.
+
+Return JSON only, without Markdown or commentary, using exactly this shape:
+{
+  "wardrobe_consistent": true,
+  "room_consistent": true,
+  "wheelchair_consistent": true,
+  "framing_stable": true,
+  "no_artifacts": true,
+  "confidence": 0.0,
+  "blocking_reasons": ["specific blocking mismatch"],
+  "observed_differences": ["specific visible difference"]
+}
+Use booleans for every component, a confidence number from 0 through 1, and arrays of strings for both lists."""
+
 
 @dataclass(frozen=True)
 class SceneContinuityQAReport:
@@ -94,13 +127,23 @@ def evaluate_visual_consistency(
     contact_sheet: Dict[str, Any],
     llm_client: Optional[Any] = None,
     model: Optional[str] = None,
+    presentation_mode: str = "wheelchair_seated",
 ) -> SceneContinuityQAReport:
     """Compare a generated take contact sheet with its approved scene plate."""
     _validate_image_input(master_image, label="approved_master")
     _validate_image_input(contact_sheet, label="contact_sheet")
     client = llm_client or get_llm_client()
+    if presentation_mode not in {"wheelchair_seated", "standing_presenter"}:
+        raise ValidationError(
+            "Visual QA presentation mode is unsupported.",
+            {"presentation_mode": presentation_mode},
+        )
     raw_response = client.generate_gemini_text(
-        prompt=_VISUAL_QA_PROMPT,
+        prompt=(
+            _STANDING_VISUAL_QA_PROMPT
+            if presentation_mode == "standing_presenter"
+            else _VISUAL_QA_PROMPT
+        ),
         model=model,
         temperature=0,
         input_images=[master_image, contact_sheet],

@@ -12,11 +12,22 @@ from app.core.config import Settings, get_settings
 from app.core.errors import ValidationError
 from app.features.shot_frames.wheelchair_scene_plate import (
     FRAMING_CONTRACT,
+    STANDING_FRAMING_CONTRACT,
+    STANDING_PRESENTATION_CONTRACT,
     WHEELCHAIR_VISUAL_CONTRACT,
 )
 
 
 VISUAL_CONTRACT_VERSION = "semantic_visual_contract_v1"
+STANDING_VISUAL_CONTRACT_VERSION = "semantic_visual_contract_v3"
+DEFAULT_PRESENTATION_MODE = "wheelchair_seated"
+STANDING_PRESENTATION_MODE = "standing_presenter"
+ACTOR_FRONT_PASSTHROUGH_MODEL = "actor-front-passthrough-v1"
+ACTOR_FRONT_PASSTHROUGH_MODE = "actor_front_passthrough"
+ACTOR_FRONT_BYTE_IDENTITY_MODEL = "sha256-exact-identity-v1"
+SUPPORTED_PRESENTATION_MODES = frozenset(
+    {DEFAULT_PRESENTATION_MODE, STANDING_PRESENTATION_MODE}
+)
 SCENE_PLATE_REFERENCE_ROLE_CONTRACT = (
     "actor_front",
     "actor_three_quarter",
@@ -56,6 +67,16 @@ def _canonical_hash(value: Mapping[str, Any]) -> str:
     return sha256(payload.encode("utf-8")).hexdigest()
 
 
+def normalize_presentation_mode(value: Any) -> str:
+    mode = str(value or DEFAULT_PRESENTATION_MODE).strip().lower()
+    if mode not in SUPPORTED_PRESENTATION_MODES:
+        raise ValidationError(
+            "Semantic presentation mode is unsupported.",
+            {"presentation_mode": mode or None},
+        )
+    return mode
+
+
 def build_actor_reference_fingerprint(actor_references: Any) -> str:
     """Hash ordered, byte-verified actor anchors for one canonical scene plate."""
     if not isinstance(actor_references, (list, tuple)) or len(actor_references) != 2:
@@ -88,6 +109,7 @@ def build_actor_reference_fingerprint(actor_references: Any) -> str:
 def build_scene_plate_generation_contract(
     *,
     actor_reference_fingerprint: str,
+    presentation_mode: str = DEFAULT_PRESENTATION_MODE,
     settings: Settings | None = None,
 ) -> dict[str, Any]:
     resolved = settings or get_settings()
@@ -100,16 +122,24 @@ def build_scene_plate_generation_contract(
         )
     fields = {
         "version": str(resolved.semantic_scene_plate_contract_version).strip(),
-        "model": str(resolved.semantic_scene_plate_model).strip(),
+        "model": (
+            ACTOR_FRONT_PASSTHROUGH_MODEL
+            if normalize_presentation_mode(presentation_mode)
+            == STANDING_PRESENTATION_MODE
+            else str(resolved.semantic_scene_plate_model).strip()
+        ),
         "prompt_contract_version": str(
             resolved.semantic_scene_plate_contract_version
         ).strip(),
         "reference_roles": list(SCENE_PLATE_REFERENCE_ROLE_CONTRACT),
         "aspect_ratio": SCENE_PLATE_ASPECT_RATIO,
         "image_size": str(resolved.semantic_scene_plate_image_size),
-        "identity_evaluator_model": str(
-            resolved.semantic_scene_identity_gate_model
-        ).strip(),
+        "identity_evaluator_model": (
+            ACTOR_FRONT_BYTE_IDENTITY_MODEL
+            if normalize_presentation_mode(presentation_mode)
+            == STANDING_PRESENTATION_MODE
+            else str(resolved.semantic_scene_identity_gate_model).strip()
+        ),
         "identity_evaluator_location": str(
             resolved.semantic_scene_identity_gate_location
         ).strip(),
@@ -121,6 +151,12 @@ def build_scene_plate_generation_contract(
         ),
         "actor_reference_fingerprint": fingerprint,
     }
+    mode = normalize_presentation_mode(presentation_mode)
+    if mode != DEFAULT_PRESENTATION_MODE:
+        fields["presentation_mode"] = mode
+        fields["standing_prompt_contract_version"] = "standing-presenter-v3"
+        fields["master_source_mode"] = ACTOR_FRONT_PASSTHROUGH_MODE
+        fields["master_source_role"] = "actor_front"
     if not fields["version"] or not fields["model"] or not fields[
         "identity_evaluator_model"
     ]:
@@ -132,6 +168,7 @@ def validate_scene_plate_generation_contract(
     value: Mapping[str, Any] | None,
     *,
     actor_reference_fingerprint: str,
+    presentation_mode: str | None = None,
     settings: Settings | None = None,
 ) -> dict[str, Any]:
     if not isinstance(value, Mapping):
@@ -140,6 +177,11 @@ def validate_scene_plate_generation_contract(
         )
     expected = build_scene_plate_generation_contract(
         actor_reference_fingerprint=actor_reference_fingerprint,
+        presentation_mode=(
+            presentation_mode
+            if presentation_mode is not None
+            else str(value.get("presentation_mode") or DEFAULT_PRESENTATION_MODE)
+        ),
         settings=settings,
     )
     if dict(value) != expected:
@@ -257,18 +299,47 @@ def build_visual_contract(reference: Mapping[str, Any]) -> dict[str, Any]:
     location = reference.get("location_reference")
     if not isinstance(location, Mapping):
         raise ValidationError("Semantic visual contract requires a location reference.")
+    presentation_mode = normalize_presentation_mode(reference.get("presentation_mode"))
     fields = {
-        "version": VISUAL_CONTRACT_VERSION,
+        "version": (
+            STANDING_VISUAL_CONTRACT_VERSION
+            if presentation_mode == STANDING_PRESENTATION_MODE
+            else VISUAL_CONTRACT_VERSION
+        ),
         "scene_key": str(reference.get("scene_key") or location.get("scene_key") or "").strip(),
         "scene_description": " ".join(str(reference.get("scene_description") or "").split()),
         "wardrobe_key": str(reference.get("wardrobe_key") or "").strip(),
         "wardrobe_description": " ".join(
             str(reference.get("wardrobe_description") or "").split()
         ),
-        "wheelchair_description": WHEELCHAIR_VISUAL_CONTRACT,
-        "framing_description": FRAMING_CONTRACT,
         "location_reference_sha256": str(location.get("sha256") or "").strip().lower(),
     }
+    if presentation_mode == STANDING_PRESENTATION_MODE:
+        actor_references = reference.get("actor_references")
+        actor_front = (
+            actor_references[0]
+            if isinstance(actor_references, (list, tuple)) and actor_references
+            else {}
+        )
+        fields.update(
+            {
+                "presentation_mode": presentation_mode,
+                "master_source_mode": ACTOR_FRONT_PASSTHROUGH_MODE,
+                "master_source_role": "actor_front",
+                "actor_front_sha256": str(actor_front.get("sha256") or "")
+                .strip()
+                .lower(),
+                "body_presentation_description": STANDING_PRESENTATION_CONTRACT,
+                "framing_description": STANDING_FRAMING_CONTRACT,
+            }
+        )
+    else:
+        fields.update(
+            {
+                "wheelchair_description": WHEELCHAIR_VISUAL_CONTRACT,
+                "framing_description": FRAMING_CONTRACT,
+            }
+        )
     missing = [
         key
         for key in (
@@ -287,6 +358,12 @@ def build_visual_contract(reference: Mapping[str, Any]) -> dict[str, Any]:
         )
     if len(fields["location_reference_sha256"]) != 64:
         raise ValidationError("Semantic visual contract requires a SHA-256 location hash.")
+    if presentation_mode == STANDING_PRESENTATION_MODE and len(
+        fields["actor_front_sha256"]
+    ) != 64:
+        raise ValidationError(
+            "Standing Semantic visual contract requires the immutable actor-front hash."
+        )
     return {**fields, "contract_hash": _canonical_hash(fields)}
 
 
@@ -298,10 +375,17 @@ def validate_visual_contract(value: Mapping[str, Any] | None) -> dict[str, Any]:
     expected = build_visual_contract(
         {
             **payload,
+            "presentation_mode": payload.get("presentation_mode"),
             "location_reference": {
                 "scene_key": payload.get("scene_key"),
                 "sha256": payload.get("location_reference_sha256"),
             },
+            "actor_references": [
+                {
+                    "role": "actor_front",
+                    "sha256": payload.get("actor_front_sha256"),
+                }
+            ],
         }
     )
     if supplied_hash and supplied_hash != expected["contract_hash"]:
@@ -318,9 +402,17 @@ __all__ = [
     "SCENE_PLATE_ASPECT_RATIO",
     "SCENE_PLATE_REFERENCE_ROLE_CONTRACT",
     "VISUAL_CONTRACT_VERSION",
+    "STANDING_VISUAL_CONTRACT_VERSION",
+    "DEFAULT_PRESENTATION_MODE",
+    "STANDING_PRESENTATION_MODE",
+    "ACTOR_FRONT_PASSTHROUGH_MODEL",
+    "ACTOR_FRONT_PASSTHROUGH_MODE",
+    "ACTOR_FRONT_BYTE_IDENTITY_MODEL",
+    "SUPPORTED_PRESENTATION_MODES",
     "build_actor_reference_fingerprint",
     "build_scene_plate_generation_contract",
     "build_visual_contract",
+    "normalize_presentation_mode",
     "select_semantic_wardrobe",
     "validate_scene_plate_generation_contract",
     "validate_scene_identity_gate",
