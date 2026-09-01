@@ -259,13 +259,16 @@ def test_compile_veo_take_requests_locks_first_frame_and_maps_beats_deterministi
         assert "38-year-old" not in request.prompt
         assert "hazel" not in request.prompt
         assert "terracotta" not in request.prompt
-        assert "seated woman" in request.prompt.lower()
+        assert "seated actor" in request.prompt.lower()
         assert "exact visibility and relaxed resting positions" in request.prompt.lower()
         assert "dialogue is spoken advice only" in request.prompt.lower()
         assert "remains speech content rather than a physical cue" in request.prompt.lower()
         assert "irregular natural blinking" in request.prompt.lower()
         assert "minimal speech-coupled head movement" in request.prompt.lower()
-        assert "one warm adult female voice speaking native german" in request.prompt.lower()
+        assert (
+            "one warm adult voice whose vocal character matches the person visible in the "
+            "supplied source frame" in request.prompt.lower()
+        )
         assert "consistent with the source-frame location" in request.prompt.lower()
         assert "home-office" not in request.prompt.lower()
         expected_final_word_time = request.duration_seconds - (

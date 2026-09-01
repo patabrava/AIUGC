@@ -27,19 +27,41 @@ WHEELCHAIR_VISUAL_CONTRACT = (
     "crop it out of frame entirely."
 )
 FRAMING_CONTRACT = (
-    "Use a vertical 9:16 arm's-length selfie framing, as if she is holding the phone in her own "
-    "hand just above her eye line. She has turned her whole body to face the phone: her shoulders "
-    "are square to the lens and her nose points straight at it, so the frame reads as her own "
-    "selfie rather than a photograph someone else took of her. The room sits behind her at "
-    "whatever angle it happens to fall. Crop tight: the top edge of the frame sits just above her hair, "
-    "and the bottom edge cuts straight across her chest below the armpits. Her head alone fills "
-    "about 40 to 45 percent of the frame height, so her face reads large and identity-readable. "
+    "Use a vertical 9:16 arm's-length selfie framing, as if the actor is holding the phone in one "
+    "hand just above eye level. The actor has turned to face the phone: the actor's shoulders "
+    "are square to the lens and the nose points straight at it, so the frame reads as the actor's own "
+    "selfie rather than a photograph someone else took. The room sits behind the actor at "
+    "whatever angle it happens to fall. Crop tight: the top edge of the frame sits just above the hair, "
+    "and the bottom edge cuts straight across the chest below the armpits. The head alone fills "
+    "about 40 to 45 percent of the frame height, so the face reads large and identity-readable. "
     "This tight crop takes priority over showing the room: a single corner of the location past "
-    "her shoulder is all the background this frame needs. The phone angles down a few degrees, the "
-    "horizon is visibly tilted three to six degrees off level, and she sits well off-center rather "
+    "the shoulder is all the background this frame needs. The phone angles down a few degrees, the "
+    "horizon is visibly tilted three to six degrees off level, and the actor sits well off-center rather "
     "than centered. Render it with close front-camera perspective at roughly a 24mm equivalent, "
     "deep depth of field, and modern smartphone HDR auto-tone. The wheelchair may fall outside "
     "this crop."
+)
+# The scene brief is rewritten by the Raw Camera prompt writer before it reaches the
+# image model, and that writer is built to add concrete physical description. Naming
+# the actor's gender here once cost an entire batch: the copy described the previous
+# actress while the references showed a new male actor, and the provider fused the two
+# into a distorted body. State the reference images as the only identity source, and
+# forbid the writer from inventing a description to fill the gap.
+IDENTITY_SOURCE_CONTRACT = (
+    "The supplied identity references are the sole authority for who the actor is: gender "
+    "presentation, build, skin tone, hair, facial hair, eyewear, and apparent age all come from "
+    "those images alone. Never infer any of them from this text, and never substitute a different "
+    "kind of person than the references show. Add no written physical description of the actor "
+    "and invent no attribute the references do not show; refer to the subject only as the actor."
+)
+# Naming one actor's glasses here is the same defect as naming their gender: it
+# survives an actor change and forces eyewear the references never showed. Bind
+# the instruction to the references instead of to a particular pair of frames.
+EYEWEAR_SOURCE_CONTRACT = (
+    "Reproduce eyewear exactly as the identity references show it. If those references show "
+    "eyeglasses, preserve their exact frame shape, scale, color, and position, fully visible and "
+    "unobscured; if they show none, add none. Never substitute different frames or sunglasses, and "
+    "never replace visible glasses with a contact-lens appearance."
 )
 STANDING_PRESENTATION_CONTRACT = (
     "The same adult actor stands upright throughout with a natural balanced stance, level shoulders, "
@@ -49,7 +71,7 @@ STANDING_FRAMING_CONTRACT = (
     "Use a vertical 9:16 arm's-length front-camera framing at eye level, as if the standing actor is "
     "holding the phone. Keep the actor square to the lens and identity-readable in a waist-up crop: the top "
     "edge sits just above the hair and the bottom edge falls below the waist. Show enough upright torso and "
-    "room geometry that his unsupported standing position is unmistakable. Preserve raw modern smartphone "
+    "room geometry that the unsupported standing position is unmistakable. Preserve raw modern smartphone "
     "perspective, deep depth of field, slight natural roll, and quiet handheld imperfection."
 )
 DEFAULT_PRESENTATION_MODE = "wheelchair_seated"
@@ -59,38 +81,38 @@ ACTOR_FRONT_PASSTHROUGH_MODE = "actor_front_passthrough"
 _REFERENCE_ROLES = ("identity_primary", "identity_support", "location")
 _CANDIDATE_VARIATIONS = (
     (
-        "Candidate 1 composition: she faces the phone straight on with her shoulders "
+        "Candidate 1 composition: the actor faces the phone straight on with the shoulders "
         "square to the lens, the phone rolled about four degrees counter-clockwise so "
-        "the horizon is visibly tilted. Her head sits clearly left of frame center."
+        "the horizon is visibly tilted. The head sits clearly left of frame center."
     ),
     (
-        "Candidate 2 composition: she faces the phone straight on with her shoulders "
+        "Candidate 2 composition: the actor faces the phone straight on with the shoulders "
         "square to the lens, the phone rolled about five degrees clockwise and held a "
-        "little lower so the downward angle is slight. Her head sits clearly right of "
-        "frame center, with a small natural head tilt to her right."
+        "little lower so the downward angle is slight. The head sits clearly right of "
+        "frame center, with a small natural tilt toward the actor's right."
     ),
     (
-        "Candidate 3 composition: she faces the phone straight on with her shoulders "
+        "Candidate 3 composition: the actor faces the phone straight on with the shoulders "
         "square to the lens, the phone rolled about three degrees counter-clockwise and "
-        "raised higher so the downward angle is obvious. Her head sits clearly left of "
-        "frame center, with a small natural head tilt to her left."
+        "raised higher so the downward angle is obvious. The head sits clearly left of "
+        "frame center, with a small natural tilt toward the actor's left."
     ),
 )
 _STANDING_CANDIDATE_VARIATIONS = (
     (
-        "Candidate 1 composition: he faces the phone straight on with his shoulders square to the lens, "
-        "the phone rolled about four degrees counter-clockwise so the horizon is visibly tilted. His head "
+        "Candidate 1 composition: the actor faces the phone straight on with the shoulders square to the lens, "
+        "the phone rolled about four degrees counter-clockwise so the horizon is visibly tilted. The head "
         "sits clearly left of frame center."
     ),
     (
-        "Candidate 2 composition: he faces the phone straight on with his shoulders square to the lens, "
-        "the phone rolled about five degrees clockwise and held a little lower. His head sits clearly right "
-        "of frame center, with a small natural head tilt to his right."
+        "Candidate 2 composition: the actor faces the phone straight on with the shoulders square to the lens, "
+        "the phone rolled about five degrees clockwise and held a little lower. The head sits clearly right "
+        "of frame center, with a small natural tilt toward the actor's right."
     ),
     (
-        "Candidate 3 composition: he faces the phone straight on with his shoulders square to the lens, "
-        "the phone rolled about three degrees counter-clockwise and raised slightly higher. His head sits "
-        "clearly left of frame center, with a small natural head tilt to his left."
+        "Candidate 3 composition: the actor faces the phone straight on with the shoulders square to the lens, "
+        "the phone rolled about three degrees counter-clockwise and raised slightly higher. The head sits "
+        "clearly left of frame center, with a small natural tilt toward the actor's left."
     ),
 )
 _MAX_DIVERSITY_ATTEMPTS = 3
@@ -326,21 +348,21 @@ def build_canonical_scene_plate_prompt(
             "Create one photorealistic vertical start image using all three supplied images with fixed roles. "
             "Image 1 is the PRIMARY ACTOR IDENTITY reference. Image 2 is the SAME ACTOR from another view and "
             "is supporting identity evidence only. Image 3 is the ACTOR-FREE LOCATION reference. Place exactly "
-            "the same adult man from Images 1 and 2 inside Image 3. Preserve his exact facial geometry, hairline, "
+            "the same adult person from Images 1 and 2 inside Image 3. "
+            f"{IDENTITY_SOURCE_CONTRACT} "
+            "Preserve that person's exact facial geometry, hairline, "
             "hair, apparent age, body proportions, and ordinary camera-file skin texture with visible "
             "pores, natural tonal variation, natural under-eye and lip texture, mild facial asymmetry, and realistic "
             "hairline flyaways. Images 1 and 2 provide identity only: do not copy their clothing. Replace every "
             "visible upper-body garment with the requested outfit below; its garment type and color must be "
-            "unmistakable. He must wear the same rectangular dark-rimmed prescription eyeglasses visible in both "
-            "identity references; preserve their exact shape, scale, color, and position. The eyeglasses are "
-            "mandatory and unobscured. Do not average him into a new face. "
+            f"unmistakable. {EYEWEAR_SOURCE_CONTRACT} Do not average the actor into a new face. "
             f"{STANDING_PRESENTATION_CONTRACT} {STANDING_FRAMING_CONTRACT} "
-            f"His upper-body outfit is exactly: {wardrobe}. The location is exactly: {scene}. "
+            f"The actor's upper-body outfit is exactly: {wardrobe}. The location is exactly: {scene}. "
             "Use natural available light and a quiet conversational expression immediately before speaking, with "
-            "his mouth closed. Keep the raw unfiltered front-camera look and natural skin texture. Render no other "
+            "the mouth closed. Keep the raw unfiltered front-camera look and natural skin texture. Render no other "
             "person, text, logo, watermark, wheelchair, mobility device, chair, seated pose, sitting pose, walking "
             "pose, beauty retouching, poreless skin, glamour lighting, CGI smoothness, face averaging, wide shot, "
-            "full-body shot, missing eyeglasses, different eyewear, sunglasses, or contact-lens appearance. "
+            "full-body shot, added or removed eyewear, different eyewear, sunglasses, or contact-lens appearance. "
             f"{variation_directive}"
         )
     if presentation_mode != DEFAULT_PRESENTATION_MODE:
@@ -352,18 +374,21 @@ def build_canonical_scene_plate_prompt(
         "Create one photorealistic vertical start image using all three supplied images with fixed roles. "
         "Image 1 is the PRIMARY ACTOR IDENTITY reference. Image 2 is the SAME ACTOR from another view and "
         "is supporting identity evidence only. Image 3 is the ACTOR-FREE LOCATION reference. Place exactly "
-        "the same adult woman from Images 1 and 2 inside Image 3. Preserve her exact facial geometry, "
+        "the same adult person from Images 1 and 2 inside Image 3. "
+        f"{IDENTITY_SOURCE_CONTRACT} "
+        "Preserve that person's exact facial geometry, "
         "hairline, hair, apparent age, body proportions, and ordinary camera-file skin texture with visible "
         "pores, natural tonal variation, natural under-eye and lip texture, mild facial asymmetry, and "
         "realistic hairline flyaways. Images 1 and 2 provide identity only: do not copy their clothing. "
         "Replace every visible upper-body garment from those references with the requested outfit below; "
-        "its garment type and color must be visibly unmistakable. Do not average her into a new face. "
-        "She is seated upright in a manual "
+        f"its garment type and color must be visibly unmistakable. {EYEWEAR_SOURCE_CONTRACT} "
+        "Do not average the actor into a new face. "
+        "The actor is seated upright in a manual "
         "wheelchair, which may sit partly or entirely outside this crop. "
         f"{WHEELCHAIR_VISUAL_CONTRACT} {FRAMING_CONTRACT} "
-        f"Her upper-body outfit is exactly: {wardrobe}. The location is exactly: {scene}. "
-        "Her hands and any visible wheelchair geometry are physically plausible. Use natural available "
-        "light and a quiet conversational expression immediately before speaking, with her mouth closed. "
+        f"The actor's upper-body outfit is exactly: {wardrobe}. The location is exactly: {scene}. "
+        "The hands and any visible wheelchair geometry are physically plausible. Use natural available "
+        "light and a quiet conversational expression immediately before speaking, with the mouth closed. "
         "Keep the raw unfiltered front-camera look with natural skin texture preserved and no filters. "
         "Render no other person, text, logo, watermark, mobility device, standing pose, walking pose, "
         "beauty retouching, poreless skin, glamour lighting, CGI smoothness, face averaging, wide shot, "
@@ -382,19 +407,18 @@ def build_derived_scene_plate_prompt(
     if presentation_mode == STANDING_PRESENTATION_MODE:
         return (
             "Create one photorealistic vertical start image using all three supplied images with fixed roles. "
-            "Image 1 is the canonical scene plate and is authoritative for the exact standing man, facial geometry, "
+            "Image 1 is the canonical scene plate and is authoritative for the exact standing person, facial geometry, "
             "scale, and upright posture. Image 2 is the unchanged front identity reference and exists only to prevent "
-            "facial drift. Image 3 is the ACTOR-FREE LOCATION reference. Preserve the exact man from Images 1 and 2, "
-            "his standing pose, camera height, camera distance, and face size from Image 1. He must wear the same "
-            "rectangular dark-rimmed prescription eyeglasses from the front identity reference; preserve their exact "
-            "shape, scale, color, and position. The eyeglasses are mandatory and unobscured. Image 1's "
+            "facial drift. Image 3 is the ACTOR-FREE LOCATION reference. Preserve the exact person from Images 1 and 2, "
+            "their standing pose, camera height, camera distance, and face size from Image 1. "
+            f"{IDENTITY_SOURCE_CONTRACT} {EYEWEAR_SOURCE_CONTRACT} Image 1's "
             "clothing is not authoritative: replace every visible upper-body garment with the requested outfit. "
             f"{STANDING_PRESENTATION_CONTRACT} {STANDING_FRAMING_CONTRACT} "
             f"Keep the actor-free location exactly: {scene}; and the upper-body outfit exactly: {wardrobe}. "
-            "Keep his mouth closed with a quiet conversational expression and preserve natural camera-file skin "
+            "Keep the mouth closed with a quiet conversational expression and preserve natural camera-file skin "
             "texture. Render no other person, text, logo, watermark, wheelchair, mobility device, chair, seated pose, "
             "sitting pose, walking pose, wide shot, full-body shot, beauty retouching, poreless skin, glamour lighting, "
-            "CGI smoothness, face averaging, motion blur, missing eyeglasses, different eyewear, sunglasses, or "
+            "CGI smoothness, face averaging, motion blur, added or removed eyewear, different eyewear, sunglasses, or "
             "contact-lens appearance. "
             f"{variation_directive}"
         )
@@ -405,19 +429,21 @@ def build_derived_scene_plate_prompt(
         )
     return (
         "Create one photorealistic vertical start image using all three supplied images with fixed roles. "
-        "Image 1 is the canonical scene plate and is the authoritative source for the exact woman, exact "
+        "Image 1 is the canonical scene plate and is the authoritative source for the exact person, exact "
         "manual wheelchair, seated posture, facial geometry, and scale. "
-        "Image 2 is the unchanged front identity reference for the same woman and exists only to prevent "
-        "facial drift. Image 3 is the ACTOR-FREE LOCATION reference. Preserve the exact woman from Images 1 "
+        "Image 2 is the unchanged front identity reference for the same person and exists only to prevent "
+        "facial drift. Image 3 is the ACTOR-FREE LOCATION reference. Preserve the exact person from Images 1 "
         "and 2 and preserve the exact manual wheelchair, seated pose, camera height, camera distance, and "
-        "face size from Image 1. Image 1's clothing is not authoritative: replace every visible upper-body "
+        "face size from Image 1. "
+        f"{IDENTITY_SOURCE_CONTRACT} {EYEWEAR_SOURCE_CONTRACT} "
+        "Image 1's clothing is not authoritative: replace every visible upper-body "
         "garment with the requested outfit below, making its garment type and color visibly unmistakable. "
         "Apply only the modest candidate-specific roll, phone height, and off-center placement "
-        "described below, keeping her square to the lens; preserve the overall selfie framing "
+        "described below, keeping the actor square to the lens; preserve the overall selfie framing "
         "contract. "
         f"{WHEELCHAIR_VISUAL_CONTRACT} {FRAMING_CONTRACT} "
         f"Keep the actor-free location exactly: {scene}; and the upper-body outfit exactly: {wardrobe}. "
-        "Keep her mouth closed with a quiet conversational expression. Preserve ordinary camera-file skin "
+        "Keep the mouth closed with a quiet conversational expression. Preserve ordinary camera-file skin "
         "texture, visible pores, natural tonal variation, natural under-eye and lip texture, mild facial "
         "asymmetry, and realistic hairline flyaways under ordinary indoor optics and available light. Keep "
         "hands, any visible wheelchair, and room perspective physically plausible. Render no other person, "
@@ -447,7 +473,7 @@ def _variation_directive(
     return (
         f"{directive} DIVERSITY RECOVERY ATTEMPT {attempt}: the prior render was "
         "perceptually indistinguishable from another option. Make the specified roll, "
-        "phone height, and off-center placement unmistakably visible while keeping her "
+        "phone height, and off-center placement unmistakably visible while keeping the actor "
         "square to the lens and preserving actor identity, presentation posture, outfit, room, "
         "face size, and crop."
     )
@@ -1180,7 +1206,9 @@ def generate_scene_plate_candidates(
 
 
 __all__ = [
+    "EYEWEAR_SOURCE_CONTRACT",
     "FRAMING_CONTRACT",
+    "IDENTITY_SOURCE_CONTRACT",
     "STANDING_FRAMING_CONTRACT",
     "STANDING_PRESENTATION_CONTRACT",
     "WHEELCHAIR_VISUAL_CONTRACT",

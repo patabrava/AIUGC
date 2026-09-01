@@ -1634,14 +1634,192 @@ def test_standing_scene_and_veo_prompts_forbid_wheelchairs_without_forbidding_st
     )
     veo_prompt = build_veo_take_prompt(beat, visual_contract=contract)
 
-    assert "same adult man" in scene_prompt
+    assert "same adult person" in scene_prompt
     assert "stands upright" in scene_prompt
     assert "wheelchair, mobility device, chair, seated pose" in scene_prompt
-    assert "eyeglasses are mandatory" in scene_prompt
+    assert "Reproduce eyewear exactly as the identity references show it" in scene_prompt
     assert "waist-up crop" in scene_prompt
-    assert "standing man speaks" in veo_prompt
-    assert "adult male voice" in veo_prompt
+    assert "standing actor speaks" in veo_prompt
+    assert "matches the person visible in the supplied source frame" in veo_prompt
     assert "same standing posture" in veo_prompt
     assert "standing," not in STANDING_EFFECTIVE_NEGATIVE_PROMPT.lower()
     assert "wheelchair" in STANDING_EFFECTIVE_NEGATIVE_PROMPT.lower()
     assert "sitting" in STANDING_EFFECTIVE_NEGATIVE_PROMPT.lower()
+
+
+_GENDERED_TERMS = (
+    "she",
+    "her",
+    "hers",
+    "herself",
+    "woman",
+    "women",
+    "female",
+    "actress",
+    "he",
+    "his",
+    "him",
+    "himself",
+    "man",
+    "men",
+    "male",
+)
+
+
+def _gendered_terms_in(text: str) -> list[str]:
+    padded = f" {' '.join(str(text).split())} ".lower()
+    return [term for term in _GENDERED_TERMS if f" {term} " in padded]
+
+
+@pytest.mark.parametrize(
+    "presentation_mode", ["wheelchair_seated", "standing_presenter"]
+)
+def test_scene_plate_prompts_never_hardcode_the_actor_gender(presentation_mode):
+    """A changed batch actor must not fight a prompt describing a different person.
+
+    The seated prompts once said "adult woman" and used she/her throughout while the
+    standing prompts said "adult man". Whichever mode did not match the batch actor
+    handed the provider a written description contradicting the identity references,
+    and it resolved the conflict by fusing the two into a distorted body.
+    """
+    from app.features.shot_frames.wheelchair_scene_plate import (
+        FRAMING_CONTRACT,
+        STANDING_FRAMING_CONTRACT,
+        _CANDIDATE_VARIATIONS,
+        _STANDING_CANDIDATE_VARIATIONS,
+        _variation_directive,
+        build_canonical_scene_plate_prompt,
+        build_derived_scene_plate_prompt,
+    )
+
+    standing = presentation_mode == "standing_presenter"
+    prompts = [
+        build_canonical_scene_plate_prompt(
+            scene="the exact supplied accessible kitchen",
+            wardrobe="cream crewneck knit sweater",
+            variation_directive=_variation_directive(
+                index=1, attempt=1, presentation_mode=presentation_mode
+            ),
+            presentation_mode=presentation_mode,
+        ),
+        build_derived_scene_plate_prompt(
+            scene="the exact supplied accessible kitchen",
+            wardrobe="cream crewneck knit sweater",
+            variation_directive=_variation_directive(
+                index=2, attempt=2, presentation_mode=presentation_mode
+            ),
+            presentation_mode=presentation_mode,
+        ),
+        STANDING_FRAMING_CONTRACT if standing else FRAMING_CONTRACT,
+        *(_STANDING_CANDIDATE_VARIATIONS if standing else _CANDIDATE_VARIATIONS),
+    ]
+
+    for prompt in prompts:
+        assert not _gendered_terms_in(prompt), (
+            f"{presentation_mode} scene-plate copy still asserts a gender: "
+            f"{_gendered_terms_in(prompt)}"
+        )
+
+    for prompt in prompts[:2]:
+        assert "sole authority for who the actor is" in prompt
+        assert "gender presentation" in prompt
+        assert "Reproduce eyewear exactly as the identity references show it" in prompt
+        if standing:
+            assert "stands upright" in prompt
+        else:
+            assert "manual wheelchair" in prompt
+
+
+@pytest.mark.parametrize(
+    "presentation_mode", ["wheelchair_seated", "standing_presenter"]
+)
+def test_veo_take_prompt_never_hardcodes_the_actor_gender_or_voice_gender(
+    presentation_mode,
+):
+    """Veo copy must not name a gender the source frame contradicts.
+
+    The voice line is the one that cannot fall back to the references, so it is bound
+    to the person visible in the source frame rather than to the presentation mode.
+    """
+    from app.features.shot_production.prompts import build_veo_take_prompt
+
+    standing = presentation_mode == "standing_presenter"
+    contract = {
+        "presentation_mode": presentation_mode,
+        "scene_description": "the exact supplied accessible kitchen",
+        "wardrobe_description": "cream crewneck knit sweater",
+        "framing_description": "tight arm's-length selfie crop",
+    }
+    if standing:
+        contract["body_presentation_description"] = "the actor stands upright"
+    else:
+        contract["wheelchair_description"] = "a lightweight manual wheelchair"
+    beat = EditorialBeat(
+        index=0,
+        text="Dieser Alltagstipp macht den nächsten Schritt leichter.",
+        word_count=8,
+        estimated_speech_seconds=4.0,
+        provider_duration_seconds=8,
+    )
+
+    prompt = build_veo_take_prompt(beat, visual_contract=contract)
+
+    assert not _gendered_terms_in(prompt), (
+        f"{presentation_mode} Veo copy still asserts a gender: "
+        f"{_gendered_terms_in(prompt)}"
+    )
+    assert (
+        "one warm adult voice whose vocal character matches the person visible in the "
+        "supplied source frame" in prompt
+    )
+    posture = "standing" if standing else "seated"
+    assert f"the {posture} actor speaks directly to the lens" in prompt
+    assert f"Preserve the same {posture} posture" in prompt
+
+
+def test_reference_driven_prompt_copy_across_features_names_no_gender():
+    """Every prompt that resolves identity from reference images stays actor-neutral.
+
+    One de-gendering pass that reaches only some call sites leaves the same defect
+    live everywhere else, so this walks the reference-driven builders together.
+    """
+    from app.features.characters.scene_reference import (
+        build_scene_reference_prompt,
+    )
+    from app.features.posts import prompt_builder
+    from app.features.shot_frames import service as shot_frame_service
+
+    reference_driven_copy = {
+        "shot_frame_writer_brief": shot_frame_service._build_prompt_writer_brief(
+            script="Ein kurzer Alltagstipp.",
+            actor_name="Test Actor",
+            scene_description="the exact supplied living room",
+            wardrobe_description="cream knit sweater",
+        ),
+        "shot_frame_composition": shot_frame_service._build_composition_prompt(
+            prompt_writer_output="A straight-out-of-camera portrait."
+        ),
+        "magnific_scene_reference": build_scene_reference_prompt(
+            actor_name="Test Actor",
+            scene_key="home_living_room_advice_a",
+            wardrobe_key="everyday_sweater",
+            post_type="lifestyle",
+        ),
+        "lean_light_base": prompt_builder.LEAN_LIGHT_BASE_PROMPT_TEMPLATE,
+        "reference_scene_base": prompt_builder.REFERENCE_SCENE_BASE_PROMPT_TEMPLATE,
+        "lean_light_continuation": prompt_builder.LEAN_LIGHT_CONTINUATION_PROMPT_TEMPLATE,
+        "segmented_i2v_continuity": prompt_builder.SEGMENTED_I2V_CONTINUITY,
+        "segmented_i2v_non_final_ending": (
+            prompt_builder.SEGMENTED_I2V_NON_FINAL_ENDING_DIRECTIVE
+        ),
+        "standard_final_ending": prompt_builder.STANDARD_FINAL_ENDING_DIRECTIVE,
+        "extended_final_ending": prompt_builder.EXTENDED_FINAL_ENDING_DIRECTIVE,
+    }
+
+    leaks = {
+        name: _gendered_terms_in(text)
+        for name, text in reference_driven_copy.items()
+        if _gendered_terms_in(text)
+    }
+
+    assert not leaks, f"reference-driven copy still asserts a gender: {leaks}"

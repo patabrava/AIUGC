@@ -699,7 +699,7 @@ def build_scene_reference_prompt(
         "full torso visible, lap, hands, scene anchors, and wheelchair armrest visible in the lower frame, "
         "face occupying 10 to 16 percent of image height, eyes and facial features sharp. "
         f"Background is the same supporting scene: {scene.generation_anchor}. "
-        f"{actor_ref}, one recognizable adult woman, is seated in this scene wearing {wardrobe}. "
+        f"{actor_ref}, one recognizable adult person, is seated in this scene wearing {wardrobe}. "
         f"{actor_ref} is the dominant identity signal and the only visible adult person in the frame. "
         "Keep the scene recognizable and consistent behind the actor, with lap, hands, scene anchors, and wheelchair armrest visible. "
         "Do not use a headshot, passport photo, corporate headshot, business portrait, suit jacket, blazer, collared white blouse, white shirt, blue blouse, close-up crop, face-only crop, shoulders-only crop, glamour portrait, full-body pose, distant shot, wide establishing shot, tiny face, or scene-dominant composition. "
