@@ -2881,7 +2881,7 @@ def compose_and_caption(
             )
             if exact_delivery_target is not None:
                 operator_review_target_duration = exact_delivery_target
-            elif requested_duration >= 24.0:
+            elif requested_duration >= 24.0 and not duration_contract.get("duration_mode"):
                 # Use the same long-form cadence floor as ordinary acoustic
                 # planning, then retime the complete transcript-safe fallback
                 # only as much as needed to reach that approved floor.

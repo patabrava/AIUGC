@@ -2840,12 +2840,14 @@ def test_sixteen_second_operator_review_preserves_native_cadence_above_retime_bo
         (3.31, "24.24", None, True),
     ],
 )
+@pytest.mark.parametrize("adaptive_manual", [False, True])
 def test_long_form_operator_review_always_delivers_complete_captioned_stitch(
     tmp_path,
     final_window_start,
     probe_duration,
     expected_target,
     expects_duration_advisory,
+    adaptive_manual,
 ):
     from app.features.shot_production.runner import (
         _canonical_sha256,
@@ -2875,6 +2877,21 @@ def test_long_form_operator_review_always_delivers_complete_captioned_stitch(
             "source": "deepgram_word_window",
         }
     payload["script"]["planned_provider_durations"] = [8, 8, 8, 6]
+    if adaptive_manual:
+        from app.features.shot_production.duration import build_manual_duration_contract
+        from app.features.shot_production.provenance import build_semantic_script_snapshot
+        from app.features.shot_production.runner import _script_delivery_duration_contract
+        contract = build_manual_duration_contract(THIRTY_TWO_SECOND_SCRIPT)
+        payload["script"].update(build_semantic_script_snapshot(
+            text=THIRTY_TWO_SECOND_SCRIPT, review_status="approved",
+            word_count=contract.minimum_words, creation_mode="manual_semantic_ugc",
+            target_duration_seconds=contract.requested_duration_seconds,
+            duration_mode=contract.duration_mode,
+        ))
+        payload["script"]["delivery_duration_seconds"] = _script_delivery_duration_contract(payload["script"])
+        payload["script"]["planned_provider_durations"] = [8] * 4
+        for take in payload["takes"]:
+            take["duration_seconds"] = 8
     payload["visual_qa"] = {"passed": True}
     payload["voice_qa"] = {"passed": True}
     payload["request_contract_sha256"] = _canonical_sha256(
@@ -2923,6 +2940,12 @@ def test_long_form_operator_review_always_delivers_complete_captioned_stitch(
     saved = _read(manifest_path)
     assert saved["status"] == "captioned"
     assert saved["composition_mode"] == "transcript_safe_operator_review"
+    if adaptive_manual:
+        assert "delivery_resolution" not in saved
+        assert "target_duration_seconds" not in stitch_calls[0]
+        assert "delivery_retime_ratio" not in stitch_calls[0]
+        assert saved["media_qa"]["passed"] is True
+        return
     assert saved["delivery_resolution"]["effective_minimum_seconds"] == 28.8
     if expected_target is not None:
         assert stitch_calls[0]["target_duration_seconds"] == expected_target
