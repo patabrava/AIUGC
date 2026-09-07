@@ -19,6 +19,74 @@ SCREENSHOT_SCRIPT = (
 )
 
 
+@pytest.mark.parametrize('case', ['exact', 'leading', 'duplicate', 'leading_no_gap', 'changed', 'missing', 'no_gap', 'overlap', 'late', 'text_disagrees', 'nan'])
+def test_manual_script_excerpt_requires_exact_safe_timed_excerpt(case):
+    from types import SimpleNamespace
+    from app.adapters.deepgram_client import Word, WordLevelTranscript
+    from app.features.shot_production.runner import _manual_script_excerpt
+    beat = SimpleNamespace(text='Hallo schöne Welt.')
+    words = [Word(word='Hallo', start=0.2, end=0.5), Word(word='schöne', start=0.5, end=0.9),
+             Word(word='Welt', start=0.9, end=1.3), Word(word='Zusatz', start=1.5, end=1.9)]
+    if case in {'leading', 'leading_no_gap'}:
+        for word in words: word.start += 1; word.end += 1
+        words.insert(0, Word(word='Vorspann', start=0.1, end=1.15 if case == 'leading_no_gap' else 0.8))
+    if case == 'duplicate':
+        words.extend([Word(word=w.word, start=w.start+3, end=w.end+3) for w in words[:3]])
+    if case == 'changed': words[1].word = 'andere'
+    if case == 'missing': words.pop(1)
+    if case == 'no_gap': words[-1].start = 1.35
+    if case == 'overlap': words[1].start = 0.4
+    if case == 'late':
+        for word in words: word.start += 6.3; word.end += 6.3
+    if case == 'nan': words[0].start = float('nan')
+    text = ' '.join(word.word for word in words)
+    if case == 'text_disagrees': text += ' weiterer Zusatz'
+    result = _manual_script_excerpt(beat, WordLevelTranscript(words=words, full_text=text), 8)
+    if case in {'exact', 'leading'}:
+        assert result.full_text == beat.text
+        assert len(result.words) == 3
+        assert result.words[-1].end == pytest.approx(2.3 if case == 'leading' else 1.3)
+    else:
+        assert result is None
+
+
+@pytest.mark.parametrize('manual', [True, False])
+@pytest.mark.parametrize('leading', [True, False])
+def test_transcript_pipeline_trims_only_manual_extra_speech_and_keeps_failed_evidence(tmp_path, manual, leading):
+    import json
+    from dataclasses import asdict
+    from app.adapters.deepgram_client import Word, WordLevelTranscript
+    from app.features.shot_production import runner as pipeline
+    from app.core.errors import ValidationError
+    from tests.test_shot_production_runner import _manifest_with_raw_takes, SINGLE_TAKE_SCRIPT, _read
+    path = _manifest_with_raw_takes(tmp_path, script=SINGLE_TAKE_SCRIPT, target_length_tier=8)
+    payload = _read(path)
+    text = 'Ein guter Plan schafft mehr Ruhe und hilft dir durch den Tag.'
+    payload['takes'][0]['beat'] = asdict(plan_manual_editorial_beats(text)[0])
+    if manual: payload['script']['duration_mode'] = ADAPTIVE_MANUAL_DURATION
+    words = [Word(word=word.strip('.'), start=0.2+i*0.3, end=0.5+i*0.3) for i, word in enumerate(text.split())]
+    words.extend([Word(word='Unerwünschter', start=4.2, end=4.6), Word(word='Zusatz', start=4.6, end=5.0)])
+    if leading:
+        for word in words: word.start += 1; word.end += 1
+        words.insert(0, Word(word='Vorspann', start=0.1, end=0.8))
+    class Deepgram:
+        def transcribe(self, **kwargs):
+            return WordLevelTranscript(words=words, full_text=('Vorspann ' if leading else '')+text+' Unerwünschter Zusatz.')
+    path.write_text(json.dumps(payload))
+    if not manual:
+        with pytest.raises(ValidationError, match='Transcript QA failed'):
+            pipeline.transcribe_and_validate_takes(path, Deepgram(), adjudicate_fn=lambda **kwargs: None)
+        return
+    result = pipeline.transcribe_and_validate_takes(path, Deepgram())
+    take = result['takes'][0]
+    assert take['transcript_qa']['passed'] is True
+    assert take['transcript']['full_text'] == text
+    assert take['excluded_provider_speech']['original_transcript_qa']['passed'] is False
+    assert take['excluded_provider_speech']['delivery_cut_seconds'] < (5.2 if leading else 4.2)
+    assert take['trim_window']['start_seconds'] == pytest.approx(1.1 if leading else 0.1)
+    assert take['trim_window']['source'] == 'deepgram_word_window'
+
+
 @pytest.mark.parametrize("script", [
     "Hallo.", "Hallo Welt.", SCREENSHOT_SCRIPT,
     " ".join(["Wort"] * 37) + ".",

@@ -1065,6 +1065,42 @@ def _adjudicate_borderline_transcript(
     }
 
 
+def _manual_script_excerpt(beat: Any, transcript: WordLevelTranscript, duration: float):
+    """Recover one verbatim script occurrence isolated from provider-added speech."""
+    expected = normalize_german_words(beat.text)
+    words = list(transcript.words or ())
+    if not expected or len(words) <= len(expected):
+        return None
+    tokens = [normalize_german_words(word.word) for word in words]
+    if any(len(token) != 1 for token in tokens):
+        return None
+    actual = tuple(token[0] for token in tokens)
+    matches = [i for i in range(len(actual) - len(expected) + 1)
+               if actual[i:i + len(expected)] == tuple(expected)]
+    if len(matches) != 1:
+        return None
+    first = matches[0]
+    last = first + len(expected)
+    if tuple(normalize_german_words(transcript.full_text)) != tuple(token[0] for token in tokens):
+        return None
+    try:
+        timings = [(float(word.start), float(word.end)) for word in words]
+    except (TypeError, ValueError):
+        return None
+    if any(not math.isfinite(start + end) or start < 0 or end <= start for start, end in timings):
+        return None
+    if any(right[0] < left[1] - 0.001 for left, right in zip(timings, timings[1:])):
+        return None
+    end = timings[last - 1][1]
+    if end > duration - 0.5:
+        return None
+    if first and timings[first][0] - timings[first - 1][1] < 0.12:
+        return None
+    if last < len(words) and timings[last][0] - end < 0.12:
+        return None
+    return WordLevelTranscript(words=words[first:last], full_text=beat.text)
+
+
 @_manifest_locked
 def transcribe_and_validate_takes(
     manifest_path: Path,
@@ -1138,6 +1174,23 @@ def transcribe_and_validate_takes(
             transcript,
             other_beats=[other for other in beats if other.index != beat.index],
         )
+        if (
+            not qa.passed
+            and len(beats) == 1
+            and (payload.get("script") or {}).get("duration_mode") == "manual_script_v1"
+        ):
+            prefix = _manual_script_excerpt(beat, transcript, float(take["duration_seconds"]))
+            if prefix is not None:
+                prefix_qa = evaluate_take_transcript(beat, prefix, other_beats=[])
+                if prefix_qa.passed:
+                    take["excluded_provider_speech"] = {
+                        "source": "exact_manual_script_excerpt_v1",
+                        "original_transcript": _serialize_transcript(transcript),
+                        "original_transcript_qa": asdict(qa),
+                        "delivery_cut_seconds": float(prefix.words[-1].end) + 1024 / 48000,
+                        "retained_speech_start_seconds": float(prefix.words[0].start),
+                    }
+                    transcript, qa = prefix, prefix_qa
         if _is_borderline_transcript_failure(qa):
             adjudicator = adjudicate_fn or _adjudicate_borderline_transcript
             try:
@@ -1174,7 +1227,8 @@ def transcribe_and_validate_takes(
             build_take_trim_window(
                 qa,
                 take["duration_seconds"],
-                trim_head=beat.index > 0,
+                trim_head=beat.index > 0 or bool(take.get("excluded_provider_speech")),
+                head_pad_seconds=0.1 if take.get("excluded_provider_speech") else 0.25,
             )
             if qa.passed
             else None
