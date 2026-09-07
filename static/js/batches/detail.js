@@ -212,9 +212,29 @@
         return 'Approval failed';
     }
 
+    function syncSavedScript(card, data) {
+        const input = card?.querySelector('[name="script_text"]');
+        // A slow response must never overwrite edits typed after submission.
+        if (!input || typeof data.script_text !== 'string' ||
+            input.value.trim() !== data.submitted_script_text?.trim()) return;
+        input.value = data.script_text;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
     window.handleScriptSaveResponse = function (event, postId) {
-        if (!event.detail?.successful) return;
         const card = scriptCard(postId);
+        if (!event.detail?.successful) {
+            showScriptSaveStatus(card, scriptReviewErrorMessage(event), { error: true, persistent: true });
+            return;
+        }
+        let data = {};
+        try {
+            data = JSON.parse(event.detail.xhr?.responseText || '{}')?.data || {};
+        } catch (_error) {
+            showScriptSaveStatus(card, 'Could not confirm the saved script. Refresh before approving.', { error: true, persistent: true });
+            return;
+        }
+        syncSavedScript(card, data);
         // Editing an already-approved script resets review to pending and needs
         // the server-rendered approval control restored. Pending drafts can stay
         // in place and avoid the expensive full batch-detail reconstruction.
@@ -222,7 +242,9 @@
             window.location.reload();
             return;
         }
-        showScriptSaveStatus(card, 'Saved');
+        showScriptSaveStatus(card,
+            data.validation_error ? 'Draft saved. ' + data.validation_error : 'Saved',
+            { error: Boolean(data.validation_error), persistent: Boolean(data.validation_error) });
     };
 
     window.handleScriptReviewResponse = function (event, postId) {
@@ -253,6 +275,7 @@
         }
 
         if (!card) return;
+        syncSavedScript(card, data);
         card.dataset.scriptReviewStatus = 'approved';
         const badge = card.querySelector('[data-script-review-badge]');
         if (badge) {

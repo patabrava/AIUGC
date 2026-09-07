@@ -1012,3 +1012,22 @@ def test_semantic_prompt_rejects_unknown_post_family():
             facts=["Fakt"],
             requested_duration_seconds=16,
         )
+
+
+@pytest.mark.parametrize(('source', 'expected'), [
+    ('Ein Satz', 'Ein Satz.'),
+    ('  Ein Satz  ', 'Ein Satz.'),
+    ('„Ein Satz“', '„Ein Satz.“'),
+    ('"Ein Satz"', '"Ein Satz."'),
+    ('Ein Satz!', 'Ein Satz!'),
+    ('Ein Satz?', 'Ein Satz?'),
+    ('Ein Satz.', 'Ein Satz.'),
+    ('Ein Satz,', 'Ein Satz,'),
+    ('Ein Satz:', 'Ein Satz:'),
+    ('Ein Satz…', 'Ein Satz…'),
+    ('', ''),
+])
+def test_operator_final_punctuation_preserves_wording(source, expected):
+    from app.features.topics.semantic_scripts import normalize_operator_script_punctuation
+    assert normalize_operator_script_punctuation(source) == expected
+    assert normalize_operator_script_punctuation(expected) == expected

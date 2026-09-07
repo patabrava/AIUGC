@@ -9,7 +9,7 @@ import json
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError as PydanticValidationError
 
 from app.adapters.supabase_client import get_supabase
 from postgrest.exceptions import APIError
@@ -38,7 +38,10 @@ from app.features.characters.actor_identity import (
 from app.features.characters.scene_reference import get_scene_bible
 from app.features.shot_production.duration import build_semantic_duration_contract
 from app.features.shot_production.planner import plan_editorial_beats
-from app.features.topics.semantic_scripts import validate_semantic_script
+from app.features.topics.semantic_scripts import (
+    normalize_operator_script_punctuation,
+    validate_semantic_script,
+)
 from app.features.semantic_videos.visual_contract import normalize_presentation_mode
 from app.features.posts.schemas import UpdatePromptRequest
 from app.features.batches.state_machine import reconcile_batch_video_pipeline_state
@@ -50,7 +53,7 @@ router = APIRouter(prefix="/posts", tags=["posts"])
 
 class UpdateScriptRequest(BaseModel):
     """Request to update post script."""
-    script_text: str = Field(..., min_length=1, max_length=900, description="Script text")
+    script_text: str = Field(..., min_length=1, max_length=4000, description="Script text")
     post_type: Optional[str] = Field(
         default=None,
         max_length=120,
@@ -336,6 +339,12 @@ def _semantic_duration_contract_message(
             f"{contract.minimum_words}-{contract.maximum_words} words; "
             f"it has {word_count}."
         )
+    if "complete semantic statement" in str(error) or "complete semantic beats" in str(error):
+        return (
+            f"Split this {contract.requested_duration_seconds}s script into complete sentences "
+            "that fit each 8-second take (8-18 words per take). End each sentence with . ! or ?. "
+            "The total word count alone does not guarantee that the take boundaries fit."
+        )
     return (
         f"This {contract.requested_duration_seconds}s script does not satisfy "
         f"its duration contract. {error}"
@@ -359,6 +368,8 @@ def _apply_script_text_update(
     batch_settings = _post_batch_script_settings(post, supabase_client)
     batch_creation_mode = batch_settings["creation_mode"]
     is_semantic_batch = is_semantic_ugc_mode(batch_creation_mode)
+    if is_semantic_batch:
+        script_text = normalize_operator_script_punctuation(script_text)
     seed_data["script"] = script_text
     seed_data["script_review_status"] = review_status
     seed_data.pop("video_excluded", None)
@@ -394,6 +405,13 @@ def _apply_script_text_update(
         except (TypeError, ValueError) as exc:
             seed_data.pop("semantic_planned_beats", None)
             seed_data.pop("semantic_planned_take_count", None)
+            seed_data.pop("dialog_script", None)
+            seed_data.pop("semantic_script_word_count", None)
+            seed_data["semantic_script_validation_error"] = _semantic_duration_contract_message(
+                script_text=script_text,
+                requested_duration_seconds=requested_duration_seconds,
+                error=exc,
+            )
             if require_valid_duration:
                 raise ValidationError(
                     _semantic_duration_contract_message(
@@ -408,6 +426,7 @@ def _apply_script_text_update(
                     },
                 ) from exc
         else:
+            seed_data.pop("semantic_script_validation_error", None)
             contract = validation.contract
             beats = plan_editorial_beats(script_text)
             prior_provenance = seed_data.get("semantic_script_provenance")
@@ -660,6 +679,13 @@ async def update_post_script(post_id: str, request: Request):
             submitted_semantic_presentation_mode = (
                 None if submitted_presentation_raw is None else str(submitted_presentation_raw)
             )
+            UpdateScriptRequest(
+                script_text=script_text,
+                post_type=submitted_post_type,
+                semantic_scene_key=submitted_semantic_scene_key,
+                semantic_wardrobe_description=submitted_semantic_wardrobe_description,
+                semantic_presentation_mode=submitted_semantic_presentation_mode,
+            )
         
         supabase = get_supabase().client
         
@@ -684,11 +710,23 @@ async def update_post_script(post_id: str, request: Request):
             script_length=len(script_text)
         )
         
-        response_payload = {"id": post_id, "script_text": script_text}
+        response_payload = {
+            "id": post_id,
+            "script_text": current_seed["script"],
+            "submitted_script_text": script_text,
+            "validation_error": current_seed.get("semantic_script_validation_error"),
+        }
         if current_seed.get("manual_post_type"):
             response_payload["post_type"] = current_seed["manual_post_type"]
         return SuccessResponse(data=response_payload)
     
+    except PydanticValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid script input: " + "; ".join(
+                item["msg"] for item in exc.errors(include_input=False)
+            ),
+        ) from exc
     except ValidationError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -722,11 +760,23 @@ def _update_post_script_review_sync(
     resolved_post_type = None
 
     if action == "approved":
-        if submitted_script_text:
+        if submitted_script_text is not None and not submitted_script_text.strip():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Cannot approve an empty script. Add script content first.",
+            )
+        is_semantic_batch = is_semantic_ugc_mode(
+            _post_batch_script_settings(post, supabase)["creation_mode"]
+        )
+        if submitted_script_text is not None or is_semantic_batch:
             seed_data = _apply_script_text_update(
                 post=post,
                 seed_data=seed_data,
-                script_text=submitted_script_text,
+                script_text=(
+                    submitted_script_text
+                    if submitted_script_text is not None
+                    else str(seed_data.get("script") or "")
+                ),
                 submitted_post_type=submitted_post_type,
                 submitted_semantic_scene_key=submitted_semantic_scene_key,
                 submitted_semantic_wardrobe_description=(
@@ -759,7 +809,11 @@ def _update_post_script_review_sync(
         post=post,
         seed_data=seed_data,
         action=action,
-        clear_video_prompt=(action == "removed" or submitted_script_text is not None),
+        clear_video_prompt=(
+            action == "removed"
+            or submitted_script_text is not None
+            or (action == "approved" and is_semantic_batch)
+        ),
         resolved_post_type=resolved_post_type,
         supabase_client=supabase,
     )
@@ -777,6 +831,8 @@ def _update_post_script_review_sync(
             "action": action,
             "script_review_status": seed_data["script_review_status"],
             "batch_state": batch_state,
+            "script_text": seed_data.get("script"),
+            "submitted_script_text": submitted_script_text,
         }
     )
 
