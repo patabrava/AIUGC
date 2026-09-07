@@ -22,7 +22,7 @@ MAX_BEAT_SPEECH_SECONDS = 7.5
 MIN_BEAT_WORDS = 4
 MIN_SCRIPT_WORDS = 4
 
-_TRAILING_CLOSERS = "\"'»”’)]}"
+_TRAILING_CLOSERS = "\"'»”“’)]}"
 _COORDINATING_WORDS = frozenset({"aber", "denn", "doch", "oder", "sondern", "und"})
 _COMPACT_TWO_LETTER_ABBREVIATION = re.compile(
     r"\b([A-Za-zÄÖÜäöüß])\.([A-Za-zÄÖÜäöüß])\."

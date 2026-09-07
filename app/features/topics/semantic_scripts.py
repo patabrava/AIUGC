@@ -78,7 +78,7 @@ _COMPLETION_LEADIN_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
-_COMPLETE_STATEMENT_END = re.compile(r"[.!?](?:[\"'»”’)\]}]+)?$")
+_COMPLETE_STATEMENT_END = re.compile(r"[.!?](?:[\"'»”“’)\]}]+)?$")
 _INTERNAL_FALLBACK_COPY = re.compile(
     r"\b(?:gekürzter\s+quellenauszug|quellenauszug|"
     r"bereitgestellte[snr]?\s+vollständige[snr]?\s+quelle|"
@@ -584,6 +584,20 @@ def _normalized_sentences(script: str) -> list[str]:
         for sentence in _SENTENCE_SPLIT.split(script)
         if sentence.strip()
     ]
+
+
+def normalize_operator_script_punctuation(script: str) -> str:
+    """Supply an omitted final full stop without rewriting operator dialogue.
+
+    Internal take boundaries still require the normal strict validation. A
+    trailing comma, colon, dash or ellipsis is deliberate and is left intact.
+    Generated scripts never pass through this operator-only convenience.
+    """
+    text = str(script or "").strip()
+    body = text.rstrip("\"'»”“’)]}")
+    if body and body[-1].isalnum():
+        return body + "." + text[len(body):]
+    return text
 
 
 def validate_semantic_script(

@@ -371,7 +371,7 @@ def test_final_semantic_script_approval_advances_batch_without_second_confirmati
                 "batch_id": "batch-semantic-final",
                 "post_type": "value",
                 "seed_data": {
-                    "script": "Ein klarer kurzer Satz erklärt den wichtigsten Punkt direkt und verständlich für alle.",
+                    "script": "Ein klarer kurzer Satz erklärt den wichtigsten Punkt direkt und verständlich für alle Zuschauer.",
                     "script_review_status": "pending",
                 },
                 "video_prompt_json": None,
@@ -383,6 +383,7 @@ def test_final_semantic_script_approval_advances_batch_without_second_confirmati
                 "id": "batch-semantic-final",
                 "state": "S2_SEEDED",
                 "creation_mode": "semantic_ugc",
+                "target_duration_seconds": 8,
             }
         ],
     }
@@ -950,3 +951,121 @@ def test_update_prompt_rebuilds_veo_prompt_from_structured_fields_when_raw_promp
     assert stored_prompt["character"] == "Edited long character prompt"
     assert "Edited long character prompt" in stored_prompt["veo_prompt"]
     assert "Edited dialogue." in stored_prompt["veo_prompt"]
+
+
+SCREENSHOT_MANUAL_SCRIPT = (
+    'Hallo ich bin Maria und ich arbeite bei Lippelift. '
+    'Stellt mir gerne Frage zu unseren Treppenlifte'
+)
+
+
+@pytest.mark.parametrize('submit_saved', [False, True])
+def test_manual_screenshot_script_normalizes_and_approves(monkeypatch, submit_saved):
+    storage = _manual_semantic_storage('manual-punctuation', 8)
+    fake = _FakeSupabase(storage)
+    monkeypatch.setattr(posts_handlers, 'get_supabase', lambda: fake)
+    client = TestClient(app, base_url='http://localhost')
+    if submit_saved:
+        saved = client.put('/posts/manual-punctuation/script', data={'script_text': SCREENSHOT_MANUAL_SCRIPT})
+        assert saved.status_code == 200, saved.text
+        assert saved.json()['data']['script_text'] == SCREENSHOT_MANUAL_SCRIPT + '.'
+        assert saved.json()['data']['validation_error'] is None
+        response = client.put('/posts/manual-punctuation/script-review', json={'action': 'approved'})
+    else:
+        response = client.put('/posts/manual-punctuation/script-review', data={
+            'action': 'approved', 'script_text': SCREENSHOT_MANUAL_SCRIPT,
+        })
+    assert response.status_code == 200, response.text
+    seed = storage['posts'][0]['seed_data']
+    assert seed['script'] == seed['dialog_script'] == SCREENSHOT_MANUAL_SCRIPT + '.'
+    assert seed['semantic_planned_beats'][0]['text'] == seed['script']
+    assert seed['semantic_script_word_count'] == 16
+    assert seed['semantic_planned_take_count'] == 1
+    assert response.json()['data']['batch_state'] == 'S4_SCRIPTED'
+
+
+@pytest.mark.parametrize('payload', [{'action': 'approved'}, {'action': 'approved', 'script_text': ''}])
+def test_saved_or_empty_submission_cannot_bypass_semantic_validation(monkeypatch, payload):
+    storage = _manual_semantic_storage('invalid-saved', 8)
+    storage['posts'][0]['seed_data']['script'] = 'Zu kurz.'
+    fake = _FakeSupabase(storage)
+    monkeypatch.setattr(posts_handlers, 'get_supabase', lambda: fake)
+    response = TestClient(app, base_url='http://localhost').put(
+        '/posts/invalid-saved/script-review', data=payload,
+    )
+    assert response.status_code == 422, response.text
+    assert storage['posts'][0]['seed_data']['script_review_status'] == 'pending'
+    assert not any(op[0] == 'rpc' for op in fake.client.operation_log)
+
+
+def test_invalid_draft_clears_stale_dialog_and_reports_validation(monkeypatch):
+    storage = _manual_semantic_storage('invalid-edit', 8)
+    storage['posts'][0]['seed_data'].update({
+        'dialog_script': SCREENSHOT_MANUAL_SCRIPT + '.',
+        'semantic_planned_beats': [{'text': 'stale'}],
+        'semantic_planned_take_count': 1, 'semantic_script_word_count': 16,
+    })
+    monkeypatch.setattr(posts_handlers, 'get_supabase', lambda: _FakeSupabase(storage))
+    response = TestClient(app, base_url='http://localhost').put(
+        '/posts/invalid-edit/script', data={'script_text': 'Zu kurz'},
+    )
+    assert response.status_code == 200, response.text
+    assert '14-18 words' in response.json()['data']['validation_error']
+    seed = storage['posts'][0]['seed_data']
+    assert seed['script'] == 'Zu kurz.'
+    assert 'dialog_script' not in seed
+    assert 'semantic_planned_beats' not in seed
+    assert 'semantic_script_word_count' not in seed
+
+
+@pytest.mark.parametrize('seconds', [8, 16, 32, 60])
+def test_missing_final_period_keeps_multi_take_contract(monkeypatch, seconds):
+    storage = _manual_semantic_storage('duration-punctuation', seconds)
+    monkeypatch.setattr(posts_handlers, 'get_supabase', lambda: _FakeSupabase(storage))
+    script = _planner_safe_manual_script(seconds)
+    response = TestClient(app, base_url='http://localhost').put(
+        '/posts/duration-punctuation/script-review',
+        data={'action': 'approved', 'script_text': script[:-1]},
+    )
+    assert response.status_code == 200, response.text
+    assert storage['posts'][0]['seed_data']['dialog_script'] == script
+
+
+def test_final_period_does_not_repair_invalid_internal_take_boundaries(monkeypatch):
+    storage = _manual_semantic_storage('internal-boundaries', 32)
+    monkeypatch.setattr(posts_handlers, 'get_supabase', lambda: _FakeSupabase(storage))
+    script = _planner_safe_manual_script(32).replace('.', '')
+    response = TestClient(app, base_url='http://localhost').put(
+        '/posts/internal-boundaries/script-review',
+        data={'action': 'approved', 'script_text': script},
+    )
+    assert response.status_code == 422, response.text
+    assert storage['posts'][0]['seed_data']['script_review_status'] == 'pending'
+
+
+@pytest.mark.parametrize('transport', ['json', 'data'])
+def test_long_sixty_second_manual_script_saves_and_approves(monkeypatch, transport):
+    script = _planner_safe_manual_script(60)
+    assert len(script) > 900
+    storage = _manual_semantic_storage('long-manual', 60)
+    monkeypatch.setattr(posts_handlers, 'get_supabase', lambda: _FakeSupabase(storage))
+    client = TestClient(app, base_url='http://localhost')
+    response = client.put('/posts/long-manual/script', **{transport: {'script_text': script}})
+    assert response.status_code == 200, response.text
+    assert response.json()['data']['script_text'] == script
+    assert response.json()['data']['validation_error'] is None
+    approval = client.put('/posts/long-manual/script-review', json={'action': 'approved'})
+    assert approval.status_code == 200, approval.text
+    assert approval.json()['data']['batch_state'] == 'S4_SCRIPTED'
+
+
+@pytest.mark.parametrize('transport', ['json', 'data'])
+def test_overlong_script_is_a_clear_422_before_database_access(monkeypatch, transport):
+    def unexpected_database():
+        pytest.fail('Oversized input must be rejected before reading the database')
+    monkeypatch.setattr(posts_handlers, 'get_supabase', unexpected_database)
+    response = TestClient(app, base_url='http://localhost').put(
+        '/posts/oversized/script', **{transport: {'script_text': 'a' * 4001}},
+    )
+    assert response.status_code == 422, response.text
+    assert '4000 characters' in response.json()['message']
