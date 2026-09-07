@@ -52,6 +52,7 @@ SEMANTIC_UGC_POSTGRES_CONTAINER="$CONTAINER_NAME" \
     tests/test_semantic_video_batch_approval_migration_postgres.py \
     tests/test_semantic_video_plan_migration_postgres.py \
     tests/test_semantic_video_worker_migration_postgres.py \
+    tests/test_manual_adaptive_migration_postgres.py \
     tests/test_semantic_scene_image_queue_migration_postgres.py \
     -q
 

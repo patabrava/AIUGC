@@ -1129,7 +1129,7 @@ def test_default_worker_id_carries_the_database_contract_fence():
         video_loader=lambda uri: f"video:{uri}".encode(),
     )
 
-    assert worker.worker_id.startswith("semantic-video-contract-v2-")
+    assert worker.worker_id.startswith("semantic-video-contract-v3-")
 
 
 def test_worker_delivers_single_paid_eight_second_take_when_qa_is_advisory():

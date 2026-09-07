@@ -18,8 +18,8 @@ from uuid import UUID
 
 from app.core.errors import ValidationError
 from app.core.video_profiles import script_word_count
-from app.features.shot_production.duration import build_semantic_duration_contract
-from app.features.shot_production.planner import plan_editorial_beats
+from app.features.shot_production.duration import resolve_post_duration_contract
+from app.features.shot_production.planner import plan_editorial_beats, plan_manual_editorial_beats
 from app.features.shot_production.prompts import compile_veo_take_requests
 from app.features.shot_production.provenance import build_semantic_script_snapshot
 from app.features.shot_production.shot_deck import derive_shot_deck
@@ -164,8 +164,8 @@ def compile_semantic_video_plan(
     if not is_semantic_ugc_mode(batch.get("creation_mode")):
         raise ValidationError("Semantic video planning requires a Semantic UGC batch.")
 
-    requested_duration = batch.get("target_duration_seconds")
-    duration_contract = build_semantic_duration_contract(requested_duration)
+    duration_contract = resolve_post_duration_contract(post, batch)
+    requested_duration = duration_contract.requested_duration_seconds
     script, review_status = _resolve_script(post)
     word_count = script_word_count(script)
     if not duration_contract.minimum_words <= word_count <= duration_contract.maximum_words:
@@ -233,7 +233,7 @@ def compile_semantic_video_plan(
             {"expected_bytes": master_snapshot.get("byte_length"), "actual_bytes": len(approved_frame_bytes)},
         )
 
-    beats = plan_editorial_beats(script)
+    beats = (plan_manual_editorial_beats(script) if duration_contract.duration_mode != "fixed" else plan_editorial_beats(script))
     if len(beats) != duration_contract.minimum_take_count:
         raise ValidationError(
             "Approved semantic script does not match the duration contract take count.",
@@ -277,6 +277,7 @@ def compile_semantic_video_plan(
         word_count=word_count,
         creation_mode=str(batch.get("creation_mode") or "semantic_ugc"),
         target_duration_seconds=duration_contract.requested_duration_seconds,
+        duration_mode=duration_contract.duration_mode,
     )
     script_hash = _canonical_hash(script_snapshot)
 

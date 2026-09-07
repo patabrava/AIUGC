@@ -590,6 +590,7 @@ def _manual_semantic_storage(post_id: str, seconds: int) -> dict:
 
 def test_short_eight_second_semantic_script_names_the_word_envelope_miss(monkeypatch):
     storage = _manual_semantic_storage("post-semantic-8s-short", 8)
+    storage["batches"][0]["creation_mode"] = "semantic_ugc"
     monkeypatch.setattr(posts_handlers, "get_supabase", lambda: _FakeSupabase(storage))
 
     response = TestClient(app, base_url="http://localhost").put(
@@ -679,7 +680,7 @@ def test_manual_semantic_script_approval_accepts_every_supported_duration(
     assert seed_data["script_review_status"] == "approved"
     assert seed_data["semantic_script_word_count"] == contract.minimum_words
     assert seed_data["semantic_planned_take_count"] == contract.minimum_take_count
-    assert seed_data["semantic_duration_contract"]["requested_duration_seconds"] == seconds
+    assert seed_data["semantic_duration_contract"] == posts_handlers.build_manual_duration_contract(script).as_dict()
 
 
 def test_semantic_contract_message_reports_missing_batch_duration():
@@ -987,6 +988,7 @@ def test_manual_screenshot_script_normalizes_and_approves(monkeypatch, submit_sa
 @pytest.mark.parametrize('payload', [{'action': 'approved'}, {'action': 'approved', 'script_text': ''}])
 def test_saved_or_empty_submission_cannot_bypass_semantic_validation(monkeypatch, payload):
     storage = _manual_semantic_storage('invalid-saved', 8)
+    storage['batches'][0]['creation_mode'] = 'semantic_ugc'
     storage['posts'][0]['seed_data']['script'] = 'Zu kurz.'
     fake = _FakeSupabase(storage)
     monkeypatch.setattr(posts_handlers, 'get_supabase', lambda: fake)
@@ -1000,6 +1002,7 @@ def test_saved_or_empty_submission_cannot_bypass_semantic_validation(monkeypatch
 
 def test_invalid_draft_clears_stale_dialog_and_reports_validation(monkeypatch):
     storage = _manual_semantic_storage('invalid-edit', 8)
+    storage['batches'][0]['creation_mode'] = 'semantic_ugc'
     storage['posts'][0]['seed_data'].update({
         'dialog_script': SCREENSHOT_MANUAL_SCRIPT + '.',
         'semantic_planned_beats': [{'text': 'stale'}],
@@ -1033,6 +1036,7 @@ def test_missing_final_period_keeps_multi_take_contract(monkeypatch, seconds):
 
 def test_final_period_does_not_repair_invalid_internal_take_boundaries(monkeypatch):
     storage = _manual_semantic_storage('internal-boundaries', 32)
+    storage['batches'][0]['creation_mode'] = 'semantic_ugc'
     monkeypatch.setattr(posts_handlers, 'get_supabase', lambda: _FakeSupabase(storage))
     script = _planner_safe_manual_script(32).replace('.', '')
     response = TestClient(app, base_url='http://localhost').put(

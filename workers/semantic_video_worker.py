@@ -39,7 +39,7 @@ from app.features.semantic_videos.visual_contract import (
 from app.features.shot_production.audio_seams import MAX_EXACT_DELIVERY_RETIME_RATIO
 from app.features.shot_production.duration import (
     SEMANTIC_TERMINAL_SPEECH_GUARD_SECONDS,
-    build_semantic_duration_contract,
+    resolve_run_duration_contract,
     semantic_terminal_speech_cut_floor,
 )
 from app.features.shot_production.runner import load_video_uri
@@ -920,8 +920,9 @@ class ProductionStageRunner:
         script_snapshot = run.get("script_snapshot")
         script = dict(script_snapshot) if isinstance(script_snapshot, Mapping) else {}
         script_text = str(script.get("text") or "")
-        canonical_duration = build_semantic_duration_contract(requested_duration)
+        canonical_duration = resolve_run_duration_contract(run)
         delivery_contract = {
+            **({"duration_mode": canonical_duration.duration_mode} if canonical_duration.duration_mode != "fixed" else {}),
             "requested": float(canonical_duration.requested_duration_seconds),
             "minimum": canonical_duration.delivery_min_seconds,
             "maximum": canonical_duration.delivery_max_seconds,
@@ -939,6 +940,7 @@ class ProductionStageRunner:
                 or script.get("review_status")
                 or ""
             ),
+            **({"duration_mode": canonical_duration.duration_mode} if canonical_duration.duration_mode != "fixed" else {}),
             "planning_profile": pipeline.PLANNING_PROFILE,
             "delivery_duration_seconds": delivery_contract,
             "text": script_text,
@@ -1442,14 +1444,12 @@ class ProductionStageRunner:
         captioned_path = manifest_path.parent / "final-captioned.mp4"
         captioned_path.write_bytes(captioned_bytes)
         probe = pipeline._probe_media(captioned_path)  # noqa: SLF001
-        duration = build_semantic_duration_contract(
-            int(run.get("requested_duration_seconds") or 0)
-        )
+        duration = resolve_run_duration_contract(run)
         media_qa = pipeline.evaluate_final_media_probe(
             probe,
             min_duration_seconds=duration.delivery_min_seconds,
             max_duration_seconds=duration.delivery_max_seconds,
-            target_duration_seconds=float(duration.requested_duration_seconds),
+            target_duration_seconds=float(duration.requested_duration_seconds) if duration.duration_mode == "fixed" else None,
         )
         if media_qa.get("passed") is not True:
             raise StateTransitionError(
@@ -1671,7 +1671,7 @@ class SemanticVideoWorker:
         self.storage = storage or get_storage_client()
         self.stage_runner = stage_runner or ProductionStageRunner(storage=self.storage)
         self.video_loader = video_loader
-        self.worker_id = worker_id or f"semantic-video-contract-v2-{os.getpid()}"
+        self.worker_id = worker_id or f"semantic-video-contract-v3-{os.getpid()}"
         self.max_inflight = max_inflight
         self.generation_gate = generation_gate
         self.lease_seconds = lease_seconds
@@ -2334,6 +2334,8 @@ class SemanticVideoWorker:
         run: Mapping[str, Any],
         takes: Sequence[Mapping[str, Any]],
     ) -> bool:
+        if (run.get("duration_contract") or {}).get("duration_mode"):
+            return False
         if int(run.get("requested_duration_seconds") or 0) != 8 or len(takes) != 1:
             return False
         take = takes[0]
@@ -2534,7 +2536,7 @@ def main() -> None:
     stop_event = threading.Event()
     threads: list[threading.Thread] = []
     for slot in range(concurrency):
-        worker_id = f"semantic-video-contract-v2-{os.getpid()}-{slot + 1}"
+        worker_id = f"semantic-video-contract-v3-{os.getpid()}-{slot + 1}"
         worker = SemanticVideoWorker(
             worker_id=worker_id,
             generation_gate=generation_gate,

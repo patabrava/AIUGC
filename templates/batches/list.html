@@ -305,7 +305,7 @@
                             <option value="manual_semantic_ugc" data-semantic-ugc-mode-option>Manual Semantic UGC - Veo 3.1</option>
                         </select>
                         <p class="mt-1 text-xs text-gray-500">
-                            Choose generated scripts or manual drafts. Both use the Semantic UGC workflow with dynamic 8-{{ semantic_ugc_max_duration_seconds | default(60) }}s durations.
+                            Choose generated scripts or manual drafts. Manual video length follows your script. Generated scripts use your chosen duration.
                             <a href="/settings/actor" class="text-[#E58434] underline">Choose actor</a>
                         </p>
                     </div>
@@ -361,11 +361,11 @@
                         >
                         <p class="mt-1 text-xs text-gray-500">Manual batches create blank draft posts that you will edit by hand.</p>
                         <p x-show="creationMode === 'manual_semantic_ugc'" x-cloak class="mt-2 rounded-md border border-[#006AAB]/20 bg-[#006AAB]/5 px-3 py-2 text-xs text-[#006AAB]">
-                            Write each script manually, then use the same Semantic UGC Veo 3.1 planning, approval, and long-video workflow.
+                            Write scripts up to 4,000 characters each. Video length adapts to each script; review the take plan and generation cost before paid work begins.
                         </p>
                     </div>
 
-                    <div x-show="['semantic_ugc', 'manual_semantic_ugc'].includes(creationMode)" x-cloak data-semantic-ugc-duration-panel class="rounded-md border border-[#006AAB]/20 bg-[#006AAB]/5 px-3 py-3">
+                    <div x-show="creationMode === 'semantic_ugc'" x-cloak data-semantic-ugc-duration-panel class="rounded-md border border-[#006AAB]/20 bg-[#006AAB]/5 px-3 py-3">
                         <label for="semantic-target-duration" class="block text-sm font-medium text-gray-700">Target video duration</label>
                         <p class="mt-1 text-xs font-medium text-[#006AAB]">Recommended for longer AIUGC videos. Uses the Semantic UGC Veo 3.1 workflow.</p>
                         <div class="mt-2 flex items-center gap-2">
@@ -378,8 +378,8 @@
                                 step="1"
                                 inputmode="numeric"
                                 x-model.number="targetDurationSeconds"
-                                :disabled="!['semantic_ugc', 'manual_semantic_ugc'].includes(creationMode)"
-                                :required="['semantic_ugc', 'manual_semantic_ugc'].includes(creationMode)"
+                                :disabled="creationMode !== 'semantic_ugc'"
+                                :required="creationMode === 'semantic_ugc'"
                                 aria-describedby="semantic-duration-help"
                                 class="block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-[#006AAB] focus:outline-none focus:ring-2 focus:ring-[#E58434]"
                             >

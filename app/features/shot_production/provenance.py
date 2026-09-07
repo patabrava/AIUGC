@@ -18,6 +18,7 @@ def build_semantic_script_snapshot(
     word_count: int,
     creation_mode: str,
     target_duration_seconds: int,
+    duration_mode: str = "fixed",
 ) -> dict[str, Any]:
     """Build the canonical script snapshot used before and after free planning."""
     normalized_mode = str(creation_mode or "semantic_ugc").strip()
@@ -28,6 +29,7 @@ def build_semantic_script_snapshot(
         else SEMANTIC_SCRIPT_SOURCE
     )
     return {
+        **({"duration_mode": duration_mode} if duration_mode != "fixed" else {}),
         "text": " ".join(str(text or "").split()),
         "review_status": normalized_review,
         "word_count": int(word_count),

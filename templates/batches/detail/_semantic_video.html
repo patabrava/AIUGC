@@ -39,7 +39,7 @@
                 </h2>
             </div>
             <div class="rounded-full bg-white px-3 py-1.5 text-sm font-semibold text-[#1C2740] ring-1 ring-[#006AAB]/15">
-                Requested delivery: {{ semantic.requested_duration_seconds }}s
+                {% if batch is defined and batch.creation_mode == 'manual_semantic_ugc' %}Duration follows each script{% else %}Requested delivery: {{ semantic.requested_duration_seconds }}s{% endif %}
             </div>
         </div>
         {% if semantic_step == 'plan' and batch_plan.count > 1 %}
@@ -114,7 +114,7 @@
                     {% endif %}
                     <h3 class="mt-2 font-bold text-[#1C2740]">{{ item.topic_title }}</h3>
                     <p class="mt-1 text-sm text-[#1C2740]/65">
-                        Requested {{ item.requested_duration_seconds or semantic.requested_duration_seconds }}s ·
+                        {% if item.adaptive_duration %}Estimated {{ item.estimated_speech_seconds }}s ·{% elif batch is not defined or batch.creation_mode != 'manual_semantic_ugc' %}Requested {{ item.requested_duration_seconds or semantic.requested_duration_seconds }}s ·{% endif %}
                         Delivery {% if item.delivery_duration_seconds is not none %}{{ item.delivery_duration_seconds }}s{% else %}pending{% endif %}
                     </p>
                 </div>

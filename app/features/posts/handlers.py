@@ -36,9 +36,12 @@ from app.features.characters.actor_identity import (
     is_semantic_ugc_mode,
 )
 from app.features.characters.scene_reference import get_scene_bible
-from app.features.shot_production.duration import build_semantic_duration_contract
-from app.features.shot_production.planner import plan_editorial_beats
+from app.features.shot_production.duration import (
+    ADAPTIVE_MANUAL_DURATION, build_manual_duration_contract, build_semantic_duration_contract,
+)
+from app.features.shot_production.planner import plan_editorial_beats, plan_manual_editorial_beats
 from app.features.topics.semantic_scripts import (
+    SemanticScriptValidationResult,
     normalize_operator_script_punctuation,
     validate_semantic_script,
 )
@@ -398,27 +401,31 @@ def _apply_script_text_update(
             or seed_data.get("target_duration_seconds")
         )
         try:
-            validation = validate_semantic_script(
-                script_text,
-                requested_duration_seconds=int(requested_duration_seconds),
-            )
+            if batch_creation_mode == "manual_semantic_ugc":
+                contract = build_manual_duration_contract(script_text)
+                validation = SemanticScriptValidationResult(
+                    contract=contract, word_count=script_word_count(script_text),
+                    planned_take_count=contract.minimum_take_count, take_count_exception=None,
+                )
+            else:
+                validation = validate_semantic_script(
+                    script_text,
+                    requested_duration_seconds=int(requested_duration_seconds),
+                )
         except (TypeError, ValueError) as exc:
             seed_data.pop("semantic_planned_beats", None)
             seed_data.pop("semantic_planned_take_count", None)
             seed_data.pop("dialog_script", None)
             seed_data.pop("semantic_script_word_count", None)
-            seed_data["semantic_script_validation_error"] = _semantic_duration_contract_message(
+            message = str(exc) if batch_creation_mode == "manual_semantic_ugc" else _semantic_duration_contract_message(
                 script_text=script_text,
                 requested_duration_seconds=requested_duration_seconds,
                 error=exc,
             )
+            seed_data["semantic_script_validation_error"] = message
             if require_valid_duration:
                 raise ValidationError(
-                    _semantic_duration_contract_message(
-                        script_text=script_text,
-                        requested_duration_seconds=requested_duration_seconds,
-                        error=exc,
-                    ),
+                    message,
                     {
                         "post_id": post.get("id"),
                         "target_duration_seconds": requested_duration_seconds,
@@ -428,7 +435,9 @@ def _apply_script_text_update(
         else:
             seed_data.pop("semantic_script_validation_error", None)
             contract = validation.contract
-            beats = plan_editorial_beats(script_text)
+            if batch_creation_mode == "manual_semantic_ugc":
+                seed_data["semantic_duration_mode"] = ADAPTIVE_MANUAL_DURATION
+            beats = (plan_manual_editorial_beats(script_text) if batch_creation_mode == "manual_semantic_ugc" else plan_editorial_beats(script_text))
             prior_provenance = seed_data.get("semantic_script_provenance")
             prior_source = (
                 prior_provenance.get("source")
@@ -438,7 +447,7 @@ def _apply_script_text_update(
             seed_data.update(
                 {
                     "dialog_script": script_text,
-                    "estimated_duration_s": contract.requested_duration_seconds,
+                    "estimated_duration_s": contract.estimated_speech_seconds or contract.requested_duration_seconds,
                     "target_duration_seconds": contract.requested_duration_seconds,
                     "semantic_duration_contract": contract.as_dict(),
                     "semantic_duration_contract_hash": contract.contract_hash,

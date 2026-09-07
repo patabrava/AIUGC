@@ -2,6 +2,7 @@
 {% set script = seed.get('script') or post.topic_rotation %}
 {% set review_status = seed.get('script_review_status') or 'pending' %}
 {% set removed = review_status == 'removed' or seed.get('video_excluded') == True %}
+{% set adaptive_manual = batch is defined and batch.creation_mode == 'manual_semantic_ugc' %}
 {% set duration = batch_view.semantic_video.duration_contract %}
 {% set script_sources = post.caption_source_links or [] %}
 
@@ -59,6 +60,7 @@
         <div
             x-data="{
                 text: {{ script | default('', true) | tojson | forceescape }},
+                adaptiveManual: {{ 'true' if adaptive_manual else 'false' }},
                 minimumWords: {{ duration.minimum_words | default(0) }},
                 maximumWords: {{ duration.maximum_words | default(0) }},
                 minimumStatements: {{ duration.minimum_semantic_blocks | default(0) }},
@@ -72,11 +74,12 @@
                     return matches ? matches.length : 0;
                 },
                 get wordsReady() {
+                    if (this.adaptiveManual) return this.wordCount > 0;
                     if (!this.maximumWords) return true;
                     return this.wordCount >= this.minimumWords && this.wordCount <= this.maximumWords;
                 },
                 get statementsReady() {
-                    return this.completeStatementCount >= this.minimumStatements;
+                    return this.adaptiveManual || this.completeStatementCount >= this.minimumStatements;
                 },
                 get missingFinalPunctuation() {
                     return /[A-Za-zÀ-ÿ0-9ÄÖÜäöüß][\x22\x27»”“’)}\]]*\s*$/.test(this.text || '');
@@ -90,11 +93,13 @@
                     return Math.max(0, this.wordCount - this.maximumWords);
                 },
                 get wordGapLabel() {
+                    if (this.adaptiveManual) return this.wordCount ? 'Duration adapts to your script' : 'Enter your script';
                     if (this.wordsMissing) return this.wordsMissing + (this.wordsMissing === 1 ? ' word missing' : ' words missing');
                     if (this.wordsOver) return this.wordsOver + (this.wordsOver === 1 ? ' word too many' : ' words too many');
                     return 'Word count ready';
                 },
                 get contractStatus() {
+                    if (this.adaptiveManual) return 'Your wording is preserved. Takes are split automatically; the plan shows the generation cost before you approve it.';
                     if (!this.maximumWords) return '';
                     if (this.wordsMissing) return 'Write ' + this.wordsMissing + ' more ' + (this.wordsMissing === 1 ? 'word' : 'words') + ' to reach the minimum of ' + this.minimumWords + '.';
                     if (this.wordsOver) return 'Cut ' + this.wordsOver + ' ' + (this.wordsOver === 1 ? 'word' : 'words') + ' to stay under the maximum of ' + this.maximumWords + '.';
@@ -123,14 +128,18 @@
             >
                 <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
                     <p class="text-sm font-bold" :class="wordsReady ? 'text-emerald-800' : 'text-amber-800'">
-                        <span x-text="wordCount"></span>/{{ duration.minimum_words }}–{{ duration.maximum_words }} words
+                        <span x-text="wordCount"></span>{% if not adaptive_manual %}/{{ duration.minimum_words }}–{{ duration.maximum_words }}{% endif %} words
                     </p>
                     <p class="text-sm font-bold" :class="wordsReady ? 'text-emerald-800' : 'text-amber-800'" x-text="wordGapLabel"></p>
                 </div>
                 <p class="mt-1 text-xs" :class="(wordsReady && statementsReady) ? 'text-emerald-800' : 'text-amber-800'" x-text="contractStatus"></p>
                 <p class="mt-1 text-xs text-[#1C2740]/65">
+                    {% if adaptive_manual %}
+                    <span x-text="wordCount ? 'About ' + Math.ceil(wordCount / 2.5 + Math.ceil(wordCount / 18) * 0.25) + ' seconds of speech · up to 4,000 characters' : 'Up to 4,000 characters'"></span>
+                    {% else %}
                     {{ duration.requested_duration_seconds }}s target ·
                     <span x-text="completeStatementCount"></span>/at least {{ duration.minimum_semantic_blocks }} complete statement{% if duration.minimum_semantic_blocks != 1 %}s{% endif %}
+                    {% endif %}
                 </p>
             </div>
         </div>

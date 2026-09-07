@@ -1039,6 +1039,8 @@ def _build_semantic_video_post_projection(
             for candidate in candidates
             if isinstance(candidate.get("identity_gate_result"), dict)
         ),
+        "adaptive_duration": bool((run.get("duration_contract") or {}).get("duration_mode")),
+        "estimated_speech_seconds": (run.get("duration_contract") or {}).get("estimated_speech_seconds"),
         "requested_duration_seconds": int(run.get("requested_duration_seconds") or 0) or None,
         "delivery_duration_seconds": delivery_duration,
         "final_video_url": final_video_url,
