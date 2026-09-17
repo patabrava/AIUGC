@@ -45,8 +45,9 @@ def build_raw_camera_background_brief(scene_key: str) -> str:
         f"Lighting: {bible.lighting} "
         f"Forbidden changes: {bible.forbidden_changes} "
         f"Also exclude: {rejectors}. "
-        "Use a believable smartphone perspective with enough room context for later actor placement. Keep the scene "
-        "sparse and stageable. Exclude text, logos, watermarks, UI, fake HDR, bloom, glow, heavy sharpening, beauty "
+        "Use a believable smartphone perspective with enough room context for later actor placement. Match the scene "
+        "bible's specified density and keep every listed prop fixed, physically plausible, and stageable behind an actor. "
+        "Exclude text, logos, watermarks, UI, fake HDR, bloom, glow, heavy sharpening, beauty "
         "polish, cinematic grading, pastel fade, synthetic materials, stylization, and decorative drift props. "
         "Return only the complete production-ready prompt; do not generate or discuss the image."
     )
