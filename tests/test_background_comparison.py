@@ -43,6 +43,29 @@ def test_background_brief_preserves_scene_and_is_strictly_actor_free():
     assert "hands visible" not in brief
 
 
+def test_lived_in_kitchen_brief_preserves_fixed_domestic_realism_without_identity_risk():
+    from app.features.characters.scene_reference import get_scene_bible
+    from app.features.scenes.background_comparison import build_raw_camera_background_brief
+
+    bible = get_scene_bible("home_kitchen_advice_a")
+    brief = build_raw_camera_background_brief(bible.scene_id)
+
+    assert bible.version == 2
+    assert "ordinary home rather than a showroom" in brief
+    assert "compact completely unbranded black bean-to-cup coffee machine" in brief
+    assert "Every appliance surface is blank" in brief
+    assert "five mismatched colored geometric magnets" in brief
+    assert "two small childlike crayon drawings containing no readable writing" in brief
+    assert "white wire drying rack" in brief
+    assert "mixed apples and oranges" in brief
+    assert "one slightly rumpled sage cotton dish towel" in brief
+    assert "Match the scene bible's specified density" in brief
+    assert "No people, faces, bodies, body parts, hands, or wheelchairs" in brief
+    assert "fruit bowl" not in bible.scene_specific_rejectors
+    assert "displayed appliances" not in bible.scene_specific_rejectors
+    assert "legible writing or numbers" in bible.scene_specific_rejectors
+
+
 def test_generate_raw_camera_background_uses_long_prompt_then_generates_one_image():
     from app.features.scenes.background_comparison import generate_raw_camera_background
 
