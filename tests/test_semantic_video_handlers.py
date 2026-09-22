@@ -2688,6 +2688,7 @@ def test_progress_endpoint_projects_queued_scene_image_without_run(monkeypatch):
     assert payload["run_id"] == ""
     assert payload["scene_image_job_id"] == "job-queued"
     assert payload["scene_image_job_status"] == "queued"
+    assert payload["estimated_remaining_seconds"] is None
     assert payload["stage"] == "scene_image_queued"
     assert payload["candidate_generation_status"] == "generating"
     assert payload["candidate_generation_phase"] == "preparing_references"

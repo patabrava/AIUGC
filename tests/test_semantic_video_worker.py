@@ -691,6 +691,23 @@ def test_worker_polls_an_accepted_operation_without_resubmitting():
     assert [call["operation_id"] for call in vertex.poll_calls] == ["existing-operation"]
 
 
+def test_worker_polls_accepted_video_while_another_paid_submission_holds_gate():
+    repo = FakeRepo(take_count=1)
+    repo.takes[0].update(submission_state="submitted", operation_id="accepted-operation")
+    vertex = FakeVertex()
+    worker = _worker(repo, vertex)
+    gate = threading.BoundedSemaphore(1)
+    worker.generation_gate = gate
+    gate.acquire()
+    try:
+        result = worker.tick("run-1")
+    finally:
+        gate.release()
+    assert result.action == "polling"
+    assert vertex.submit_calls == []
+    assert [call["operation_id"] for call in vertex.poll_calls] == ["accepted-operation"]
+
+
 def test_worker_persists_ambiguous_submission_as_unknown_and_never_retries():
     repo = FakeRepo(take_count=1)
     vertex = FakeVertex()

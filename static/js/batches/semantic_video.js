@@ -126,8 +126,10 @@
             if (!button) return;
             rememberSceneImageButton(button);
             const domainDisabled = sceneImageButtonDomainDisabled.get(button) === true;
-            button.disabled = domainDisabled || workflowBusy;
-            button.dataset.sceneImageWorkflowBlocked = String(workflowBusy && !domainDisabled);
+            const cardBusy = candidateRoot.dataset.waitingForCandidates === 'true'
+                || candidateRoot.dataset.candidateGenerationStatus === 'generating';
+            button.disabled = domainDisabled || cardBusy;
+            button.dataset.sceneImageWorkflowBlocked = String(cardBusy && !domainDisabled);
         });
         return workflowBusy;
     }
@@ -516,7 +518,8 @@
         if (label) {
             label.textContent = status === 'stalled'
                 ? 'Generation needs attention'
-                : (labels[phase] || (status === 'ready' ? labels.ready : 'Preparing scene plates'));
+                : (progress.stage === 'scene_image_queued' ? 'Waiting for an image worker'
+                    : (labels[phase] || (status === 'ready' ? labels.ready : 'Preparing scene plates')));
         }
         if (detail) detail.textContent = progress.status_message || '';
         if (spinner) spinner.classList.toggle('hidden', !isGenerating);

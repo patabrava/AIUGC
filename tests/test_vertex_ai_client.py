@@ -2,12 +2,19 @@ from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 import app.adapters.vertex_ai_client as vertex_module
 from app.adapters.vertex_ai_client import VertexAIClient
 from app.core.errors import ThirdPartyError, ValidationError
 from app.features.posts.prompt_builder import VEO_NEGATIVE_PROMPT
+
+
+@pytest.fixture(autouse=True)
+def isolated_video_submission_gate(monkeypatch):
+    monkeypatch.setattr(vertex_module, "_VEO_SUBMIT_GATE", vertex_module._VeoSubmitGate())
+    monkeypatch.setattr(vertex_module, "_VEO_SUBMIT_INTERVAL_SECONDS", 0.0)
 
 
 def _settings(enabled: bool = True):
@@ -1302,3 +1309,106 @@ def test_llm_vertex_multi_image_route_uses_one_provider_request(monkeypatch):
         input_images=None,
         provider_max_attempts=1,
     )
+
+
+def _video_submit_client(monkeypatch, responses):
+    client = object.__new__(VertexAIClient)
+    client._http_client = MagicMock()
+    client._http_client.post.side_effect = responses
+    monkeypatch.setattr(client, "_build_submit_url", lambda _model: "https://vertex.test/submit")
+    monkeypatch.setattr(client, "_build_headers", lambda **_kw: {})
+    return client
+
+
+def _video_response(status, retry_after=None):
+    return httpx.Response(
+        status,
+        headers={"Retry-After": retry_after} if retry_after else {},
+        json={"name": "accepted-operation"} if status == 200 else {"error": "rejected"},
+        request=httpx.Request("POST", "https://vertex.test/submit"),
+    )
+
+
+def test_video_submit_recovers_explicit_429_with_shared_cooldown(monkeypatch):
+    clock = [100.0]
+    sleeps = []
+    monkeypatch.setattr(vertex_module.time, "monotonic", lambda: clock[0])
+    def sleep(delay):
+        sleeps.append(delay)
+        clock[0] += delay
+    monkeypatch.setattr(vertex_module.time, "sleep", sleep)
+    monkeypatch.setattr(vertex_module.random, "uniform", lambda *_a: 0.0)
+    client = _video_submit_client(monkeypatch, [_video_response(429, "7"), _video_response(200)])
+    result = client._submit_to_vertex(model_name="veo-test", payload={}, correlation_id="test")
+    assert result["operation_id"] == "accepted-operation"
+    assert client._http_client.post.call_count == 2
+    assert sleeps == [7.0]
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 500, 502, 503, 504])
+def test_video_submit_does_not_retry_permanent_or_ambiguous_http_failures(monkeypatch, status):
+    client = _video_submit_client(monkeypatch, [_video_response(status)])
+    with pytest.raises(httpx.HTTPStatusError):
+        client._submit_to_vertex(model_name="veo-test", payload={}, correlation_id="test")
+    assert client._http_client.post.call_count == 1
+
+
+def test_video_submit_does_not_retry_ambiguous_transport_failure(monkeypatch):
+    client = _video_submit_client(monkeypatch, [httpx.ReadTimeout("response lost")])
+    with pytest.raises(httpx.ReadTimeout):
+        client._submit_to_vertex(model_name="veo-test", payload={}, correlation_id="test")
+    assert client._http_client.post.call_count == 1
+
+
+def test_video_submit_rate_limit_retry_is_bounded(monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr(vertex_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(vertex_module.time, "sleep", lambda delay: clock.__setitem__(0, clock[0]+delay))
+    monkeypatch.setattr(vertex_module.random, "uniform", lambda *_a: 0.0)
+    client = _video_submit_client(monkeypatch, [_video_response(429)] * 4)
+    with pytest.raises(httpx.HTTPStatusError):
+        client._submit_to_vertex(model_name="veo-test", payload={}, correlation_id="test")
+    assert client._http_client.post.call_count == 4
+    assert clock[0] == 114.0
+
+
+def test_video_submit_does_not_shorten_long_provider_retry_after(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(vertex_module.time, "sleep", sleeps.append)
+    client = _video_submit_client(monkeypatch, [_video_response(429, "120")])
+    with pytest.raises(httpx.HTTPStatusError):
+        client._submit_to_vertex(model_name="veo-test", payload={}, correlation_id="test")
+    assert client._http_client.post.call_count == 1
+    assert sleeps == []
+
+
+def test_video_submit_long_cooldown_rejects_followup_without_parking_worker(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(vertex_module.time, "sleep", sleeps.append)
+    client = _video_submit_client(monkeypatch, [_video_response(429, "120")])
+    for _ in range(2):
+        with pytest.raises(httpx.HTTPStatusError):
+            client._submit_to_vertex(model_name="veo-test", payload={}, correlation_id="test")
+    assert client._http_client.post.call_count == 1
+    assert sleeps == []
+
+
+def test_concurrent_video_submits_are_paced_without_serializing_provider_operations(monkeypatch):
+    import time
+    import threading
+    starts = []
+    barrier = threading.Barrier(3)
+    monkeypatch.setattr(vertex_module, "_VEO_SUBMIT_INTERVAL_SECONDS", 0.02)
+    client = _video_submit_client(monkeypatch, [])
+    def post(*_args, **_kwargs):
+        starts.append(time.monotonic())
+        return _video_response(200)
+    client._http_client.post.side_effect = post
+    def submit(index):
+        barrier.wait(timeout=2)
+        return client._submit_to_vertex(model_name="veo-test", payload={}, correlation_id=str(index))
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        results = list(pool.map(submit, range(3)))
+    assert len(results) == 3
+    assert all(result["operation_id"] for result in results)
+    assert all(b - a >= 0.019 for a, b in zip(starts, starts[1:]))

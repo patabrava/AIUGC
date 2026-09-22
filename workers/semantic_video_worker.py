@@ -1748,7 +1748,12 @@ class SemanticVideoWorker:
         try:
             takes = _latest_attempts(self.repo.list_attempts(claimed_id))
             if stage == "generating":
-                if self.generation_gate is None:
+                # Accepted operations can finish while another slot submits a
+                # paid wave or waits for provider capacity. Only new submissions
+                # need the shared gate; polling never buys another take.
+                if self.generation_gate is None or any(
+                    take.get("submission_state") == "submitted" for take in takes
+                ):
                     return self._run_generation_wave(run, takes, lease_token)
                 if not self.generation_gate.acquire(blocking=False):
                     return WorkerTickResult(

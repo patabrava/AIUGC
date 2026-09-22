@@ -9,7 +9,13 @@ from __future__ import annotations
 
 import os
 import base64
+import math
+import random
+import threading
+import time
 from copy import deepcopy
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Optional, Dict, Any
 
 import httpx
@@ -27,6 +33,49 @@ logger = get_logger(__name__)
 
 _DEFAULT_VERTEX_MODEL = "veo-3.1-generate-001"
 _DEFAULT_VERTEX_FAST_MODEL = "veo-3.1-fast-generate-001"
+
+
+class _VeoSubmitGate:
+    """Pace process-local submissions; accepted video operations run in parallel."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.not_before = 0.0
+        self.last_rejection = None
+
+    def wait(self):
+        delay = self.not_before - time.monotonic()
+        if delay > _VEO_THROTTLE_MAX_WAIT_SECONDS and self.last_rejection is not None:
+            # Preserve a long server cooldown without parking a worker/lease
+            # indefinitely or making another paid HTTP request prematurely.
+            self.last_rejection.raise_for_status()
+        if delay > 0:
+            time.sleep(delay)
+
+
+_VEO_SUBMIT_GATE = _VeoSubmitGate()
+_VEO_SUBMIT_INTERVAL_SECONDS = 2.0
+_VEO_THROTTLE_MAX_ATTEMPTS = 4
+_VEO_THROTTLE_MAX_WAIT_SECONDS = 60.0
+
+
+def _veo_throttle_delay(response: httpx.Response, attempt: int) -> float:
+    """Honor provider Retry-After, with jitter for simultaneous clients."""
+    delay = min(30.0, 2.0 ** (attempt + 1)) + random.uniform(0.0, 1.0)
+    raw = str(response.headers.get("Retry-After") or "").strip()
+    try:
+        requested = float(raw)
+    except ValueError:
+        try:
+            parsed = parsedate_to_datetime(raw)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            requested = (parsed - datetime.now(timezone.utc)).total_seconds()
+        except (TypeError, ValueError, OverflowError):
+            requested = 0.0
+    if math.isfinite(requested):
+        delay = max(delay, requested)
+    return delay
 
 
 class VertexSettings(BaseSettings):
@@ -296,7 +345,34 @@ class VertexAIClient:
             request_payload=logged_payload,
         )
 
-        response = self._http_client.post(url, headers=headers, json=payload)
+        # Retry only an explicit capacity rejection: transport failures and 5xx
+        # responses can hide an accepted paid operation and must remain unknown.
+        # The lock also shares pacing/cooldown across every local caller. Polling
+        # uses a separate path and is never held behind this submission gate.
+        with _VEO_SUBMIT_GATE.lock:
+            waited = 0.0
+            for attempt in range(_VEO_THROTTLE_MAX_ATTEMPTS):
+                _VEO_SUBMIT_GATE.wait()
+                if attempt:
+                    headers = self._build_headers(include_json=True)
+                response = self._http_client.post(url, headers=headers, json=payload)
+                _VEO_SUBMIT_GATE.not_before = time.monotonic() + _VEO_SUBMIT_INTERVAL_SECONDS
+                if response.status_code != 429:
+                    _VEO_SUBMIT_GATE.last_rejection = None
+                    break
+                delay = _veo_throttle_delay(response, attempt)
+                _VEO_SUBMIT_GATE.last_rejection = response
+                _VEO_SUBMIT_GATE.not_before = time.monotonic() + delay
+                if attempt == _VEO_THROTTLE_MAX_ATTEMPTS - 1 or waited + delay > _VEO_THROTTLE_MAX_WAIT_SECONDS:
+                    break
+                waited += delay
+                logger.warning(
+                    "vertex_ai_submit_throttled",
+                    correlation_id=correlation_id,
+                    attempt=attempt + 1,
+                    delay_seconds=delay,
+                    model=model_name,
+                )
         logger.info(
             "vertex_ai_rest_response",
             correlation_id=correlation_id,

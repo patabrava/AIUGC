@@ -2507,14 +2507,16 @@ def _scene_image_job_progress(
     error_message = str(error.get("message") or "").strip()
     if is_stalled:
         message = error_message or (
-            "The image operation exceeded its eight-minute deadline. Retry this script."
+            ("The image exceeded its queue waiting limit. Retry this script."
+             if job_status == "queued" and not job.get("started_at")
+             else "The image operation exceeded its eight-minute deadline. Retry this script.")
             if deadline_expired
             else "Image generation failed safely. Retry this script."
         )
     elif lease_expired:
         message = "The image worker is reclaiming this operation safely."
     elif job_status == "queued":
-        message = "Queued for fast script-image generation."
+        message = "Queued for script-image generation. Waiting for an available image worker."
     else:
         message = "Generating one script image and checking actor identity."
 
@@ -2550,7 +2552,7 @@ def _scene_image_job_progress(
         progress_percent=20 if job_status == "processing" else (5 if not is_stalled else 20),
         elapsed_seconds=elapsed,
         estimated_remaining_seconds=(
-            None if is_stalled else max(0, _TYPICAL_SCENE_PLATE_SECONDS - elapsed)
+            None if is_stalled or job_status == "queued" else max(0, _TYPICAL_SCENE_PLATE_SECONDS - elapsed)
         ),
         status_message=message,
         failed_take_indexes=[],
