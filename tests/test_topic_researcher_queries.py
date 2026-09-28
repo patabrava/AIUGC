@@ -442,7 +442,7 @@ def test_upsert_topic_script_variants_accepts_product_32s_midrange_script(mock_g
         target_length_tier=32,
         topic_research_dossier_id=None,
         variants=[{
-            "script": "VARIO PLUS passt sich deinem Alltag an, weil er gerade, kurvig, steil oder eng funktioniert. Du nutzt ihn innen und außen, als Plattform oder mit Sitz. Dabei bleibst du flexibel und sicher unterwegs. Mit 300 Kilo Tragkraft und nachrüstbarem Sitzwechsel wächst die Lösung mit. Vor dem Einbau klärst du Bedienung, Kurven und Ausstattung gemeinsam. Made in Germany sorgt zusätzlich für mehr Vertrauen im Alltag.",
+            "script": "VARIO PLUS passt sich deinem Alltag an, weil er gerade, kurvige, steile oder enge Treppen bewältigt. Du nutzt ihn innen oder außen, als Plattform oder mit Sitz. Dabei bleibst du sicher unterwegs. Mit 300 Kilo Tragkraft und wechselbarer Ausstattung wächst die Lösung mit. Vor dem Einbau klärst du Bedienung, Kurven und passende Haltepunkte gemeinsam. Die Fertigung in Deutschland schafft zusätzlich Vertrauen im Alltag und erleichtert die Beratung.",
             "caption": "VARIO PLUS fuer Zuhause",
             "source_summary": "Kurzer Produktkontext fuer die Speicherung.",
             "disclaimer": "Keine Rechts- oder medizinische Beratung.",

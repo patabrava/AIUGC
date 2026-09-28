@@ -124,4 +124,4 @@ def test_caption_worker_keeps_active_backoff_after_poll_error(monkeypatch):
 
     caption_worker.main()
 
-    assert sleep_args == [10]
+    assert sleep_args == [caption_worker.CAPTION_ERROR_BACKOFF_SECONDS]

@@ -69,7 +69,7 @@ def test_validate_pre_persistence_topic_payload_matches_published_bounds_for_all
         {
             "topic": "Bahnhof ohne Huerden",
             "title": "Bahnhof ohne Huerden",
-            "script": "Du willst einfach einsteigen, aber der Aufzug fällt aus und der Umweg kostet Kraft, Zeit und Nerven, deshalb zählt barrierefreie Planung 2026 im Alltag für dich und alle anderen, die nicht noch mehr Wege verlieren wollen, wenn Bahnsteige, Eingänge und Wege nicht zusammenpassen und jede kleine Hürde den ganzen Tag kippt und Kraft kostet.",
+            "script": "Du willst einfach einsteigen, aber der Aufzug fällt aus und der Umweg kostet Kraft, Zeit und Nerven, deshalb zählt barrierefreie Planung 2026 im Alltag für dich und alle anderen, die nicht noch mehr Wege verlieren wollen, wenn Bahnsteige, Eingänge und Wege nicht zusammenpassen und jede kleine Hürde den ganzen Tag kippt und Kraft kostet. Prüf vorher die aktuellen Hinweise und vereinbare mit anderen einen verlässlichen Plan für den nächsten Anschluss.",
             "caption": "Barrieren im Bahnhof kosten Kraft.",
             "source_summary": "Barrieren im Bahnhof kosten Kraft und Zeit.",
             "disclaimer": "Keine Rechts- oder medizinische Beratung.",
@@ -79,7 +79,7 @@ def test_validate_pre_persistence_topic_payload_matches_published_bounds_for_all
     )
     assert 14 <= len(eight["script"].split()) <= 18
     assert 26 <= len(sixteen["script"].split()) <= 36
-    assert 54 <= len(thirty_two["script"].split()) <= 74
+    assert 68 <= len(thirty_two["script"].split()) <= 88
 
 
 def test_validate_pre_persistence_topic_payload_uses_lifestyle_bounds_for_lifestyle_posts():
@@ -87,7 +87,7 @@ def test_validate_pre_persistence_topic_payload_uses_lifestyle_bounds_for_lifest
         {
             "topic": "Rollstuhl-Alltag",
             "title": "Rollstuhl-Alltag",
-            "script": "Schon wieder ein unnötiger Umweg, aber heute planst du ihn bewusst anders und sparst dir Kraft im Alltag, weil gute Vorbereitung den spontanen Stress senkt, deine Wege planbarer macht und dir hilft, Energie für die wirklich wichtigen Momente des Tages zu behalten.",
+            "script": "Schon wieder ein unnötiger Umweg, aber heute planst du ihn bewusst anders und sparst dir Kraft im Alltag, weil gute Vorbereitung den spontanen Stress senkt, deine Wege planbarer macht und dir hilft, Energie für die wirklich wichtigen Momente des Tages zu behalten. Plane anstrengende Wege mit festen Pausen, prüfe mögliche Alternativen vorher und verabrede einen Treffpunkt, falls der Aufzug ausfällt. So bleibt der Tag flexibler und du behältst mehr Kraft für die Momente, die dir wirklich wichtig sind.",
             "caption": "Alltag mit Rollstuhl braucht kluge Planung.",
             "source_summary": "Alltag mit Rollstuhl braucht kluge Planung.",
             "disclaimer": "Keine Rechts- oder medizinische Beratung.",
@@ -96,7 +96,7 @@ def test_validate_pre_persistence_topic_payload_uses_lifestyle_bounds_for_lifest
         post_type="lifestyle",
         current_year=2026,
     )
-    assert 40 <= len(payload["script"].split()) <= 66
+    assert 64 <= len(payload["script"].split()) <= 84
 
 
 def test_validate_pre_persistence_topic_payload_repairs_short_16s_lifestyle_script():
@@ -104,7 +104,7 @@ def test_validate_pre_persistence_topic_payload_repairs_short_16s_lifestyle_scri
         {
             "topic": "Rollstuhl-Alltag",
             "title": "Rollstuhl-Alltag",
-            "script": "Der spontane Umweg kostet dich heute wieder Kraft und Zeit.",
+            "script": "Der spontane Umweg kostet dich heute wieder Kraft und Zeit, weil ungeplante Stufen deinen Ablauf verschieben und Pausen fehlen.",
             "caption": "Kleine Anpassungen entlasten den Alltag.",
             "source_summary": "Kleine Anpassungen entlasten den Alltag mit dem Rollstuhl deutlich.",
             "disclaimer": "Keine Rechts- oder medizinische Beratung.",

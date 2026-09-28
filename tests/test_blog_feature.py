@@ -136,6 +136,7 @@ def test_gemini_image_generation_maps_nanobanana_alias():
     client = LLMClient()
     client.gemini_provider = "gemini_api"
     client.gemini_api_fallback_enabled = True
+    client.gemini_api_key = "test-gemini-key"
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
@@ -180,6 +181,7 @@ def test_gemini_image_generation_maps_nanobananapro_alias():
     client = LLMClient()
     client.gemini_provider = "gemini_api"
     client.gemini_api_fallback_enabled = True
+    client.gemini_api_key = "test-gemini-key"
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
@@ -214,6 +216,7 @@ def test_gemini_image_generation_accepts_ordered_reference_images():
     client = LLMClient()
     client.gemini_provider = "gemini_api"
     client.gemini_api_fallback_enabled = True
+    client.gemini_api_key = "test-gemini-key"
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
@@ -261,6 +264,7 @@ def test_gemini_text_generation_accepts_ordered_input_images():
     client = LLMClient()
     client.gemini_provider = "gemini_api"
     client.gemini_api_fallback_enabled = True
+    client.gemini_api_key = "test-gemini-key"
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
@@ -665,6 +669,7 @@ def test_gemini_image_generation_decodes_inline_image_bytes():
     client = LLMClient()
     client.gemini_provider = "gemini_api"
     client.gemini_api_fallback_enabled = True
+    client.gemini_api_key = "test-gemini-key"
     png_bytes = b"\x89PNG\r\n\x1a\nimage-bytes"
     encoded = base64.b64encode(png_bytes).decode("ascii")
     mock_response = MagicMock()

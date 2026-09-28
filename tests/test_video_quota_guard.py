@@ -485,6 +485,7 @@ def test_generate_all_videos_keeps_text_only_path_for_every_veo_submit(monkeypat
 
 def test_generate_all_character_consistency_uses_approved_scene_reference_set_for_segmented_submit(monkeypatch):
     from app.features.characters.schemas import SceneReferenceSetSummary
+    from app.features.videos import handlers as video_handlers
 
     posts = [
         {
@@ -629,6 +630,9 @@ def test_generate_all_character_consistency_uses_approved_scene_reference_set_fo
             "segment_count": 2,
             "prompts": ["Segment prompt 1", "Segment prompt 2"],
             "beats": ["Segment beat 1", "Segment beat 2"],
+            "spoken_windows": video_handlers._build_segmented_spoken_windows(
+                ["Segment beat 1", "Segment beat 2"]
+            ),
             "seed": 123,
             "i2v_locked": True,
             "i2v_model": "veo-3.1-generate-001",
@@ -766,6 +770,9 @@ def test_generate_all_character_consistency_prepares_lora_scene_reference_set_wh
             "segment_count": 2,
             "prompts": ["Segment prompt 1", "Segment prompt 2"],
             "beats": ["Segment beat 1", "Segment beat 2"],
+            "spoken_windows": video_handlers._build_segmented_spoken_windows(
+                ["Segment beat 1", "Segment beat 2"]
+            ),
             "seed": 123,
             "i2v_locked": True,
             "i2v_model": "veo-3.1-generate-001",

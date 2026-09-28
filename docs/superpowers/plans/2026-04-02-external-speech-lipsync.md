@@ -785,7 +785,7 @@ def test_reconcile_batch_video_pipeline_state_waits_for_external_audio():
     assert state == "S5_PROMPTS_BUILT"
 ```
 
-If `tests/test_video_submission_flow.py` already covers skip logic, add this assertion there; otherwise add a small focused test to `tests/test_batches_status_progress.py`:
+If `tests/manual_video_submission_flow.py` already covers skip logic, add this assertion there; otherwise add a small focused test to `tests/test_batches_status_progress.py`:
 
 ```python
 def test_batch_detail_counts_voiceover_and_lipsync_as_active_polling():

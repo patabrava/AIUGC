@@ -1,20 +1,7 @@
 from __future__ import annotations
 
-import os
-
 import pytest
 from types import SimpleNamespace
-
-os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
-os.environ.setdefault("SUPABASE_KEY", "test-key")
-os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
-os.environ.setdefault("GEMINI_API_KEY", "test-google-key")
-os.environ.setdefault("CLOUDFLARE_R2_ACCOUNT_ID", "test-account")
-os.environ.setdefault("CLOUDFLARE_R2_ACCESS_KEY_ID", "test-access")
-os.environ.setdefault("CLOUDFLARE_R2_SECRET_ACCESS_KEY", "test-secret")
-os.environ.setdefault("CLOUDFLARE_R2_BUCKET_NAME", "test-bucket")
-os.environ.setdefault("CLOUDFLARE_R2_PUBLIC_BASE_URL", "https://example.r2.dev")
-os.environ.setdefault("CRON_SECRET", "test-cron-secret")
 
 from fastapi.testclient import TestClient
 

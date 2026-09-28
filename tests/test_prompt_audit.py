@@ -168,13 +168,13 @@ class TestBuildProviderPromptRequest:
         assert result["prompt_path"] == "full_prompt_text_fallback"
         assert len(result["prompt_text"]) > 0
 
-    def test_sora_returns_optimized_prompt_path(self):
-        """Sora uses optimized_prompt when available."""
+    def test_sora_uses_full_prompt_fallback(self):
+        """Sora keeps the full prompt fallback; optimized prompt is Veo-specific."""
         video_prompt = {
             "optimized_prompt": "sora optimized text",
         }
         result = _build_provider_prompt_request(video_prompt, "sora_2")
-        assert result["prompt_path"] == "sora_optimized_prompt"
+        assert result["prompt_path"] == "full_prompt_text_fallback"
 
     def test_sora_falls_back_to_full_prompt_text(self):
         """Sora falls back to full_prompt_text."""

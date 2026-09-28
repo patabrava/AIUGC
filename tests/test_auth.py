@@ -365,7 +365,7 @@ def test_reviewer_login_sets_session_cookie(monkeypatch):
     monkeypatch.setenv("REVIEWER_LOGIN_TOKEN", "review-secret-token")
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", "test-token-encryption-key")
 
-    client = TestClient(app, base_url="https://lippelift.xyz")
+    client = TestClient(app, base_url="http://testserver")
     response = client.get("/auth/review?token=review-secret-token", allow_redirects=False)
 
     assert response.status_code == 302
@@ -385,7 +385,7 @@ def test_reviewer_email_direct_login_from_send_otp(monkeypatch):
     monkeypatch.setenv("REVIEWER_LOGIN_TOKEN", "review-secret-token")
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", "test-token-encryption-key")
 
-    client = TestClient(app, base_url="https://lippelift.xyz")
+    client = TestClient(app, base_url="http://testserver")
     response = client.post(
         "/auth/send-otp",
         data={"email": "tiktok-review@lippelift.xyz"},
@@ -399,6 +399,7 @@ def test_reviewer_email_direct_login_from_send_otp(monkeypatch):
 
 def test_root_keeps_authenticated_reviewer_in_app(monkeypatch):
     import app.core.config as config_module
+    import app.features.auth.queries as auth_queries
     from fastapi.testclient import TestClient
     from app.main import app
 
@@ -409,7 +410,12 @@ def test_root_keeps_authenticated_reviewer_in_app(monkeypatch):
     monkeypatch.setenv("REVIEWER_LOGIN_TOKEN", "review-secret-token")
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", "test-token-encryption-key")
 
-    client = TestClient(app, base_url="https://lippelift.xyz")
+    async def _authenticated_user(_access_token):
+        return {"email": "tiktok-review@lippelift.xyz"}
+
+    monkeypatch.setattr(auth_queries, "get_user_from_token", _authenticated_user)
+
+    client = TestClient(app, base_url="https://testserver")
     login_response = client.get("/auth/review?token=review-secret-token", allow_redirects=False)
 
     assert login_response.status_code == 302
@@ -431,7 +437,7 @@ def test_root_stays_public_without_session(monkeypatch):
     monkeypatch.setenv("APP_URL", "https://lippelift.xyz")
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", "test-token-encryption-key")
 
-    client = TestClient(app, base_url="https://lippelift.xyz")
+    client = TestClient(app, base_url="http://testserver")
     response = client.get("/", allow_redirects=False)
 
     assert response.status_code == 200
@@ -449,7 +455,7 @@ def test_reviewer_login_rejects_invalid_token(monkeypatch):
     monkeypatch.setenv("REVIEWER_LOGIN_EMAIL", "tiktok-review@lippelift.xyz")
     monkeypatch.setenv("REVIEWER_LOGIN_TOKEN", "review-secret-token")
 
-    client = TestClient(app, base_url="https://lippelift.xyz")
+    client = TestClient(app, base_url="http://testserver")
     response = client.get("/auth/review?token=wrong-token")
 
     assert response.status_code == 403
@@ -467,7 +473,7 @@ def test_reviewer_login_requires_configuration(monkeypatch):
     monkeypatch.setenv("REVIEWER_LOGIN_EMAIL", "")
     monkeypatch.setenv("REVIEWER_LOGIN_TOKEN", "")
 
-    client = TestClient(app, base_url="https://lippelift.xyz")
+    client = TestClient(app, base_url="http://testserver")
     response = client.get("/auth/review?token=anything")
 
     assert response.status_code == 503

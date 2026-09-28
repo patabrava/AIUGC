@@ -87,9 +87,12 @@ def test_production_compose_uses_repo_build_and_server_env_file():
     assert "external: true" not in compose_text
 
 
-def test_production_compose_does_not_include_web_healthcheck():
+def test_production_compose_web_healthcheck_uses_database_independent_livez():
     data = yaml.safe_load(COMPOSE_PATH.read_text(encoding="utf-8"))
-    assert "healthcheck" not in data["services"]["web"]
+    healthcheck = data["services"]["web"]["healthcheck"]
+    command = " ".join(healthcheck["test"])
+    assert "/livez" in command
+    assert "/health" not in command
 
 
 def test_all_compose_contracts_run_the_dedicated_semantic_video_worker():
@@ -212,9 +215,12 @@ def test_hostinger_runtime_checkout_tracks_remote_main():
     assert "external: true" not in compose_text
 
 
-def test_hostinger_runtime_does_not_include_web_healthcheck():
+def test_hostinger_runtime_web_healthcheck_uses_database_independent_livez():
     data = yaml.safe_load((Path(__file__).resolve().parents[1] / "docker-compose.hostinger-runtime.yaml").read_text(encoding="utf-8"))
-    assert "healthcheck" not in data["services"]["web"]
+    healthcheck = data["services"]["web"]["healthcheck"]
+    command = " ".join(healthcheck["test"])
+    assert "/livez" in command
+    assert "/health" not in command
 
 
 def test_github_action_deploys_on_push_to_main():
