@@ -184,7 +184,13 @@
         if (!RUN_PROGRESS_STAGES.includes(root.dataset.stage)) stopPolling(root);
         showCandidateTerminal(root, status, message, isError);
         const button = action(root, 'generate-candidates');
-        if (button) window.endActionFeedback(button);
+        if (button) {
+            window.endActionFeedback(button);
+            // A page opened mid-generation has no click feedback to restore.
+            button.textContent = status === 'ready'
+                ? 'Regenerate script image'
+                : 'Retry script image';
+        }
         const workflowBusy = syncSceneImageWorkflowGate(root);
         return workflowBusy;
     }
