@@ -7,14 +7,19 @@ from datetime import datetime, timezone
 from hashlib import sha256
 import json
 import math
+import random
+import time
 from typing import Any, Callable, Mapping, Optional, Sequence, Tuple
 
 from app.adapters.llm_client import get_llm_client
 from app.core.errors import ThirdPartyError, ValidationError
+from app.core.logging import get_logger
 from app.features.semantic_videos.visual_contract import (
     SCENE_IDENTITY_EVALUATOR_CONTRACT_VERSION,
 )
 
+
+logger = get_logger(__name__)
 
 VIDEO_IDENTITY_EVALUATOR_CONTRACT_VERSION = "semantic-video-identity-v2"
 _SCENE_COMPONENTS = (
@@ -292,8 +297,6 @@ def _evaluate_report_with_consistency_retry(
     deadline_at: Optional[datetime] = None,
     execution_guard: Optional[Callable[[], None]] = None,
 ) -> dict[str, Any]:
-    if execution_guard is not None:
-        execution_guard()
     request: dict[str, Any] = {
         "prompt": prompt,
         "model": model,
@@ -301,21 +304,65 @@ def _evaluate_report_with_consistency_retry(
         "input_images": images,
         "location": location,
     }
-    if deadline_at is not None:
-        normalized_deadline = deadline_at
-        if normalized_deadline.tzinfo is None:
-            normalized_deadline = normalized_deadline.replace(tzinfo=timezone.utc)
-        remaining = (
-            normalized_deadline - datetime.now(timezone.utc)
-        ).total_seconds() - _SCENE_IMAGE_POST_IDENTITY_RESERVE_SECONDS
-        if remaining < 5.0:
-            raise ThirdPartyError(
-                "Scene identity evaluation reached the image-job deadline.",
-                {"status_code": 408, "reason_code": "scene_image_deadline"},
-            )
-        request["timeout_seconds"] = min(45.0, remaining)
-        request["provider_max_attempts"] = 1
-    raw = llm_client.generate_gemini_text(**request)
+    normalized_deadline = deadline_at
+    if normalized_deadline is not None and normalized_deadline.tzinfo is None:
+        normalized_deadline = normalized_deadline.replace(tzinfo=timezone.utc)
+
+    def generate_report_text() -> str:
+        # Only deadline-bound scene QA owns retries here. Other callers retain
+        # the adapter's existing policy. These calls evaluate the same bytes;
+        # they never buy another rendered image or repeat a Veo submission.
+        attempts = 3 if normalized_deadline is not None else 1
+        for attempt in range(attempts):
+            if execution_guard is not None:
+                execution_guard()
+            remaining = None
+            if normalized_deadline is not None:
+                remaining = (
+                    normalized_deadline - datetime.now(timezone.utc)
+                ).total_seconds() - _SCENE_IMAGE_POST_IDENTITY_RESERVE_SECONDS
+                if remaining < 5.0:
+                    raise ThirdPartyError(
+                        "Scene identity evaluation reached the image-job deadline.",
+                        {"status_code": 408, "reason_code": "scene_image_deadline"},
+                    )
+                request["timeout_seconds"] = min(45.0, remaining)
+                request["provider_max_attempts"] = 1
+            try:
+                return llm_client.generate_gemini_text(**request)
+            except ThirdPartyError as exc:
+                status = exc.details.get("status_code")
+                transport_failure = status is None and bool(exc.details.get("error_class"))
+                transient = status in {408, 429, 500, 502, 503, 504} or transport_failure
+                if not transient or attempt + 1 >= attempts:
+                    raise
+                delay = (30.0 if status == 429 else 2.0) * (2 ** attempt)
+                retry_after = exc.details.get("retry_after_seconds")
+                if isinstance(retry_after, (int, float)) and math.isfinite(retry_after):
+                    delay = max(delay, retry_after)
+                delay += random.uniform(0.0, delay * 0.25)
+                available = (
+                    normalized_deadline - datetime.now(timezone.utc)
+                ).total_seconds() - _SCENE_IMAGE_POST_IDENTITY_RESERVE_SECONDS
+                if delay + 5.0 >= available:
+                    raise
+                logger.warning(
+                    "semantic_scene_identity_service_retry",
+                    attempt=attempt + 1,
+                    status_code=status,
+                    error_class=exc.details.get("error_class"),
+                    delay_seconds=round(delay, 2),
+                    model=model,
+                )
+                while delay > 0:
+                    if execution_guard is not None:
+                        execution_guard()
+                    interval = min(1.0, delay)
+                    time.sleep(interval)
+                    delay -= interval
+        raise AssertionError("Scene identity service retry budget exhausted")
+
+    raw = generate_report_text()
     parsed = _parse_report(
         raw,
         component_fields=component_fields,
@@ -329,23 +376,7 @@ def _evaluate_report_with_consistency_retry(
     if not internally_inconsistent_low_confidence:
         return parsed
     request["prompt"] = prompt + _CONFIDENCE_CONSISTENCY_CORRECTION
-    if execution_guard is not None:
-        execution_guard()
-    if deadline_at is not None:
-        normalized_deadline = deadline_at
-        if normalized_deadline.tzinfo is None:
-            normalized_deadline = normalized_deadline.replace(tzinfo=timezone.utc)
-        remaining = (
-            normalized_deadline - datetime.now(timezone.utc)
-        ).total_seconds() - _SCENE_IMAGE_POST_IDENTITY_RESERVE_SECONDS
-        if remaining < 5.0:
-            raise ThirdPartyError(
-                "Scene identity evaluation reached the image-job deadline.",
-                {"status_code": 408, "reason_code": "scene_image_deadline"},
-            )
-        request["timeout_seconds"] = min(45.0, remaining)
-        request["provider_max_attempts"] = 1
-    corrected_raw = llm_client.generate_gemini_text(**request)
+    corrected_raw = generate_report_text()
     return _parse_report(
         corrected_raw,
         component_fields=component_fields,
