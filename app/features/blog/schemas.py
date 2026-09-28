@@ -20,6 +20,9 @@ _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s+")
 _LINK_TOKEN_RE = re.compile(r"\[\[LINK:([a-z0-9_-]{1,80})\|([^\[\]]{1,160})\]\]", re.IGNORECASE)
+# The LLM ignores the prompt's "Kein Markdown" rule and bolds bullet labels ("**Label:** Text").
+_MD_BOLD_RE = re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*")
+_MD_BOLD_MARKER_RE = re.compile(r"\*\*")
 
 
 class BlogSource(BaseModel):
@@ -225,6 +228,10 @@ def _strip_html(value: str) -> str:
     return _compact_text(_TAG_RE.sub(" ", value or ""))
 
 
+def _strip_markdown_bold(value: Any) -> str:
+    return _compact_text(_MD_BOLD_MARKER_RE.sub("", str(value or "")))
+
+
 def _looks_like_html(value: str) -> bool:
     return bool(value and "<" in value and ">" in value)
 
@@ -291,6 +298,18 @@ def _sanitize_internal_links(raw_links: Any) -> List[Dict[str, str]]:
     return cleaned
 
 
+def _render_text_html(text: str) -> str:
+    """Escape text, render Markdown bold as <strong>, and drop unpaired bold markers."""
+    parts: List[str] = []
+    cursor = 0
+    for match in _MD_BOLD_RE.finditer(text):
+        parts.append(escape(_MD_BOLD_MARKER_RE.sub("", text[cursor : match.start()])))
+        parts.append(f"<strong>{escape(match.group(1))}</strong>")
+        cursor = match.end()
+    parts.append(escape(_MD_BOLD_MARKER_RE.sub("", text[cursor:])))
+    return "".join(parts)
+
+
 def _render_inline_html(value: Any, internal_links: Optional[List[Dict[str, str]]] = None) -> str:
     text = _compact_text(value)
     if not text:
@@ -299,15 +318,15 @@ def _render_inline_html(value: Any, internal_links: Optional[List[Dict[str, str]
     parts: List[str] = []
     cursor = 0
     for match in _LINK_TOKEN_RE.finditer(text):
-        parts.append(escape(text[cursor : match.start()]))
+        parts.append(_render_text_html(text[cursor : match.start()]))
         link = allowed.get(match.group(1).lower())
-        anchor = _compact_text(match.group(2))
+        anchor = _strip_markdown_bold(match.group(2))
         if link and anchor:
             parts.append(f'<a href="{escape(link["url"], quote=True)}">{escape(anchor)}</a>')
         else:
             parts.append(escape(match.group(0)))
         cursor = match.end()
-    parts.append(escape(text[cursor:]))
+    parts.append(_render_text_html(text[cursor:]))
     return "".join(parts)
 
 
@@ -320,7 +339,7 @@ def _render_bullet_list(items: List[str], internal_links: Optional[List[Dict[str
 
 
 def render_summary_html(summary_title: str, summary_bullets: List[str]) -> str:
-    title = escape(_compact_text(summary_title) or DEFAULT_SUMMARY_TITLE)
+    title = escape(_strip_markdown_bold(summary_title) or DEFAULT_SUMMARY_TITLE)
     bullets_html = _render_bullet_list(summary_bullets)
     return f"<h2>{title}</h2>{bullets_html}" if bullets_html else f"<h2>{title}</h2>"
 
@@ -342,7 +361,7 @@ def render_body_html(
     internal_links: Optional[List[Dict[str, str]]] = None,
 ) -> str:
     parts: List[str] = []
-    heading = _compact_text(intro_heading)
+    heading = _strip_markdown_bold(intro_heading)
     if heading:
         parts.append(f"<h2>{escape(heading)}</h2>")
     for paragraph in introduction_paragraphs or []:
@@ -352,7 +371,7 @@ def render_body_html(
     for section in sections or []:
         if not isinstance(section, dict):
             continue
-        section_heading = _compact_text(section.get("heading"))
+        section_heading = _strip_markdown_bold(section.get("heading"))
         if section_heading:
             parts.append(f"<h2>{escape(section_heading)}</h2>")
         for paragraph in section.get("paragraphs") or []:
@@ -362,7 +381,7 @@ def render_body_html(
         bullets_html = _render_bullet_list(section.get("bullets") or [], internal_links)
         if bullets_html:
             parts.append(bullets_html)
-    ending = _compact_text(conclusion_heading)
+    ending = _strip_markdown_bold(conclusion_heading)
     if ending:
         parts.append(f"<h2>{escape(ending)}</h2>")
     for paragraph in conclusion_paragraphs or []:
@@ -472,7 +491,7 @@ def normalize_blog_content(
         return {}
 
     content = dict(raw_content)
-    name = _compact_text(content.get("name") or content.get("title") or fallback_name)
+    name = _strip_markdown_bold(content.get("name") or content.get("title") or fallback_name)
     if not name:
         return content
 
@@ -507,8 +526,9 @@ def normalize_blog_content(
         if _compact_text(item)
     ]
 
-    body_html = content.get("body_html") or ""
-    if not body_html and (intro_heading or sections or conclusion_heading or conclusion_paragraphs):
+    # Structured drafts are re-rendered so renderer fixes also reach drafts stored before them.
+    body_html = ""
+    if intro_heading or sections or conclusion_heading or conclusion_paragraphs:
         internal_links = _sanitize_internal_links(content.get("internal_links"))
         body_html = render_body_html(
             intro_heading=intro_heading,
@@ -519,21 +539,24 @@ def normalize_blog_content(
             internal_links=internal_links,
         )
     if not body_html:
+        body_html = content.get("body_html") or ""
+    if not body_html:
         legacy_body = str(content.get("body") or "")
         body_html = legacy_body if _looks_like_html(legacy_body) else _render_plain_text_html(legacy_body)
 
     plain_body = _strip_html(body_html)
+    stored_summary_html = "" if summary_bullets else content.get("summary_html")
     if not summary_bullets:
         summary_bullets = _extract_sentences(plain_body)[:4]
     if not summary_bullets and content.get("preview_text"):
         summary_bullets = [_compact_text(content.get("preview_text"))]
 
-    summary_html = content.get("summary_html") or render_summary_html(summary_title, summary_bullets)
+    summary_html = stored_summary_html or render_summary_html(summary_title, summary_bullets)
 
     sentences = _extract_sentences(plain_body)
-    merksatz = _compact_text(content.get("merksatz")) or (sentences[0] if sentences else name)
-    tipp = _compact_text(content.get("tipp")) or (sentences[1] if len(sentences) > 1 else merksatz)
-    preview_text = _compact_text(content.get("preview_text"))
+    merksatz = _strip_markdown_bold(content.get("merksatz")) or (sentences[0] if sentences else name)
+    tipp = _strip_markdown_bold(content.get("tipp")) or (sentences[1] if len(sentences) > 1 else merksatz)
+    preview_text = _strip_markdown_bold(content.get("preview_text"))
     if not preview_text:
         paragraphs = _split_plain_paragraphs(plain_body)
         preview_text = _truncate(paragraphs[0] if paragraphs else plain_body, 220)
@@ -571,8 +594,8 @@ def normalize_blog_content(
         "image_generated_at": _compact_text(content.get("image_generated_at")) or None,
         "preview_image_url": _compact_text(content.get("preview_image_url")) or None,
         "author_name": _compact_text(content.get("author_name")) or None,
-        "meta_title": _compact_text(content.get("meta_title")) or name,
-        "meta_description": _compact_text(content.get("meta_description")) or _truncate(preview_text or plain_body, 160),
+        "meta_title": _strip_markdown_bold(content.get("meta_title")) or name,
+        "meta_description": _strip_markdown_bold(content.get("meta_description")) or _truncate(preview_text or plain_body, 160),
         "sources": _sanitize_source_list(content.get("sources")),
         "internal_links": _sanitize_internal_links(content.get("internal_links")),
         "seo_brief": content.get("seo_brief") if isinstance(content.get("seo_brief"), dict) else None,
