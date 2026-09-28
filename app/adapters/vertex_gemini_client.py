@@ -11,6 +11,8 @@ import os
 import threading
 import time
 from copy import deepcopy
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, Dict, List, Optional
 
 import google.auth
@@ -143,6 +145,24 @@ def _vertex_request_slot(*, timeout_seconds: Optional[float] = None):
         yield
     finally:
         _VERTEX_REQUEST_SEMAPHORE.release()
+
+
+def _vertex_retry_after_seconds(response: Any) -> Optional[float]:
+    """Preserve server cooldowns for the feature that owns image retries."""
+    value = str(response.headers.get("Retry-After") or "").strip()
+    if not value:
+        return None
+    try:
+        seconds = float(value)
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(value)
+            if retry_at.tzinfo is None:
+                retry_at = retry_at.replace(tzinfo=timezone.utc)
+            seconds = max(0.0, (retry_at - datetime.now(timezone.utc)).total_seconds())
+        except (TypeError, ValueError, OverflowError):
+            return None
+    return seconds if math.isfinite(seconds) and seconds >= 0 else None
 
 
 def _vertex_retry_delay_seconds(*, attempt: int, response: Optional[Any] = None) -> float:
@@ -593,6 +613,7 @@ class VertexGeminiClient:
                     "model": model,
                     "location": location,
                     "attempts": attempt + 1,
+                    "retry_after_seconds": _vertex_retry_after_seconds(response),
                 },
             )
 

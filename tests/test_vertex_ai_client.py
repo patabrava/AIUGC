@@ -1412,3 +1412,21 @@ def test_concurrent_video_submits_are_paced_without_serializing_provider_operati
     assert len(results) == 3
     assert all(result["operation_id"] for result in results)
     assert all(b - a >= 0.019 for a, b in zip(starts, starts[1:]))
+
+
+@pytest.mark.parametrize('retry_after', ['90', 'Wed, 01 Jan 2031 00:00:00 GMT'])
+def test_vertex_image_error_preserves_server_cooldown_for_outer_retry(monkeypatch, retry_after):
+    module, client, http = _gemini_post_client(monkeypatch, [
+        _gemini_response(429, body='capacity', retry_after=retry_after),
+    ])
+    with pytest.raises(ThirdPartyError) as raised:
+        client._post_generate_content(model='image-model', location='global', payload={}, log_event='test_image', max_attempts=1)
+    assert raised.value.details['status_code'] == 429
+    assert raised.value.details['retry_after_seconds'] >= 90
+    assert http.post.call_count == 1
+
+
+@pytest.mark.parametrize('retry_after', ['invalid', '-1', 'NaN', 'Infinity', ''])
+def test_vertex_server_cooldown_rejects_invalid_values(retry_after):
+    from app.adapters.vertex_gemini_client import _vertex_retry_after_seconds
+    assert _vertex_retry_after_seconds(_gemini_response(429, retry_after=retry_after)) is None

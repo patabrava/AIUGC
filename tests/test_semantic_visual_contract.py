@@ -1645,3 +1645,63 @@ def test_standing_scene_and_veo_prompts_forbid_wheelchairs_without_forbidding_st
     assert "standing," not in STANDING_EFFECTIVE_NEGATIVE_PROMPT.lower()
     assert "wheelchair" in STANDING_EFFECTIVE_NEGATIVE_PROMPT.lower()
     assert "sitting" in STANDING_EFFECTIVE_NEGATIVE_PROMPT.lower()
+
+
+@pytest.mark.parametrize('always_rejected', [False, True])
+def test_single_scene_image_uses_three_bounded_attempts(monkeypatch, always_rejected):
+    from app.core.errors import ThirdPartyError
+    from app.features.shot_frames import wheelchair_scene_plate as module
+
+    calls = []
+    authorizations = []
+
+    class Provider:
+        def generate_gemini_text(self, **kwargs):
+            return kwargs['prompt']
+
+        def generate_gemini_image(self, **kwargs):
+            calls.append(kwargs)
+            if always_rejected or len(calls) < 3:
+                raise ThirdPartyError('capacity', {'status_code': 429})
+            return {'image_bytes': b'one-image', 'mime_type': 'image/png', 'model': kwargs['model']}
+
+    def generate():
+        return module.generate_scene_plate_candidates(
+            actor_references=[_reference('actor_front', b'front'), _reference('actor_three_quarter', b'support')],
+            location_reference=_reference('location', b'location'),
+            scene='the supplied location', wardrobe='the approved wardrobe',
+            candidate_count=1, llm_client=Provider(),
+            provider_attempt_callback=lambda: authorizations.append(True),
+        )
+
+    if always_rejected:
+        with pytest.raises(ThirdPartyError, match='capacity'):
+            generate()
+    else:
+        result = generate()
+        assert len(result.candidates) == 1
+    assert len(calls) == len(authorizations) == 3
+    assert all(call['provider_max_attempts'] == 1 for call in calls)
+
+
+def test_scene_image_cooldown_grows_and_survives_a_successful_sibling(monkeypatch):
+    from app.features.shot_frames import wheelchair_scene_plate as module
+
+    now = [100.0]
+    monkeypatch.setattr(module.time, 'monotonic', lambda: now[0])
+    monkeypatch.setattr(module.random, 'uniform', lambda *_: 0.0)
+    monkeypatch.setattr(module, '_SCENE_PLATE_THROTTLE_COOLDOWN_SECONDS', 30.0)
+    monkeypatch.setattr(module, '_SCENE_PLATE_IMAGE_MAX_CONCURRENCY', 2)
+    gate = module._ScenePlateImageTrafficGate()
+    gate._active = 2
+    gate._current_limit = 2
+    gate.release(succeeded=False, status_code=429, retry_after_seconds=45)
+    assert gate._cooldown_until == 145.0
+    gate.release(succeeded=True, status_code=None)
+    assert gate._current_limit == 1
+    now[0] = 160.0
+    gate.release(succeeded=False, status_code=429)
+    assert gate._cooldown_until == 220.0
+    now[0] = 225.0
+    gate.release(succeeded=False, status_code=429, retry_after_seconds=180)
+    assert gate._cooldown_until == 405.0
