@@ -19,7 +19,8 @@ class TestProcessCaptionPost:
     @patch("workers.caption_worker.get_deepgram_client")
     @patch("workers.caption_worker.get_storage_client")
     @patch("workers.caption_worker.get_supabase")
-    def test_full_caption_pipeline(self, mock_sb_factory, mock_storage, mock_dg, mock_burn):
+    @patch("workers.caption_worker.reconcile_batch_video_pipeline_state")
+    def test_full_caption_pipeline(self, mock_reconcile, mock_sb_factory, mock_storage, mock_dg, mock_burn):
         from workers.caption_worker import _process_caption_post
 
         mock_client = MagicMock()
@@ -74,7 +75,8 @@ class TestProcessCaptionPost:
     @patch("workers.caption_worker.get_deepgram_client")
     @patch("workers.caption_worker.get_storage_client")
     @patch("workers.caption_worker.get_supabase")
-    def test_empty_transcript_skips_burn(self, mock_sb_factory, mock_storage, mock_dg):
+    @patch("workers.caption_worker.reconcile_batch_video_pipeline_state")
+    def test_empty_transcript_skips_burn(self, mock_reconcile, mock_sb_factory, mock_storage, mock_dg):
         from workers.caption_worker import _process_caption_post
 
         mock_client = MagicMock()

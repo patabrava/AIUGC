@@ -430,3 +430,24 @@ def test_ten_variable_batch_runs_generate_every_script_once_with_concurrency_two
         assert {count for _post_id, count in generated} == {1}
         assert repo.finished == []
         assert peak <= 2
+
+
+def test_image_worker_keeps_safe_capacity_evidence_without_provider_body(monkeypatch):
+    from app.core.errors import ThirdPartyError
+    from workers import semantic_scene_image_worker as module
+
+    repo = FakeJobRepository(1)
+    def fail(*_args, **_kwargs):
+        raise ThirdPartyError('provider rejected request', {
+            'status_code': 429, 'body': 'sensitive provider payload',
+            'url': 'https://provider.invalid/?key=secret',
+        })
+    monkeypatch.setattr(module, 'generate_candidates', fail)
+    result = module.SemanticSceneImageWorker(repo=repo, worker_id='test').tick()
+    error = repo.finished[0]['error']
+    assert result['action'] == 'failed'
+    assert error['provider_status_code'] == 429
+    assert error['retryable'] is True
+    assert 'retry shortly' in error['message']
+    assert 'body' not in error and 'url' not in error
+    assert 'secret' not in str(error)

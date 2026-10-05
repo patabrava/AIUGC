@@ -13,7 +13,7 @@ from typing import Any, Callable, Optional
 from uuid import uuid4
 
 from app.adapters.vertex_gemini_client import get_vertex_gemini_client
-from app.core.errors import ValidationError
+from app.core.errors import ThirdPartyError, ValidationError
 from app.core.logging import get_logger
 from app.features.semantic_videos import queries
 from app.features.semantic_videos.handlers import generate_candidates
@@ -406,6 +406,16 @@ class SemanticSceneImageWorker:
                     "run_id": str(persisted["run_id"]),
                 }
             error = {"code": type(exc).__name__, "message": str(exc)[:500]}
+            if isinstance(exc, ThirdPartyError):
+                status_code = exc.details.get("status_code")
+                if isinstance(status_code, int):
+                    error["provider_status_code"] = status_code
+                    error["retryable"] = status_code in {429, 500, 502, 503, 504}
+                    if status_code == 429:
+                        error["message"] = (
+                            "The image provider is temporarily at capacity. "
+                            "Automatic retries are exhausted; please retry shortly."
+                        )
             try:
                 self.repo.finish_scene_image_job(
                     job_id=job_id,

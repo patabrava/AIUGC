@@ -52,6 +52,11 @@ def _active_posts(posts: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
     return [post for post in posts if not _is_removed_post(post)]
 
 
+def _active_posts_ready_for_publish(posts: list[Dict[str, Any]]) -> bool:
+    active_posts = _active_posts(posts)
+    return bool(active_posts) and all(post.get("qa_pass") is True for post in active_posts)
+
+
 def _qa_rpc_result(response: httpx.Response) -> dict[str, Any]:
     try:
         result = response.json()
@@ -423,7 +428,7 @@ async def get_batch_qa_status(batch_id: str):
         posts_qa_passed = sum(1 for p in active_posts if p.get("qa_pass") is True)
         posts_qa_pending = max(total_posts - posts_qa_passed, 0)
         
-        all_passed = (total_posts > 0 and posts_qa_passed == total_posts)
+        all_passed = _active_posts_ready_for_publish(active_posts)
         can_advance = all_passed
         
         logger.info(

@@ -30,7 +30,13 @@ from app.adapters.llm_client import LLMClient
 from app.features.blog import handlers as blog_handlers
 from app.features.blog import blog_runtime
 from app.features.blog import queries as blog_queries
-from app.features.blog.schemas import BlogContent, BlogSource, build_blog_content_from_llm, normalize_blog_content
+from app.features.blog.schemas import (
+    BlogContent,
+    BlogSource,
+    build_blog_content_from_llm,
+    normalize_blog_content,
+    render_body_html,
+)
 from app.features.blog.webflow_client import WebflowClient
 from pathlib import Path
 
@@ -130,6 +136,7 @@ def test_gemini_image_generation_maps_nanobanana_alias():
     client = LLMClient()
     client.gemini_provider = "gemini_api"
     client.gemini_api_fallback_enabled = True
+    client.gemini_api_key = "test-gemini-key"
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
@@ -174,6 +181,7 @@ def test_gemini_image_generation_maps_nanobananapro_alias():
     client = LLMClient()
     client.gemini_provider = "gemini_api"
     client.gemini_api_fallback_enabled = True
+    client.gemini_api_key = "test-gemini-key"
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
@@ -208,6 +216,7 @@ def test_gemini_image_generation_accepts_ordered_reference_images():
     client = LLMClient()
     client.gemini_provider = "gemini_api"
     client.gemini_api_fallback_enabled = True
+    client.gemini_api_key = "test-gemini-key"
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
@@ -255,6 +264,7 @@ def test_gemini_text_generation_accepts_ordered_input_images():
     client = LLMClient()
     client.gemini_provider = "gemini_api"
     client.gemini_api_fallback_enabled = True
+    client.gemini_api_key = "test-gemini-key"
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
@@ -348,6 +358,91 @@ def test_normalize_blog_content_upgrades_legacy_payload():
     assert normalized["body_html"].startswith("<p>")
     assert normalized["summary_html"].startswith("<h2>")
     assert normalized["meta_description"] == "Legacy Beschreibung"
+
+
+def test_blog_draft_renders_llm_markdown_bold_instead_of_literal_asterisks():
+    raw_text = """Name: Treppenlift oder Plattformlift: Welche Lösung passt?
+Slug: treppenlift-oder-plattformlift
+Merksatz: **Wichtig:** Die Treppenform entscheidet über die passende Liftart.
+Tipp: Lassen Sie die Treppe vor dem Angebotsvergleich vermessen.
+Zusammenfassung:
+- **Gerade Treppen:** meist schnell und günstig ausgestattet
+- Kurvige Treppen brauchen eine maßgefertigte Schiene
+- Plattformlifte eignen sich für Rollstühle
+Einleitung:
+### Warum die Treppenform zählt
+Nicht jeder Lift passt zu jeder Treppe.
+Abschnitt 1:
+### **Welche Treppenlifte es gibt**
+Die Auswahl hängt von Treppe und Mobilität ab.
+- **Gerade Treppenlifte:** Für Treppen ohne Kurven oder Zwischenpodeste.
+- **Kurven Treppenlifte:** Speziell angefertigt für Treppen mit Biegungen.
+- **Stehlifte:** Eine Option für Personen, die Schwierigkeiten beim Sitzen haben.
+Abschnitt 2:
+### Plattformlifte: Die barrierefreie Lösung
+Plattformlifte transportieren Rollstuhlfahrende samt Rollstuhl.
+Abschnitt 3:
+### Was vor dem Kauf zu klären ist
+Eine Vermessung vor Ort schafft Klarheit.
+Schluss:
+### Was jetzt wichtig ist
+Die richtige Liftart ergibt sich aus Treppe und Alltag.
+Vorschautext: Welche Liftart zu Ihrer Treppe passt.
+Meta-Titel: Treppenlift oder Plattformlift
+Meta-Beschreibung: So finden Sie die passende Liftart für Ihre Treppe.
+"""
+    parsed = blog_runtime._parse_labeled_blog_text(raw_text, {})
+    content = build_blog_content_from_llm(parsed, dossier_id="dossier-bold")
+
+    assert "<li><strong>Gerade Treppenlifte:</strong> Für Treppen ohne Kurven oder Zwischenpodeste.</li>" in content["body_html"]
+    assert "<li><strong>Stehlifte:</strong> Eine Option für Personen" in content["body_html"]
+    assert "<h2>Welche Treppenlifte es gibt</h2>" in content["body_html"]
+    assert "<li><strong>Gerade Treppen:</strong> meist schnell und günstig ausgestattet</li>" in content["summary_html"]
+    assert content["merksatz"] == "Wichtig: Die Treppenform entscheidet über die passende Liftart."
+    assert "**" not in content["body_html"]
+    assert "**" not in content["summary_html"]
+
+
+def test_normalize_blog_content_rerenders_stored_drafts_with_literal_markdown_bold():
+    normalized = normalize_blog_content(
+        {
+            "schema_version": 2,
+            "name": "Treppenlifte im Vergleich",
+            "summary_bullets": ["**Gerade Treppen:** meist günstiger", "Kurven brauchen Maßarbeit", "Stehlifte sparen Platz"],
+            "summary_html": "<h2>Das Wichtigste auf einen Blick</h2><ul><li>**Gerade Treppen:** meist günstiger</li></ul>",
+            "sections": [
+                {
+                    "heading": "Welche Treppenlifte es gibt",
+                    "paragraphs": ["Die Auswahl hängt von der Treppe ab."],
+                    "bullets": ["**Stehlifte:** Für Personen, die nicht sitzen können."],
+                }
+            ],
+            "body_html": (
+                "<h2>Welche Treppenlifte es gibt</h2><p>Die Auswahl hängt von der Treppe ab.</p>"
+                "<ul><li>**Stehlifte:** Für Personen, die nicht sitzen können.</li></ul>"
+            ),
+        }
+    )
+
+    assert "<li><strong>Stehlifte:</strong> Für Personen, die nicht sitzen können.</li>" in normalized["body_html"]
+    assert "<li><strong>Gerade Treppen:</strong> meist günstiger</li>" in normalized["summary_html"]
+    assert "**" not in normalized["body_html"]
+    assert "**" not in normalized["summary_html"]
+
+
+def test_blog_renderer_escapes_bold_text_and_drops_unpaired_markers():
+    html = render_body_html(
+        intro_heading="Einordnung",
+        introduction_paragraphs=["**<script>alert(1)</script>** hilft Nutzer*innen nicht, ein ** loses Paar auch nicht."],
+        sections=[],
+        conclusion_heading=None,
+        conclusion_paragraphs=[],
+    )
+
+    assert "<strong>&lt;script&gt;alert(1)&lt;/script&gt;</strong>" in html
+    assert "<script>" not in html
+    assert "Nutzer*innen" in html
+    assert "**" not in html
 
 
 def test_webflow_client_build_blog_field_data_resolves_field_slugs_and_author_option():
@@ -574,6 +669,7 @@ def test_gemini_image_generation_decodes_inline_image_bytes():
     client = LLMClient()
     client.gemini_provider = "gemini_api"
     client.gemini_api_fallback_enabled = True
+    client.gemini_api_key = "test-gemini-key"
     png_bytes = b"\x89PNG\r\n\x1a\nimage-bytes"
     encoded = base64.b64encode(png_bytes).decode("ascii")
     mock_response = MagicMock()

@@ -448,7 +448,7 @@ Expected: PASS.
 Run:
 
 ```bash
-.venv/bin/pytest -q tests/test_video_submission_flow.py
+.venv/bin/python tests/manual_video_submission_flow.py
 ```
 
 Expected: PASS, verifying the submission path still builds and stores prompt payloads correctly.

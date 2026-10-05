@@ -13,9 +13,9 @@ def test_generate_dialog_scripts_variant_includes_constraints(monkeypatch):
         captured_prompt["value"] = prompt
         return (
             "Problem-Agitieren-Lösung Ads\n\n"
-            "Kennst du das Gefühl, wenn der Alltag im Rollstuhl dich mal wieder völlig unerwartet überrascht und du spontan umplanen musst?\n\n"
+            "Kennst du den Moment, wenn eine ungeplante Stufe deinen Ausflug kippt und du sofort neu planen musst?\n\n"
             "Beschreibung\n\n"
-            "Ein ausführliches Test-Skript für Lifestyle-Inhalte mit genug Zeichen und Kontext für die Social-Media-Caption und noch mehr Wörter dazu."
+            "Ein ausführlicher Erfahrungsbericht über alltägliche Planung, mögliche Hindernisse und hilfreiche Absprachen für mehr Selbstständigkeit unterwegs. #Rollstuhl #Alltag #Mobilität"
         )
 
     mock_llm = MagicMock()

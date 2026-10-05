@@ -213,7 +213,7 @@ def test_topics_hub_uses_fixed_height_desktop_panels(monkeypatch):
 
     assert response.status_code == 200
     assert "lg:h-[80vh]" in response.text
-    assert 'id="launch-panel" class="bg-slate-50/50 p-5 sm:p-6 overflow-y-auto lg:h-full min-h-0"' in response.text
+    assert 'id="launch-panel" class="brand-launch-panel p-5 sm:p-7 overflow-y-auto lg:h-full min-h-0"' in response.text
 
 
 def test_topics_hub_script_cards_show_delete_button(monkeypatch):
@@ -417,10 +417,10 @@ def test_prompt_builders_include_bank_and_research_context():
     )
 
     assert "DOSSIER-KONTEXT FÜR DIESEN DURCHLAUF:" in prompt1
-    assert "HOOK-BANK (verbindlich):" in prompt1
-    assert "Lane-Titel: Mobilitätsservice richtig buchen" in prompt1
-    assert "RESEARCH-KONTEXT FÜR DIE SKRIPTE:" in prompt2
-    assert "HOOK-BANK (verbindlich):" in prompt2
+    assert "AUFHÄNGER-SAMMLUNG (verbindlich):" in prompt1
+    assert "Themenvariantentitel: Mobilitätsservice richtig buchen" in prompt1
+    assert "RECHERCHE-KONTEXT FÜR DIE SKRIPTE:" in prompt2
+    assert "AUFHÄNGER-SAMMLUNG (verbindlich):" in prompt2
 
 
 def test_build_research_seed_data_uses_normalized_dossier_facts():
@@ -608,7 +608,7 @@ def test_topics_hub_html_renders_new_badge_for_fresh_generated_topics(monkeypatc
     )
 
     client = _build_test_client()
-    response = client.get("/topics", headers={"accept": "text/html"})
+    response = client.get("/topics/hydrate", headers={"accept": "text/html"})
 
     assert response.status_code == 200
     assert ">New<" in response.text
@@ -1129,7 +1129,9 @@ def test_launch_research_with_new_topic_title(monkeypatch):
         headers={"HX-Request": "true"},
         follow_redirects=False,
     )
-    assert response.status_code == 303
+    assert response.status_code == 200
+    assert "Running" in response.text
+    assert "topic-research-launched" in response.headers.get("HX-Trigger", "")
     assert launch_called_with["topic_registry_id"] == "new-t1"
 
 
@@ -1683,7 +1685,7 @@ def test_launch_redirects_and_hub_shows_active_runs(monkeypatch):
     )
 
     client = _build_test_client()
-    response = client.get("/topics", headers={"Accept": "text/html"})
+    response = client.get("/topics/hydrate", headers={"Accept": "text/html"})
     assert response.status_code == 200
     assert "Running" in response.text
 
@@ -1751,8 +1753,9 @@ def test_full_launch_flow_pick_from_list(monkeypatch):
         headers={"HX-Request": "true"},
         follow_redirects=False,
     )
-    assert launch_response.status_code == 303
-    assert launch_response.headers["location"] == "/topics"
+    assert launch_response.status_code == 200
+    assert "Running" in launch_response.text
+    assert "topic-research-launched" in launch_response.headers.get("HX-Trigger", "")
 
 
 def test_topic_run_stream_endpoint_returns_sse(monkeypatch):

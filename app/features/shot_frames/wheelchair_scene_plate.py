@@ -128,7 +128,7 @@ _SINGLE_IMAGE_PROVIDER_MAX_ATTEMPTS = max(
     1,
     min(
         _PROVIDER_MAX_ATTEMPTS,
-        int(os.environ.get("SEMANTIC_SCENE_IMAGE_PROVIDER_MAX_ATTEMPTS", "2")),
+        int(os.environ.get("SEMANTIC_SCENE_IMAGE_PROVIDER_MAX_ATTEMPTS", "3")),
     ),
 )
 _SCENE_PLATE_PROVIDER_TIMEOUT_SECONDS = max(
@@ -190,6 +190,8 @@ class _ScenePlateImageTrafficGate:
         self._last_started_key = ""
         self._next_start_at = 0.0
         self._cooldown_until = 0.0
+        self._throttle_rejections = 0
+        self._last_throttle_at = 0.0
         self._adaptive_start_interval_seconds = (
             _SCENE_PLATE_START_INTERVAL_SECONDS
         )
@@ -268,12 +270,21 @@ class _ScenePlateImageTrafficGate:
                     ]
                     self._condition.notify_all()
 
-    def release(self, *, succeeded: bool, status_code: Optional[int]) -> None:
+    def release(
+        self,
+        *,
+        succeeded: bool,
+        status_code: Optional[int],
+        retry_after_seconds: Optional[float] = None,
+    ) -> None:
         with self._condition:
             self._active = max(0, self._active - 1)
             now = time.monotonic()
             if succeeded:
-                self._healthy_successes += 1
+                # A sibling may finish after another request was throttled.
+                # It must not reopen the second lane during the shared cooldown.
+                if now >= self._cooldown_until:
+                    self._healthy_successes += 1
                 if (
                     self._healthy_successes >= _SCENE_PLATE_SUCCESS_RAMP
                     and self._current_limit < _SCENE_PLATE_IMAGE_MAX_CONCURRENCY
@@ -284,7 +295,15 @@ class _ScenePlateImageTrafficGate:
                 self._healthy_successes = 0
                 self._current_limit = 1
                 if status_code == 429:
-                    cooldown = _SCENE_PLATE_THROTTLE_COOLDOWN_SECONDS
+                    if now - self._last_throttle_at > 300.0:
+                        self._throttle_rejections = 0
+                    self._throttle_rejections = min(3, self._throttle_rejections + 1)
+                    self._last_throttle_at = now
+                    cooldown = min(
+                        120.0,
+                        _SCENE_PLATE_THROTTLE_COOLDOWN_SECONDS
+                        * (2 ** (self._throttle_rejections - 1)),
+                    )
                     self._adaptive_start_interval_seconds = max(
                         self._adaptive_start_interval_seconds,
                         min(
@@ -299,6 +318,13 @@ class _ScenePlateImageTrafficGate:
                     cooldown = _SCENE_PLATE_TRANSIENT_COOLDOWN_SECONDS
                 else:
                     cooldown = 0.0
+                if (
+                    isinstance(retry_after_seconds, (int, float))
+                    and math.isfinite(retry_after_seconds)
+                ):
+                    # acquire() still enforces the durable job deadline. A long
+                    # server cooldown must never cause an early resubmission.
+                    cooldown = max(cooldown, retry_after_seconds)
                 if cooldown:
                     self._cooldown_until = max(
                         self._cooldown_until,
@@ -716,6 +742,7 @@ def generate_scene_plate(
         _SCENE_PLATE_IMAGE_TRAFFIC_GATE.release(
             succeeded=False,
             status_code=normalized_status,
+            retry_after_seconds=exc.details.get("retry_after_seconds"),
         )
         raise
     except Exception:

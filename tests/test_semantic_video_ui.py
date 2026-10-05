@@ -1772,6 +1772,12 @@ def test_scene_image_terminal_cleanup_and_workflow_gate_preserve_ui_contracts():
     feedback_clear = finish.index("window.endActionFeedback(button);")
     gate_release = finish.index("syncSceneImageWorkflowGate(root);")
     assert waiting_clear < polling_clear < visual_clear < feedback_clear < gate_release
+    # Server-rendered active cards have no stored click feedback. Their label
+    # must still reflect completion while sibling cards continue polling.
+    terminal_label = finish.index("button.textContent = status === 'ready'")
+    assert feedback_clear < terminal_label < gate_release
+    assert "'Regenerate script image'" in finish
+    assert "'Retry script image'" in finish
 
     assert "const sceneImageButtonDomainDisabled = new WeakMap();" in source
     assert "button.disabled = domainDisabled || cardBusy;" in gate

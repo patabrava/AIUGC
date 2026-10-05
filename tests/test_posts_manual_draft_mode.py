@@ -137,7 +137,7 @@ async def test_automated_save_does_not_override_post_type_with_submitted_value(m
 
 
 @pytest.mark.anyio
-async def test_automated_save_rejects_underlength_32s_lifestyle_script(monkeypatch):
+async def test_automated_save_preserves_underlength_draft_and_marks_contract_invalid(monkeypatch):
     storage = {
         "batches": [{"id": "batch-1", "creation_mode": "automated", "target_length_tier": 32}],
         "posts": [
@@ -152,12 +152,12 @@ async def test_automated_save_rejects_underlength_32s_lifestyle_script(monkeypat
     }
     monkeypatch.setattr(posts_handlers, "get_supabase", lambda: _FakeSupabase(storage))
 
-    with pytest.raises(posts_handlers.HTTPException) as excinfo:
-        await posts_handlers.update_post_script(
-            "post-1",
-            _FakeRequest({"script_text": "Viel zu kurz fuer zweiunddreissig Sekunden."}),
-        )
+    response = await posts_handlers.update_post_script(
+        "post-1",
+        _FakeRequest({"script_text": "Viel zu kurz fuer zweiunddreissig Sekunden."}),
+    )
 
-    assert excinfo.value.status_code == 422
-    assert storage["posts"][0]["seed_data"]["script"] == "Old valid script."
-    assert storage["posts"][0]["video_prompt_json"] == {"stale": True}
+    assert response.ok is True
+    assert storage["posts"][0]["seed_data"]["script"] == "Viel zu kurz fuer zweiunddreissig Sekunden."
+    assert storage["posts"][0]["seed_data"]["script_duration_contract"]["status"] == "underlength"
+    assert storage["posts"][0]["video_prompt_json"] is None

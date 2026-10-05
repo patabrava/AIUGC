@@ -111,4 +111,3 @@ REVOKE ALL ON FUNCTION public.probe_manual_video_duration_contract() FROM PUBLIC
 GRANT EXECUTE ON FUNCTION public.probe_manual_video_duration_contract() TO service_role;
 
 NOTIFY pgrst, 'reload schema';
-;

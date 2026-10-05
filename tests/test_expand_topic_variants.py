@@ -49,9 +49,10 @@ def test_expand_topic_variants_generates_and_stores(monkeypatch):
     assert "—" not in stored[0]["variants"][0]["script"]
     assert "Seit 2025" in stored[0]["variants"][0]["script"]
     assert "—" not in stored[0]["variants"][0]["caption"]
-    assert "Seit 2025" in stored[0]["variants"][0]["caption"]
+    # Captions are generated in the later publish-caption stage.
+    assert stored[0]["variants"][0]["caption"] == ""
     assert "—" not in stored[0]["variants"][0]["source_summary"]
-    assert "Seit 2025" in stored[0]["variants"][0]["source_summary"]
+    assert stored[0]["variants"][0]["source_summary"] == ""
     assert "—" not in stored[0]["variants"][0]["disclaimer"]
 
 

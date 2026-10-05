@@ -1497,14 +1497,22 @@ def acquire_run_lease(
 ) -> Optional[dict[str, Any]]:
     if not str(worker_id or "").strip() or isinstance(lease_seconds, bool) or lease_seconds <= 0:
         raise ValidationError("Semantic video lease requires a worker id and positive lease seconds.")
-    response = _client(client).rpc(
-        "claim_semantic_video_run",
-        {
-            "worker_id": str(worker_id),
-            "lease_seconds": int(lease_seconds),
-            "requested_run_id": str(run_id) if run_id is not None else None,
-        },
-    ).execute()
+    active_client = _client(client)
+    try:
+        response = active_client.rpc(
+            "claim_semantic_video_run",
+            {
+                "worker_id": str(worker_id),
+                "lease_seconds": int(lease_seconds),
+                "requested_run_id": str(run_id) if run_id is not None else None,
+            },
+        ).execute()
+    except httpx.RequestError:
+        # A claim may have committed before its acknowledgement was lost.
+        # Refresh the transport for the next worker tick without replaying it.
+        if client is None:
+            get_supabase().reconnect(failed_client=active_client)
+        raise
     rows = _rows(response)
     if len(rows) > 1:
         raise StateTransitionError(

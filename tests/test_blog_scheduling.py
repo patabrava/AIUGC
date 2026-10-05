@@ -363,6 +363,11 @@ def test_webflow_publish_item_uses_v2_collection_item_publish_endpoint():
 
 
 def test_blog_cron_dispatch_bypasses_global_auth_with_cron_bearer(monkeypatch):
+    import app.core.config as config_module
+
+    monkeypatch.setattr(config_module, "_settings", None)
+    monkeypatch.setenv("CRON_SECRET", "test-cron-secret")
+
     async def _fake_dispatch_due_blog_posts(trigger="scheduler"):
         return {"processed": 0, "published": 0, "failed": 0, "trigger": trigger}
 

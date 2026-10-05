@@ -31,17 +31,26 @@ def _build_current_date_guardrail() -> str:
     # ASCII-only to avoid reintroducing long dash characters into prompt fixtures.
     return _join_sections(
         "ZEIT- UND FORMAT-GUARDRAILS:",
-        "- Heute ist April 2026.",
+        f"- Heute ist {_current_date_label()}.",
         "- Wenn etwas 2025 in Kraft getreten ist, formuliere als bereits gültig (z.B. `Seit 2025 ...`), nicht als Ankündigung (`Ab 2025 ...`).",
         "- Verwende keine langen Dash-Zeichen: kein U+2014 (em dash), U+2013 (en dash), U+2015 (horizontal bar), U+2212 (minus).",
     )
 
 
+def _current_date_label() -> str:
+    months = (
+        "Januar", "Februar", "März", "April", "Mai", "Juni",
+        "Juli", "August", "September", "Oktober", "November", "Dezember",
+    )
+    now = datetime.now(timezone.utc)
+    return f"{now.day}. {months[now.month - 1]} {now.year}"
+
+
 def _build_current_date_context_for_research() -> str:
     return _join_sections(
         "ZEITKONTEXT:",
-        "- Heute ist April 2026.",
-        "- Ordne Fristen und Regelungen relativ zu 2026 ein.",
+        f"- Heute ist {_current_date_label()}.",
+        f"- Ordne Fristen und Regelungen relativ zu {datetime.now(timezone.utc).year} ein.",
         "- Wenn eine Änderung bereits 2025 in Kraft getreten ist, beschreibe sie als bereits geltend (z.B. `Seit 2025 ...`).",
     )
 

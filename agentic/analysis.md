@@ -1,25 +1,4 @@
-# Bridgecode upgrade and main publication
-
-## Decision brief
-
-Intent/acceptance: install the latest published Bridgecode 4.3 patch, preserve all repository requirements and existing unfinished work, validate canonical installation, integrate remote main, and push authorized project changes without secrets or worktree copies.
-
-Perspective: Michael Feathers, preservation through observable seams (Working Effectively with Legacy Code). Transfer the preservation principle to instruction migration: separate canonical package policy from editable project memory, retain exact legacy evidence, and verify hashes and rule preservation before publication. This does not authorize unrelated app refactors.
-
-Anticipatory corrections: use exact-version CLI operations, keep unverified imported constraints visible, preserve the concurrent ModelArk checkpoint, avoid committing credentials/nested worktrees, ask whether generated media belongs in the requested publication, and merge advanced main without force-push.
-
-## Acceptance checklist
-
-- [x] Read upstream README; verify npm 4.3.2 availability.
-- [x] Run exact-version dry-run, install, and doctor; projected and installed verification pass.
-- [x] Preserve legacy general instructions as historical evidence and imported repo requirements in architecture; retain active harness constraints.
-- [ ] Run focused checks for existing app changes; report proof limits.
-- [ ] Integrate remote main without losing local or remote work.
-- [ ] Validate staged paths/content, commit, and push main.
-
-{files, LOC/file, deps}: package-managed AGENTS core ~58 lines and six specialists; editable migration notice ~4 lines plus existing harness rules; architecture exact imported constraints; installation metadata and two hook registrations. CLI tooling only, no app dependencies.
-
-Review cycle: bridgecode-upgrade-main-2026-10-05; first review pending; correction stage unused.
+# Active work
 
 ## Concurrent unfinished task: direct ModelArk implementation
 

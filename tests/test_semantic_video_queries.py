@@ -245,3 +245,55 @@ def test_semantic_location_uses_script_intent_before_batch_ordinal_and_override_
         "home_office_advice_a",
     }
     assert requested_scene_keys[3] == "home_office_advice_a"
+
+
+def test_video_lease_transport_failure_refreshes_client_without_replaying_claim(monkeypatch):
+    import httpx
+    from app.features.semantic_videos import queries
+
+    calls = []
+    failure = httpx.RemoteProtocolError("Server disconnected")
+    class ClaimClient:
+        def __init__(self, result):
+            self.result = result
+        def rpc(self, name, payload):
+            calls.append((self, name, payload))
+            return self
+        def execute(self):
+            if isinstance(self.result, Exception):
+                raise self.result
+            return SimpleNamespace(data=self.result)
+    failed = ClaimClient(failure)
+    fresh = ClaimClient([])
+    class Adapter:
+        client = failed
+        def reconnect(self, *, failed_client):
+            assert failed_client is failed
+            self.client = fresh
+            return fresh
+    adapter = Adapter()
+    monkeypatch.setattr(queries, "get_supabase", lambda: adapter)
+
+    with pytest.raises(httpx.RemoteProtocolError) as raised:
+        queries.acquire_run_lease(worker_id="worker", lease_seconds=120)
+    assert raised.value is failure
+    assert len(calls) == 1  # Never replay an ambiguously committed claim.
+    assert adapter.client is fresh
+    assert queries.acquire_run_lease(worker_id="worker", lease_seconds=120) is None
+    assert len(calls) == 2 and calls[1][0] is fresh
+
+
+def test_video_lease_injected_client_does_not_replace_shared_transport(monkeypatch):
+    import httpx
+    from app.features.semantic_videos import queries
+
+    class Client:
+        def rpc(self, *_):
+            return self
+        def execute(self):
+            raise httpx.RemoteProtocolError("Server disconnected")
+    def unexpected_global_client():
+        pytest.fail("An explicit client must not replace the shared client")
+    monkeypatch.setattr(queries, "get_supabase", unexpected_global_client)
+    with pytest.raises(httpx.RemoteProtocolError):
+        queries.acquire_run_lease(worker_id="worker", lease_seconds=120, client=Client())

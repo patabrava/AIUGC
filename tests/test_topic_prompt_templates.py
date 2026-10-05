@@ -1,9 +1,11 @@
 from pathlib import Path
+from datetime import datetime, timezone
 
 from app.core.video_profiles import get_duration_profile
 from app.features.topics.prompts import build_prompt1, build_prompt1_batch, build_prompt2, build_prompt3, build_topic_research_dossier_prompt, build_topic_research_prompt
 from app.features.topics.schemas import ProductKnowledgeEntry
 from app.features.topics import agents as topic_agents
+from app.features.topics import prompts as topic_prompts
 
 
 PROMPT_DATA_DIR = Path(__file__).resolve().parent.parent / "app" / "features" / "topics" / "prompt_data"
@@ -14,7 +16,6 @@ def test_prompt_text_files_exist_for_all_duration_tiers():
         "prompt1_8s.txt",
         "prompt1_16s.txt",
         "prompt1_32s.txt",
-        "prompt1_batch.txt",
         "prompt1_normalization.txt",
         "prompt2_8s.txt",
         "prompt2_16s.txt",
@@ -63,13 +64,24 @@ def test_build_prompt1_uses_32s_text_template():
     assert "source_summary" not in prompt
 
 
-def test_build_prompt1_batch_keeps_rotation_context():
+def test_build_prompt1_batch_keeps_rotation_context(tmp_path, monkeypatch):
+    # prompt1_batch.txt is intentionally ignored as a local legacy asset.
+    template = (
+        "ZUFALLS-THEMEN FÜR DIESEN DURCHLAUF: {assigned_rotation_section}\n"
+        "{desired_topics} {post_type} {prompt1_min_words}-{prompt1_max_words} Wörter\n"
+        "{prompt1_min_seconds}-{prompt1_max_seconds} Sekunden {prompt1_sentence_guidance}\n"
+        "{hook_bank_section}"
+    )
+    (tmp_path / "prompt1_batch.txt").write_text(template, encoding="utf-8")
+    monkeypatch.setattr(topic_prompts, "PROMPT_DATA_DIR", tmp_path)
+    topic_prompts._load_prompt_text.cache_clear()
     prompt = build_prompt1_batch(
         post_type="value",
         desired_topics=2,
         profile=get_duration_profile(16),
         assigned_topics=["Barrierefreie Bahnreisen", "BahnCard bei Schwerbehinderung"],
     )
+    topic_prompts._load_prompt_text.cache_clear()
 
     assert "ZUFALLS-THEMEN FÜR DIESEN DURCHLAUF:" in prompt
     assert "28-36 Wörter" in prompt
@@ -232,8 +244,8 @@ def test_build_topic_research_dossier_prompt_renders_current_date_context():
         target_length_tier=8,
     )
 
-    assert "Heute ist April 2026." in prompt
-    assert "Ordne Fristen und Regelungen relativ zu 2026 ein." in prompt
+    assert f"Heute ist {topic_prompts._current_date_label()}." in prompt
+    assert f"Ordne Fristen und Regelungen relativ zu {datetime.now(timezone.utc).year} ein." in prompt
 
 
 def test_prompt2_hook_prefixes_include_new_families():
@@ -283,7 +295,7 @@ Zu kurz.
 def test_prompt1_8s_contains_new_word_range_and_guardrails():
     prompt = build_prompt1(post_type="value", desired_topics=1)
     assert "16-18 Wörter" in prompt
-    assert "Heute ist April 2026" in prompt
+    assert f"Heute ist {topic_prompts._current_date_label()}" in prompt
     assert "U+2014" in prompt
     assert "HARTE NORMEN" in prompt
     assert "SELF-CHECK VOR DEM ABSCHICKEN" in prompt
@@ -295,7 +307,7 @@ def test_prompt1_research_mentions_current_year_context():
         post_type="value",
         target_length_tier=8,
     )
-    assert "Heute ist April 2026" in prompt
+    assert f"Heute ist {topic_prompts._current_date_label()}" in prompt
     assert "Seit 2025" in prompt
 
 

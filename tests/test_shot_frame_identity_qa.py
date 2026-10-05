@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from app.core.errors import ValidationError
+from app.core.errors import ThirdPartyError, ValidationError
 
 
 class _FakeLLM:
@@ -16,9 +16,10 @@ class _FakeLLM:
 
     def generate_gemini_text(self, **kwargs):
         self.calls.append(kwargs)
-        if isinstance(self.payload, list):
-            return self.payload[len(self.calls) - 1]
-        return self.payload
+        response = self.payload[len(self.calls) - 1] if isinstance(self.payload, list) else self.payload
+        if isinstance(response, Exception):
+            raise response
+        return response
 
 
 def _image(marker: bytes, mime_type: str = "image/png") -> dict:
@@ -204,3 +205,78 @@ def test_video_identity_gate_retries_an_internally_inconsistent_low_confidence_r
     assert report.confidence == 0.92
     assert len(llm.calls) == 2
     assert "Consistency correction" in llm.calls[1]["prompt"]
+
+
+@pytest.mark.parametrize("failure", [
+    {"status_code": 429},
+    {"status_code": 503},
+    {"error_class": "ReadTimeout"},
+])
+def test_scene_identity_retries_service_failures_using_the_same_bytes(monkeypatch, failure):
+    from app.features.shot_frames import identity_qa
+
+    waits = []
+    monkeypatch.setattr(identity_qa.time, "sleep", waits.append)
+    monkeypatch.setattr(identity_qa.random, "uniform", lambda *_: 0.0)
+    llm = _FakeLLM([ThirdPartyError("temporary", failure), ThirdPartyError("temporary", failure), _scene_payload()])
+    report = identity_qa.evaluate_scene_plate_identity(
+        _image(b"front"), _image(b"support"), _image(b"already-rendered"),
+        llm_client=llm, model="gemini-2.5-flash",
+        deadline_at=datetime.now(timezone.utc) + timedelta(minutes=8),
+    )
+    assert report.passed is True
+    assert len(llm.calls) == 3
+    assert all(call["provider_max_attempts"] == 1 for call in llm.calls)
+    assert all(call["input_images"] == llm.calls[0]["input_images"] for call in llm.calls)
+    assert sum(waits) == (90.0 if failure.get("status_code") == 429 else 6.0)
+
+
+@pytest.mark.parametrize("failure,expected_calls", [
+    ({"status_code": 429}, 3),
+    ({"status_code": 403}, 1),
+    ({"status_code": 429, "retry_after_seconds": 500.0}, 1),
+])
+def test_scene_identity_retry_budget_and_retry_after_fail_closed(monkeypatch, failure, expected_calls):
+    from app.features.shot_frames import identity_qa
+
+    monkeypatch.setattr(identity_qa.time, "sleep", lambda _: None)
+    monkeypatch.setattr(identity_qa.random, "uniform", lambda *_: 0.0)
+    llm = _FakeLLM(ThirdPartyError("service failed", failure))
+    with pytest.raises(ThirdPartyError, match="service failed"):
+        identity_qa.evaluate_scene_plate_identity(
+            _image(b"front"), _image(b"support"), _image(b"candidate"),
+            llm_client=llm, model="gemini-2.5-flash",
+            deadline_at=datetime.now(timezone.utc) + timedelta(minutes=8),
+        )
+    assert len(llm.calls) == expected_calls
+
+
+def test_scene_identity_retry_respects_lease_loss_before_another_call(monkeypatch):
+    from app.features.shot_frames import identity_qa
+
+    checks = []
+    def guard():
+        checks.append(True)
+        if len(checks) > 1:
+            raise RuntimeError("lease lost")
+    llm = _FakeLLM(ThirdPartyError("capacity", {"status_code": 429}))
+    with pytest.raises(RuntimeError, match="lease lost"):
+        identity_qa.evaluate_scene_plate_identity(
+            _image(b"front"), _image(b"support"), _image(b"candidate"),
+            llm_client=llm, model="gemini-2.5-flash", execution_guard=guard,
+            deadline_at=datetime.now(timezone.utc) + timedelta(minutes=8),
+        )
+    assert len(llm.calls) == 1
+
+
+def test_scene_identity_actual_identity_failure_is_not_service_retried():
+    from app.features.shot_frames.identity_qa import evaluate_scene_plate_identity
+
+    llm = _FakeLLM(_scene_payload(same_person=False, blocking_reasons=["different_person"]))
+    report = evaluate_scene_plate_identity(
+        _image(b"front"), _image(b"support"), _image(b"candidate"),
+        llm_client=llm, model="gemini-2.5-flash",
+        deadline_at=datetime.now(timezone.utc) + timedelta(minutes=8),
+    )
+    assert report.passed is False
+    assert len(llm.calls) == 1

@@ -512,17 +512,17 @@ def test_discover_topics_falls_back_for_missing_lifestyle_posts(monkeypatch):
     value_item = SimpleNamespace(topic="Value topic")
     value_topic = SimpleNamespace(
         title="Value topic title",
-        rotation="Value rotation",
+        rotation="Mit einer klaren Vorbereitung findest du im Alltag leichter Unterstützung und sparst unnötige Wege.",
         cta="Value cta",
-        spoken_duration=6.0,
+        spoken_duration=8.0,
     )
 
     duplicate_lifestyle_topic = {
         "title": "Community-Erfahrungen teilen",
-        "rotation": "Bekannte Lifestyle-Rotation aus der Registry",
+        "rotation": "Gemeinsam planen wir den Ausflug, damit Wege und Pausen für alle besser passen.",
         "cta": "Bekannte Lifestyle-CTA aus der Registry",
-        "spoken_duration": 6.0,
-        "dialog_scripts": _dialog_scripts("Bekannte Lifestyle-Rotation aus der Registry."),
+        "spoken_duration": 8.0,
+        "dialog_scripts": _dialog_scripts("Gemeinsam planen wir den Ausflug, damit Wege und Pausen für alle besser passen."),
         "framework": "PAL",
     }
 
@@ -549,10 +549,10 @@ def test_discover_topics_falls_back_for_missing_lifestyle_posts(monkeypatch):
         return value_topic
 
     def fake_generate_dialog_scripts(topic: str, scripts_required: int = 1, previously_used_hooks=None, profile=None):
-        return _dialog_scripts("Value dialog script stays valid for the regression harness.")
+        return _dialog_scripts("Mit einer klaren Vorbereitung findest du im Alltag leichter Unterstützung und sparst unnötige Wege.")
 
     def fake_generate_topic_script_candidate(**kwargs):
-        return SimpleNamespace(script="Value prompt-one script remains isolated in this regression.")
+        return SimpleNamespace(script="Mit einer klaren Vorbereitung findest du im Alltag leichter Unterstützung und sparst unnötige Wege.")
 
     def fake_extract_seed_strict_extractor(topic):
         return SimpleNamespace(facts=["Value fact"], source_context="Value context")
@@ -602,8 +602,8 @@ def test_discover_topics_falls_back_for_missing_lifestyle_posts(monkeypatch):
         "title": "Value topic title",
         "rotation": "Value rotation",
         "cta": "Value cta",
-        "spoken_duration": 6.0,
-        "seed_payload": {"script": "Value dialog script stays valid for the regression harness.", "facts": ["Value fact"]},
+        "spoken_duration": 8.0,
+        "seed_payload": {"script": "Mit einer klaren Vorbereitung findest du im Alltag leichter Unterstützung und sparst unnötige Wege.", "facts": ["Value fact"]},
     }
 
     def fake_list_topic_suggestions(**kwargs):
@@ -620,6 +620,9 @@ def test_discover_topics_falls_back_for_missing_lifestyle_posts(monkeypatch):
     monkeypatch.setattr(topic_handlers, "get_batch_by_id", fake_get_batch_by_id)
     monkeypatch.setattr(topic_handlers, "get_all_topics_from_registry", fake_get_all_topics_from_registry)
     monkeypatch.setattr(topic_handlers, "list_topic_suggestions", fake_list_topic_suggestions)
+    monkeypatch.setattr(topic_handlers, "_batch_has_manual_drafts", lambda _batch_id: False)
+    monkeypatch.setattr(topic_handlers, "mark_topic_family_used", lambda _family_id: None)
+    monkeypatch.setattr(topic_handlers, "mark_topic_script_used", lambda script_id=None: None)
     monkeypatch.setattr(topic_agents, "generate_dialog_scripts", fake_generate_dialog_scripts)
     monkeypatch.setattr(topic_handlers, "generate_lifestyle_topics", fake_generate_lifestyle_topics)
     monkeypatch.setattr(topic_handlers, "build_lifestyle_seed_payload", fake_build_lifestyle_seed_payload)
@@ -813,10 +816,10 @@ def test_mixed_batch_lifestyle_dedupe_stays_lane_scoped(monkeypatch):
             "family_id": "value-family-1",
             "family_fingerprint": "value-fp-1",
             "title": "Wohnumfeld sicher planen",
-            "rotation": "Wenn der Alltag zuhause enger wird, braucht Planung mehr Klarheit.",
+            "rotation": "Wenn der Alltag zuhause enger wird, hilft ein klarer Plan und schafft wieder mehr Ruhe.",
             "cta": "Hol dir einen Plan, der passt.",
-            "spoken_duration": 5.0,
-            "seed_payload": {"script": "Wenn der Alltag zuhause enger wird, braucht Planung mehr Klarheit.", "facts": ["Value fact"]},
+            "spoken_duration": 8.0,
+            "seed_payload": {"script": "Wenn der Alltag zuhause enger wird, hilft ein klarer Plan und schafft wieder mehr Ruhe.", "facts": ["Value fact"]},
         },
         {
             "id": "value-suggestion-2",
@@ -824,20 +827,20 @@ def test_mixed_batch_lifestyle_dedupe_stays_lane_scoped(monkeypatch):
             "family_id": "value-family-2",
             "family_fingerprint": "value-fp-2",
             "title": "Pflege im Alltag entlasten",
-            "rotation": "Wenn Pflege den Tag frisst, braucht es spürbare Entlastung.",
+            "rotation": "Wenn Pflege deinen Tag bestimmt, helfen kleine Absprachen und entlasten dich spürbar.",
             "cta": "Mach den Alltag leichter.",
-            "spoken_duration": 5.0,
-            "seed_payload": {"script": "Wenn Pflege den Tag frisst, braucht es spürbare Entlastung.", "facts": ["Value fact 2"]},
+            "spoken_duration": 8.0,
+            "seed_payload": {"script": "Wenn Pflege deinen Tag bestimmt, helfen kleine Absprachen und entlasten dich spürbar.", "facts": ["Value fact 2"]},
         },
     ]
 
     lifestyle_topics = [
         {
             "title": "Barrierefreiheit im Alltag erleben",
-            "rotation": "Im Alltag geht es nicht um Technikfakten, sondern um Wege, die funktionieren.",
+            "rotation": "Im Alltag helfen passende Wege und gemeinsame Planung, damit Ausflüge wirklich gelingen.",
             "cta": "Zeig, wie sich Alltag wirklich anfühlt.",
-            "spoken_duration": 5.0,
-            "dialog_scripts": _dialog_scripts("Im Alltag geht es nicht um Technikfakten, sondern um Wege, die funktionieren."),
+            "spoken_duration": 8.0,
+            "dialog_scripts": _dialog_scripts("Im Alltag helfen passende Wege und gemeinsame Planung, damit Ausflüge wirklich gelingen."),
             "framework": "PAL",
         }
     ]
@@ -881,6 +884,9 @@ def test_mixed_batch_lifestyle_dedupe_stays_lane_scoped(monkeypatch):
     monkeypatch.setattr(topic_handlers, "get_batch_by_id", fake_get_batch_by_id)
     monkeypatch.setattr(topic_handlers, "get_all_topics_from_registry", lambda: [])
     monkeypatch.setattr(topic_handlers, "list_topic_suggestions", fake_list_topic_suggestions)
+    monkeypatch.setattr(topic_handlers, "_batch_has_manual_drafts", lambda _batch_id: False)
+    monkeypatch.setattr(topic_handlers, "mark_topic_family_used", lambda _family_id: None)
+    monkeypatch.setattr(topic_handlers, "mark_topic_script_used", lambda script_id=None: None)
     monkeypatch.setattr(topic_handlers, "generate_lifestyle_topics", fake_generate_lifestyle_topics)
     monkeypatch.setattr(topic_handlers, "generate_product_topics", fake_generate_product_topics)
     monkeypatch.setattr(topic_handlers, "deduplicate_topics", fake_deduplicate_topics)
@@ -1088,12 +1094,12 @@ def test_discover_topics_reuses_bank_suggestions_without_self_deduping(monkeypat
         "family_fingerprint": "begleitperson nahverkehr merkzeichen b",
         "canonical_topic": "Begleitperson im Nahverkehr mit Merkzeichen B",
         "title": "Begleitperson im Nahverkehr erklärt",
-        "rotation": "Mit Merkzeichen B planst du Begleitung und Freifahrt deutlich entspannter im Alltag.",
+        "rotation": "Mit Merkzeichen B kannst du im Nahverkehr oft eine Begleitperson kostenfrei mitnehmen, wenn dein Ausweis gültig ist. Prüfe die Bedingungen vor der Fahrt und halte beide Ausweise griffbereit, damit du am Einstieg entspannt bleibst.",
         "cta": "Prüf deine Nachweise rechtzeitig.",
         "spoken_duration": 16.0,
         "seed_payload": {
             "canonical_topic": "Begleitperson im Nahverkehr mit Merkzeichen B",
-            "script": "Mit Merkzeichen B planst du Begleitung und Freifahrt deutlich entspannter im Alltag.",
+            "script": "Mit Merkzeichen B kannst du im Nahverkehr oft eine Begleitperson kostenfrei mitnehmen, wenn dein Ausweis gültig ist. Prüfe die Bedingungen vor der Fahrt und halte beide Ausweise griffbereit, damit du am Einstieg entspannt bleibst.",
             "facts": ["Begleitperson und Freifahrt müssen sauber nachgewiesen werden."],
         },
     }
@@ -1112,6 +1118,8 @@ def test_discover_topics_reuses_bank_suggestions_without_self_deduping(monkeypat
         ],
     )
     monkeypatch.setattr(topic_handlers, "list_topic_suggestions", lambda **kwargs: [suggestion])
+    monkeypatch.setattr(topic_handlers, "_batch_has_manual_drafts", lambda _batch_id: False)
+    monkeypatch.setattr(topic_handlers, "mark_topic_family_used", lambda _family_id: None)
     monkeypatch.setattr(
         topic_handlers,
         "_schedule_coverage_warmup",
