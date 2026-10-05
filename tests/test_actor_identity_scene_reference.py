@@ -162,7 +162,7 @@ def test_scene_reference_prompt_does_not_include_freeform_script_text():
         post_type="value",
     )
     assert "Badezimmer" not in prompt
-    assert "the same compact accessible bathroom" in prompt
+    assert "the same lived-in compact accessible bathroom" in prompt
     assert "Accessible bathroom scene A" not in prompt
     assert "texture-only" not in prompt
 
@@ -702,7 +702,7 @@ def test_scene_bible_prompt_prioritizes_scene_composition_before_actor_handle():
     )
 
     assert prompt.startswith("Photorealistic vertical UGC smartphone still, waist-up seated wheelchair-user reference")
-    assert prompt.index("the same compact accessible bathroom") < prompt.index("@ayra_actor::100")
+    assert prompt.index("the same lived-in compact accessible bathroom") < prompt.index("@ayra_actor::100")
     assert "Actor Identity:" not in prompt
     assert "Primary Subject:" not in prompt
     assert "@ayra_actor::100 is the dominant identity signal" in prompt
@@ -736,12 +736,13 @@ def test_scene_reference_prompts_share_same_location_lock_without_labels():
     ]
 
     shared_sentence = (
-        "Keep the same supporting location details across every angle: same silver hatchback, open passenger door, "
-        "quiet curb, low brick garden wall, muted hedge, overcast daylight."
+        "Keep the same supporting location details across every angle: same silver hatchback with mild road dust, "
+        "open passenger door, charcoal travel blanket, blank canvas tote, weather-marked paving, fallen leaves, "
+        "low brick garden wall, muted hedge, and overcast daylight."
     )
     assert all(shared_sentence in prompt for prompt in prompts)
     assert all("@ayra_actor::100" in prompt for prompt in prompts)
-    assert all(prompt.index("quiet residential curb") < prompt.index("@ayra_actor::100") for prompt in prompts)
+    assert all(prompt.index("ordinary residential curb") < prompt.index("@ayra_actor::100") for prompt in prompts)
     assert all("Scene Consistency:" not in prompt for prompt in prompts)
     assert all("Background Anchor:" not in prompt for prompt in prompts)
     assert all("Scene Bible:" not in prompt for prompt in prompts)
@@ -956,7 +957,7 @@ def test_scene_reference_metadata_includes_scene_bible_contract():
 
     assert build_scene_bible_provider_metadata("car_transfer_residential_a") == {
         "scene_bible_id": "car_transfer_residential_a",
-        "scene_bible_version": 1,
+        "scene_bible_version": 2,
         "scene_bible_name": "Residential car transfer A",
         "scene_bible_identity": get_scene_bible("car_transfer_residential_a").scene_identity,
         "scene_generation_anchor": get_scene_bible("car_transfer_residential_a").generation_anchor,
@@ -1060,11 +1061,11 @@ def test_scene_reference_prompt_includes_scene_specific_rejectors_and_wardrobe_l
     )
 
     assert "same cream crewneck sweater and neutral trousers" in prompt
-    assert (
-        "Do not add tall cabinets, doors behind the actor, plants, ladder shelves, radiators, mirrors, shower curtains, or extra towels"
-        in prompt
-    )
-    assert "same grab rail, sink, sage-green towel shelf, frosted window" in prompt
+    assert "Do not add tall cabinets, doors behind the actor, plants, ladder shelves" in prompt
+    assert "extra towels, product labels or readable packaging" in prompt
+    assert "objects blocking the wheelchair turning area" in prompt
+    assert "same grab rail, sink, amber soap dispenser, cream toothbrush tumbler" in prompt
+    assert "sage-green towel and soap-dish shelf, frosted window" in prompt
 
 
 def test_generate_scene_reference_uses_lora_safe_mystic_options_and_metadata(monkeypatch):
@@ -1175,14 +1176,14 @@ def test_generate_scene_reference_uses_lora_safe_mystic_options_and_metadata(mon
     for candidate in captured_candidates:
         metadata = candidate["provider_metadata"]
         assert metadata["scene_bible_id"] == "bathroom_accessibility_a"
-        assert metadata["scene_bible_version"] == 1
+        assert metadata["scene_bible_version"] == 2
         assert metadata["scene_bible_name"] == "Accessible bathroom A"
         assert metadata["scene_bible_identity"].startswith("Accessible bathroom scene A")
-        assert metadata["scene_generation_anchor"].startswith("the same compact accessible bathroom")
+        assert metadata["scene_generation_anchor"].startswith("the same lived-in compact accessible bathroom")
         assert metadata["scene_consistency_contract"]["scene_bible_id"] == "bathroom_accessibility_a"
         assert metadata["scene_consistency_contract"]["layout_lock"].startswith("same compact accessible bathroom")
         assert metadata["reason_code"] == "bathroom_terms"
-        assert "the same compact accessible bathroom" in candidate["prompt"]
+        assert "the same lived-in compact accessible bathroom" in candidate["prompt"]
         assert "Accessible bathroom scene A" not in candidate["prompt"]
         assert metadata["angle_key"] in {"front_mid", "left_three_quarter", "right_profile"}
         assert metadata["angle_label"] in {"Front", "Left three-quarter", "Right profile"}
@@ -1529,7 +1530,7 @@ def test_regenerate_scene_reference_keeps_identity_lock_contract(monkeypatch):
     assert response.status_code == 303
     metadata = created[0]["provider_metadata"]
     assert metadata["scene_bible_id"] == "bathroom_accessibility_a"
-    assert metadata["scene_bible_version"] == 1
+    assert metadata["scene_bible_version"] == 2
     assert metadata["scene_bible_name"] == "Accessible bathroom A"
     assert metadata["scene_consistency_contract"]["scene_bible_id"] == "bathroom_accessibility_a"
     assert metadata["scene_consistency_contract"]["layout_lock"].startswith("same compact accessible bathroom")
@@ -1714,7 +1715,7 @@ def test_regenerate_scene_reference_accepts_legacy_scene_alias(monkeypatch):
     assert metadata["scene_bible_id"] == "bathroom_accessibility_a"
     assert metadata["provider_source_image_rehosted"] is True
     assert created[0]["image_url"].startswith("https://cdn.example.com/durable/scene-reference-set-1-front_mid-task-regenerated")
-    assert "the same compact accessible bathroom" in created[0]["prompt"]
+    assert "the same lived-in compact accessible bathroom" in created[0]["prompt"]
     assert "Accessible bathroom scene A" not in created[0]["prompt"]
 
 

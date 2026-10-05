@@ -1,0 +1,19 @@
+# Writing — brief, meaning, and reader progression
+
+Use for substantial generation, editing, explanation, or narrative. AGENTS.md supplies the permanent writing floor. Establish what the reader must understand, feel, decide, or do; the subject's actual facts and vocabulary; intended experience; fixed requirements; open choices; and bounded completion. Preserve the user's genre, voice, terminology, factual strength, attribution, and required form. A mechanical correction needs no creative search.
+
+When framing, voice, structure, emphasis, rhythm, or omission materially affects success, read `bridgecode/taste.md` completely. Apply its Person/Core/representative-work selection, task-local default exclusion, four stances, and minimal amalgams only to discretionary choices. Compare concrete consequences, not reputations. Respect a prescribed perspective. The governing principles should remain useful after removing the person's name. A technical explanation may require taste where its progression determines comprehension.
+
+## Unslop constitution
+
+Derive content from this brief; category familiarity alone cannot justify interchangeable passages. Match claims to evidence and preserve uncertainty. Allocate rhetorical intensity according to actual importance. Let structure encode relationships: prose develops explanations and arguments; lists, tables, headings, and labels carry genuine sequences, comparisons, or reference information. Use the natural number of parts and give unequal points appropriate weight. Preserve exact technical terms and explain them at the reader's level instead of substituting impressive synonyms. Keep independent judgment: agreement, balance, praise, and qualification require evidence or an interaction purpose. Bound completeness by reader use. Economy preserves intelligibility, expressive capacity, and necessary context. Distinctiveness must improve fit; novelty and austerity receive no independent reward.
+
+Inspect combined failures as well as individual symptoms. Prestige language plus unsupported claims, comprehensive coverage plus refusal to prioritize, or forced informality plus decorative novelty can recreate generic writing after surface edits. Infer the governing decision, test it against the brief, repair that decision, then revise the affected passages. Familiar wording is a reason to inspect fit, not proof of poor quality or AI authorship. Do not impose a universal blacklist of words, structures, people, or genres.
+
+## Draft and critique
+
+Before drafting, connect the intended outcome, fixed content, selected principles, first encounter, subsequent progression, omissions, tradeoffs, and checks in the active decision brief. Give a public rationale only when useful and compatible with the requested output. Produce the deliverable; avoid substituting a direction statement for completed writing.
+
+Read the draft from the audience's knowledge state. Put prerequisites before dependent claims; restore missing orientation and connective reasoning; remove repetition that obscures progression. State actors, conditions, actions, consequences, ownership, and limits where necessary to operate or understand a system. Preserve intentional voice and source meaning within the editing scope. Fix framing and information order before synonym replacement. Anticipate only objections supported by the brief. Distinguish proposed changes from applied and verified corrections.
+
+Accept when the text serves the evidenced reader and purpose, preserves required meaning and form, grounds consequential claims, develops relationships clearly, applies the chosen Core to consequential choices, and stops at the requested completion boundary. Source or factual checks replace runtime testing for prose-only work; follow the root review contract for implemented artifacts. Report validation limits truthfully.

@@ -52,6 +52,8 @@ SEMANTIC_UGC_POSTGRES_CONTAINER="$CONTAINER_NAME" \
     tests/test_semantic_video_batch_approval_migration_postgres.py \
     tests/test_semantic_video_plan_migration_postgres.py \
     tests/test_semantic_video_worker_migration_postgres.py \
+    tests/test_manual_adaptive_migration_postgres.py \
+    tests/test_runway_evaluation_migration_postgres.py \
     tests/test_semantic_scene_image_queue_migration_postgres.py \
     -q
 
@@ -119,8 +121,23 @@ BEGIN
     SELECT 1
     FROM supabase_migrations.schema_migrations
     WHERE version = '20260805000000'
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM supabase_migrations.schema_migrations
+    WHERE version = '20261001000000'
   ) THEN
     RAISE EXCEPTION 'Supabase CLI did not record all Semantic UGC migrations';
+  END IF;
+  IF to_regclass('public.runway_video_evaluations') IS NULL
+     OR (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname = 'public' AND p.proname LIKE '%runway_video_evaluation%') <> 10
+     OR NOT has_table_privilege('service_role', 'public.runway_video_evaluations', 'SELECT')
+     OR has_table_privilege('service_role', 'public.runway_video_evaluations', 'INSERT')
+     OR has_table_privilege('service_role', 'public.runway_video_evaluations', 'UPDATE')
+     OR has_table_privilege('service_role', 'public.runway_video_evaluations', 'DELETE')
+     OR has_table_privilege('anon', 'public.runway_video_evaluations', 'SELECT')
+     OR has_table_privilege('authenticated', 'public.runway_video_evaluations', 'SELECT') THEN
+    RAISE EXCEPTION 'Runway evaluation RPCs or privileges are unsafe';
   END IF;
   IF to_regprocedure('public.persist_semantic_video_plan(uuid,integer,jsonb,jsonb)') IS NULL THEN
     RAISE EXCEPTION 'Supabase CLI did not install Semantic UGC RPCs';

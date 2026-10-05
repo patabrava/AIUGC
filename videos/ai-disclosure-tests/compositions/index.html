@@ -1,0 +1,592 @@
+<!doctype html>
+<html
+  lang="en"
+  data-resolution="portrait"
+  data-composition-variables='[
+    {"id":"testNumber","type":"number","label":"Test number","default":1},
+    {"id":"theme","type":"string","label":"Theme","default":"cobalt"}
+  ]'
+>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <title>AI Disclosure Test</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 1080px;
+        height: 1920px;
+        margin: 0;
+        overflow: hidden;
+        background: var(--bg);
+      }
+
+      body {
+        font-family: "Space Grotesk", "Arial Black", sans-serif;
+      }
+
+      #stage {
+        position: relative;
+        width: 1080px;
+        height: 1920px;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--fg);
+        isolation: isolate;
+      }
+
+      #disclosure-clip,
+      .scene,
+      .scene-content,
+      .field {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+
+      #disclosure-clip {
+        overflow: hidden;
+      }
+
+      .field {
+        z-index: 0;
+        background: var(--bg);
+      }
+
+      .field-interrupt {
+        background: var(--interrupt-bg);
+        opacity: 0;
+      }
+
+      .scene {
+        z-index: 4;
+        opacity: 0;
+        visibility: hidden;
+      }
+
+      .scene-content {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        padding: 180px 90px 260px;
+        gap: 34px;
+        text-align: center;
+      }
+
+      .identifier-content {
+        justify-content: flex-start;
+        align-items: flex-start;
+        text-align: left;
+      }
+
+      .identifier {
+        position: relative;
+        z-index: 2;
+        color: var(--fg);
+        font-size: 92px;
+        font-weight: 700;
+        line-height: 0.92;
+        letter-spacing: -0.055em;
+        text-transform: uppercase;
+      }
+
+      .identifier::after {
+        display: block;
+        width: 100%;
+        height: 12px;
+        margin-top: 28px;
+        background: var(--accent);
+        content: "";
+        transform-origin: left center;
+      }
+
+      .headline-stack,
+      .purpose-stack {
+        position: relative;
+        width: 900px;
+        z-index: 2;
+      }
+
+      .hero-word,
+      .purpose-word,
+      .proof-line {
+        display: block;
+        font-weight: 700;
+        line-height: 0.92;
+        letter-spacing: -0.055em;
+        text-transform: uppercase;
+      }
+
+      .hero-word {
+        font-size: 174px;
+      }
+
+      .hero-word.ai {
+        color: var(--accent-ink);
+      }
+
+      .hero-word.generated {
+        color: var(--accent);
+      }
+
+      .ai-mask {
+        position: relative;
+        overflow: hidden;
+      }
+
+      .ai-wipe {
+        position: absolute;
+        inset: 0;
+        z-index: -1;
+        background: var(--accent);
+        transform-origin: left center;
+      }
+
+      .hero-underline {
+        width: 100%;
+        height: 14px;
+        margin-top: 38px;
+        background: var(--accent);
+        transform-origin: left center;
+      }
+
+      .purpose-content {
+        color: var(--interrupt-fg);
+      }
+
+      .purpose-word {
+        font-size: 138px;
+      }
+
+      .purpose-word.test {
+        color: var(--accent-ink);
+      }
+
+      .proof-content {
+        justify-content: flex-start;
+        padding-top: 460px;
+        gap: 38px;
+      }
+
+      .proof-id {
+        color: var(--accent);
+        font-size: 92px;
+      }
+
+      .proof-headline {
+        margin-top: 166px;
+        color: var(--fg);
+        font-size: 112px;
+      }
+
+      .proof-purpose {
+        color: var(--fg);
+        font-size: 76px;
+      }
+
+      .proof-rule {
+        position: absolute;
+        top: 1370px;
+        left: 90px;
+        width: 900px;
+        height: 12px;
+        background: var(--accent);
+        transform-origin: left center;
+      }
+
+      .motif {
+        position: absolute;
+        inset: 0;
+        z-index: 1;
+        pointer-events: none;
+      }
+
+      .theme-cobalt .stamp-motif,
+      .theme-vermilion .signal-motif {
+        display: none;
+      }
+
+      .corner {
+        position: absolute;
+        width: 72px;
+        height: 72px;
+        border-color: var(--accent);
+        border-style: solid;
+      }
+
+      .corner.tl {
+        top: 84px;
+        left: 64px;
+        border-width: 4px 0 0 4px;
+      }
+
+      .corner.tr {
+        top: 84px;
+        right: 64px;
+        border-width: 4px 4px 0 0;
+      }
+
+      .corner.bl {
+        bottom: 84px;
+        left: 64px;
+        border-width: 0 0 4px 4px;
+      }
+
+      .corner.br {
+        right: 64px;
+        bottom: 84px;
+        border-width: 0 4px 4px 0;
+      }
+
+      .scanline {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 3px;
+        background: var(--interrupt-accent);
+        box-shadow: 0 0 30px var(--interrupt-accent);
+        opacity: 0;
+      }
+
+      .signal-bars {
+        position: absolute;
+        top: 760px;
+        right: 58px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+
+      .signal-bars span {
+        display: block;
+        width: 82px;
+        height: 14px;
+        background: var(--interrupt-accent);
+        opacity: 0;
+        transform-origin: right center;
+      }
+
+      .stamp-rule {
+        position: absolute;
+        top: 114px;
+        left: 90px;
+        width: 900px;
+        height: 4px;
+        background: var(--accent);
+        transform-origin: left center;
+      }
+
+      .stamp-rule.bottom {
+        top: auto;
+        bottom: 138px;
+        transform-origin: right center;
+      }
+
+      .impact-ring {
+        position: absolute;
+        top: 700px;
+        left: 280px;
+        width: 520px;
+        height: 520px;
+        border: 16px solid var(--interrupt-accent);
+        border-radius: 50%;
+        opacity: 0;
+      }
+
+      .stamp-box {
+        position: absolute;
+        top: 710px;
+        left: 190px;
+        width: 700px;
+        height: 500px;
+        border: 16px solid var(--interrupt-accent);
+        opacity: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="stage"
+      data-composition-id="ai-disclosure-test"
+      data-start="0"
+      data-duration="8"
+      data-fps="30"
+      data-width="1080"
+      data-height="1920"
+    >
+      <div
+        id="disclosure-clip"
+        class="clip"
+        data-start="0"
+        data-duration="8"
+        data-track-index="1"
+      >
+        <div class="field field-base"></div>
+        <div class="field field-interrupt"></div>
+
+        <div class="motif signal-motif" aria-hidden="true">
+          <i class="corner tl"></i>
+          <i class="corner tr"></i>
+          <i class="corner bl"></i>
+          <i class="corner br"></i>
+          <i class="scanline"></i>
+          <div class="signal-bars"><span></span><span></span><span></span></div>
+        </div>
+
+        <div class="motif stamp-motif" aria-hidden="true">
+          <i class="stamp-rule"></i>
+          <i class="stamp-rule bottom"></i>
+          <i class="impact-ring"></i>
+          <i class="stamp-box"></i>
+        </div>
+
+        <section id="hook-scene" class="scene" aria-label="Test identifier">
+          <div class="scene-content identifier-content">
+            <div class="identifier js-test-id">TEST 1</div>
+          </div>
+        </section>
+
+        <section
+          id="headline-scene"
+          class="scene"
+          aria-label="AI generated declaration"
+          data-layout-allow-occlusion="true"
+        >
+          <div class="scene-content">
+            <div class="headline-stack">
+              <div class="ai-mask">
+                <span class="hero-word ai">AI</span>
+                <i class="ai-wipe" aria-hidden="true"></i>
+              </div>
+              <span class="hero-word generated">GENERATED</span>
+              <i class="hero-underline" aria-hidden="true"></i>
+            </div>
+          </div>
+        </section>
+
+        <section id="purpose-scene" class="scene" aria-label="Disclosure test declaration">
+          <div class="scene-content purpose-content">
+            <div class="purpose-stack">
+              <span class="purpose-word disclosure">DISCLOSURE</span>
+              <span class="purpose-word test">TEST</span>
+            </div>
+          </div>
+        </section>
+
+        <section id="proof-scene" class="scene" aria-label="Disclosure verification proof frame">
+          <div class="scene-content proof-content">
+            <span class="proof-line proof-id js-test-id">TEST 1</span>
+            <span class="proof-line proof-headline">AI-GENERATED</span>
+            <span class="proof-line proof-purpose">DISCLOSURE TEST</span>
+            <i class="proof-rule" aria-hidden="true"></i>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        window.__timelines = window.__timelines || {};
+
+        const declared = {
+          ...(window.__hyperframes?.getVariables?.() || {}),
+          ...(
+            window.__hfVariables &&
+            typeof window.__hfVariables === "object" &&
+            !Array.isArray(window.__hfVariables)
+              ? window.__hfVariables
+              : {}
+          ),
+        };
+        const testNumber = Number(declared.testNumber) === 2 ? 2 : 1;
+        const requestedTheme = String(declared.theme || "").toLowerCase();
+        const theme = requestedTheme === "vermilion" ? "vermilion" : "cobalt";
+
+        const palettes = {
+          cobalt: {
+            bg: "#071A52",
+            fg: "#EAFDFF",
+            accent: "#18E4FF",
+            secondary: "#2459FF",
+            interruptBg: "#18E4FF",
+            interruptFg: "#071A52",
+            interruptAccent: "#EAFDFF",
+            accentInk: "#071A52",
+            shift: "#2459FF",
+          },
+          vermilion: {
+            bg: "#FFF1D6",
+            fg: "#111111",
+            accent: "#F24C32",
+            secondary: "#D72F19",
+            interruptBg: "#F24C32",
+            interruptFg: "#FFF1D6",
+            interruptAccent: "#111111",
+            accentInk: "#111111",
+            shift: "#111111",
+          },
+        };
+
+        const stage = document.getElementById("stage");
+        const palette = palettes[theme];
+        stage.classList.add("theme-" + theme);
+        stage.style.setProperty("--bg", palette.bg);
+        stage.style.setProperty("--fg", palette.fg);
+        stage.style.setProperty("--accent", palette.accent);
+        stage.style.setProperty("--secondary", palette.secondary);
+        stage.style.setProperty("--interrupt-bg", palette.interruptBg);
+        stage.style.setProperty("--interrupt-fg", palette.interruptFg);
+        stage.style.setProperty("--interrupt-accent", palette.interruptAccent);
+        stage.style.setProperty("--accent-ink", palette.accentInk);
+        document.documentElement.style.setProperty("--bg", palette.bg);
+
+        document.querySelectorAll(".js-test-id").forEach(function (node) {
+          node.textContent = "TEST " + testNumber;
+        });
+
+        const tl = gsap.timeline({ paused: true });
+
+        if (theme === "cobalt") {
+          tl.fromTo(
+            ".corner",
+            { scale: 0, autoAlpha: 0 },
+            { scale: 1, autoAlpha: 1, duration: 0.4, ease: "power4.out", stagger: 0.03 },
+            0,
+          );
+        } else {
+          tl.fromTo(
+            ".stamp-rule",
+            { scaleX: 0, autoAlpha: 1 },
+            { scaleX: 1, autoAlpha: 1, duration: 0.4, ease: "power4.out" },
+            0,
+          );
+        }
+
+        tl.fromTo("#hook-scene", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.001 }, 0);
+        tl.fromTo(
+          "#hook-scene .identifier",
+          { y: -300, scale: 0.76, autoAlpha: 0 },
+          { y: 0, scale: 1, autoAlpha: 1, duration: 0.4, ease: "power4.out" },
+          0,
+        );
+        tl.to("#hook-scene .identifier", {
+          keyframes: [{ x: -9 }, { x: 9 }, { x: 0 }],
+          duration: 0.2,
+          ease: "power2.inOut",
+        }, 0.4);
+        tl.to("#hook-scene", { x: -90, clipPath: "inset(0 100% 0 0)", duration: 0.2, ease: "power2.in" }, 0.6);
+        tl.set("#hook-scene", { autoAlpha: 0 }, 0.8);
+
+        tl.fromTo("#headline-scene", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.001 }, 0.8);
+        tl.fromTo(
+          "#headline-scene .ai-wipe",
+          { scaleX: 0 },
+          { scaleX: 1, duration: 0.6, ease: "power4.out" },
+          0.8,
+        );
+        tl.fromTo(
+          "#headline-scene .ai",
+          { clipPath: "inset(0 100% 0 0)" },
+          { clipPath: "inset(0 0% 0 0)", duration: 0.6, ease: "power4.out" },
+          0.8,
+        );
+        tl.fromTo(
+          "#headline-scene .generated",
+          { y: -300, scale: 0.84, autoAlpha: 0 },
+          { y: 0, scale: 1, autoAlpha: 1, duration: 0.6, ease: "power4.out" },
+          1.4,
+        );
+        tl.fromTo(
+          "#headline-scene .hero-underline",
+          { scaleX: 0 },
+          { scaleX: 1, duration: 0.4, ease: "power2.out" },
+          2.0,
+        );
+        tl.to("#headline-scene .ai", { scale: 1.08, duration: 0.2, ease: "sine.inOut" }, 2.4);
+        tl.to("#headline-scene .ai", { scale: 1, duration: 0.2, ease: "sine.inOut" }, 2.6);
+        tl.to("#headline-scene", { clipPath: "inset(0 0 0 100%)", duration: 0.2, ease: "power2.in" }, 3.0);
+        tl.set("#headline-scene", { autoAlpha: 0 }, 3.2);
+
+        tl.fromTo(".field-interrupt", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.001 }, 3.2);
+        tl.fromTo("#purpose-scene", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.001 }, 3.2);
+        tl.fromTo(
+          "#purpose-scene .disclosure",
+          { y: 120, autoAlpha: 0 },
+          { y: 0, autoAlpha: 1, duration: 0.6, ease: "power4.out" },
+          3.2,
+        );
+        tl.fromTo(
+          "#purpose-scene .test",
+          { scale: 0.6, autoAlpha: 0 },
+          { scale: 1, autoAlpha: 1, duration: 0.4, ease: "back.out(2.2)" },
+          3.8,
+        );
+        if (theme === "cobalt") {
+          tl.fromTo(
+            ".scanline",
+            { y: 0, autoAlpha: 1 },
+            { y: 1920, autoAlpha: 1, duration: 1.0, ease: "power2.inOut" },
+            3.2,
+          );
+          tl.fromTo(
+            ".signal-bars span",
+            { scaleX: 0, autoAlpha: 0 },
+            { scaleX: 1, autoAlpha: 1, duration: 0.14, stagger: 0.06, ease: "power4.out" },
+            4.2,
+          );
+        } else {
+          tl.fromTo(
+            ".impact-ring",
+            { scale: 0.72, autoAlpha: 0 },
+            { scale: 1, autoAlpha: 1, duration: 1.0, ease: "power4.out" },
+            3.2,
+          );
+          tl.fromTo(
+            ".stamp-box",
+            { rotate: 6, scale: 0.84, autoAlpha: 0 },
+            { rotate: 0, scale: 1, autoAlpha: 1, duration: 0.4, ease: "power4.out" },
+            4.2,
+          );
+        }
+        tl.to("#purpose-scene .disclosure", { scale: 1.06, duration: 0.2, ease: "sine.inOut" }, 4.2);
+        tl.to("#purpose-scene .disclosure", { scale: 1, duration: 0.2, ease: "sine.inOut" }, 4.4);
+        tl.to("#purpose-scene .purpose-stack", { scale: 1.015, duration: 0.4, ease: "sine.inOut" }, 4.6);
+        tl.to("#purpose-scene .purpose-stack", { scale: 1, duration: 0.4, ease: "sine.inOut" }, 5.0);
+        tl.to("#purpose-scene .test", { color: palette.shift, duration: 0.199, ease: "sine.inOut" }, 5.4);
+        tl.to("#purpose-scene .test", { color: palette.accentInk, duration: 0.2, ease: "sine.inOut" }, 5.6);
+        tl.to("#purpose-scene .disclosure", { x: -120, autoAlpha: 0, duration: 0.4, ease: "power2.in" }, 5.8);
+        tl.to("#purpose-scene .test", { x: 120, autoAlpha: 0, duration: 0.4, ease: "power2.in" }, 5.8);
+        tl.set("#purpose-scene", { autoAlpha: 0 }, 6.2);
+
+        tl.to(".field-interrupt", { autoAlpha: 0, duration: 0.001 }, 6.2);
+        if (theme === "cobalt") {
+          tl.to(".signal-bars", { autoAlpha: 0, duration: 0.001 }, 6.2);
+        } else {
+          tl.to([".impact-ring", ".stamp-box"], { autoAlpha: 0, duration: 0.001 }, 6.2);
+        }
+        tl.fromTo("#proof-scene", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.001 }, 6.2);
+        tl.fromTo("#proof-scene .proof-id", { y: 80, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.133, ease: "power4.out" }, 6.2);
+        tl.fromTo("#proof-scene .proof-headline", { y: 80, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.133, ease: "power4.out" }, 6.333);
+        tl.fromTo("#proof-scene .proof-purpose", { y: 80, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.133, ease: "power4.out" }, 6.466);
+        tl.fromTo("#proof-scene .proof-rule", { scaleX: 0 }, { scaleX: 1, duration: 1.0, ease: "none" }, 6.6);
+
+        tl.seek(0);
+        window.__timelines["ai-disclosure-test"] = tl;
+      })();
+    </script>
+  </body>
+</html>

@@ -64,7 +64,7 @@ from app.features.shot_production.duration import (
     SEMANTIC_TERMINAL_SPEECH_GUARD_SECONDS,
     semantic_terminal_speech_cut_floor,
 )
-from app.features.shot_production.planner import EditorialBeat, plan_editorial_beats
+from app.features.shot_production.planner import EditorialBeat, plan_editorial_beats, plan_manual_editorial_beats
 from app.features.shot_production.prompts import (
     EFFECTIVE_NEGATIVE_PROMPT,
     SUPPORTED_DURATIONS,
@@ -341,6 +341,24 @@ def _requested_script_duration(script_source: Dict[str, Any]) -> Any:
     return script_source.get("target_length_tier")
 
 
+def _script_delivery_duration_contract(script: Dict[str, Any]) -> Dict[str, Any]:
+    from app.features.shot_production.duration import ADAPTIVE_MANUAL_DURATION, build_manual_duration_contract
+
+    if script.get("duration_mode") == ADAPTIVE_MANUAL_DURATION:
+        if not _is_approved_manual_semantic_script(script):
+            raise ValidationError("Adaptive delivery requires approved manual provenance.")
+        contract = build_manual_duration_contract(str(script.get("text") or script.get("script") or ""))
+        if _requested_script_duration(script) != contract.requested_duration_seconds:
+            raise ValidationError("Adaptive duration estimate changed after approval.")
+        return {
+            "duration_mode": ADAPTIVE_MANUAL_DURATION,
+            "requested": float(contract.requested_duration_seconds),
+            "minimum": contract.delivery_min_seconds,
+            "maximum": contract.delivery_max_seconds,
+        }
+    return _delivery_duration_contract(_requested_script_duration(script))
+
+
 def _delivery_duration_contract(requested_seconds: Any) -> Dict[str, float]:
     if isinstance(requested_seconds, bool):
         raise ValidationError("Pilot requested duration must be a finite number of at least four seconds.")
@@ -392,9 +410,7 @@ def _validate_approved_pilot_plan(
             "Pilot requires an app-generated script with intact generator provenance "
             "or approved manual semantic script provenance."
         )
-    duration_contract = _delivery_duration_contract(
-        _requested_script_duration(script_source)
-    )
+    duration_contract = _script_delivery_duration_contract(script_source)
     durations = [beat.provider_duration_seconds for beat in beats]
     if not durations or any(duration not in SUPPORTED_DURATIONS for duration in durations):
         raise ValidationError(
@@ -432,6 +448,7 @@ def _request_contract_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         "script_review_status",
         "target_length_tier",
         "target_duration_seconds",
+        "duration_mode",
     ):
         if field in script:
             script_contract[field] = script[field]
@@ -467,7 +484,7 @@ def _request_contract_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def _validate_duration_planning_contract(payload: Dict[str, Any]) -> Dict[str, float]:
     script = payload.get("script") or {}
-    derived = _delivery_duration_contract(_requested_script_duration(script))
+    derived = _script_delivery_duration_contract(script)
     stored_profile = script.get("planning_profile")
     stored_duration = script.get("delivery_duration_seconds")
     requires_duration_fields = int(payload.get("version") or 0) >= 3
@@ -554,7 +571,7 @@ def initialize_pilot(
         raise ValidationError("Pilot script input requires a non-empty script.")
 
     # Hash/aspect validation happens before the run directory or manifest is created.
-    beats = plan_editorial_beats(script_text)
+    beats = (plan_manual_editorial_beats(script_text) if script_source.get("duration_mode") else plan_editorial_beats(script_text))
     duration_contract = _validate_approved_pilot_plan(
         script_source=script_source,
         script_text=script_text,
@@ -629,6 +646,7 @@ def initialize_pilot(
             "category": script_source.get("category"),
             "target_length_tier": script_source.get("target_length_tier"),
             "target_duration_seconds": script_source.get("target_duration_seconds"),
+            **({"duration_mode": script_source["duration_mode"]} if script_source.get("duration_mode") else {}),
             "planning_profile": PLANNING_PROFILE,
             "delivery_duration_seconds": duration_contract,
             "text": script_text,
@@ -1047,6 +1065,42 @@ def _adjudicate_borderline_transcript(
     }
 
 
+def _manual_script_excerpt(beat: Any, transcript: WordLevelTranscript, duration: float):
+    """Recover one verbatim script occurrence isolated from provider-added speech."""
+    expected = normalize_german_words(beat.text)
+    words = list(transcript.words or ())
+    if not expected or len(words) <= len(expected):
+        return None
+    tokens = [normalize_german_words(word.word) for word in words]
+    if any(len(token) != 1 for token in tokens):
+        return None
+    actual = tuple(token[0] for token in tokens)
+    matches = [i for i in range(len(actual) - len(expected) + 1)
+               if actual[i:i + len(expected)] == tuple(expected)]
+    if len(matches) != 1:
+        return None
+    first = matches[0]
+    last = first + len(expected)
+    if tuple(normalize_german_words(transcript.full_text)) != tuple(token[0] for token in tokens):
+        return None
+    try:
+        timings = [(float(word.start), float(word.end)) for word in words]
+    except (TypeError, ValueError):
+        return None
+    if any(not math.isfinite(start + end) or start < 0 or end <= start for start, end in timings):
+        return None
+    if any(right[0] < left[1] - 0.001 for left, right in zip(timings, timings[1:])):
+        return None
+    end = timings[last - 1][1]
+    if end > duration - 0.5:
+        return None
+    if first and timings[first][0] - timings[first - 1][1] < 0.12:
+        return None
+    if last < len(words) and timings[last][0] - end < 0.12:
+        return None
+    return WordLevelTranscript(words=words[first:last], full_text=beat.text)
+
+
 @_manifest_locked
 def transcribe_and_validate_takes(
     manifest_path: Path,
@@ -1120,6 +1174,23 @@ def transcribe_and_validate_takes(
             transcript,
             other_beats=[other for other in beats if other.index != beat.index],
         )
+        if (
+            not qa.passed
+            and len(beats) == 1
+            and (payload.get("script") or {}).get("duration_mode") == "manual_script_v1"
+        ):
+            prefix = _manual_script_excerpt(beat, transcript, float(take["duration_seconds"]))
+            if prefix is not None:
+                prefix_qa = evaluate_take_transcript(beat, prefix, other_beats=[])
+                if prefix_qa.passed:
+                    take["excluded_provider_speech"] = {
+                        "source": "exact_manual_script_excerpt_v1",
+                        "original_transcript": _serialize_transcript(transcript),
+                        "original_transcript_qa": asdict(qa),
+                        "delivery_cut_seconds": float(prefix.words[-1].end) + 1024 / 48000,
+                        "retained_speech_start_seconds": float(prefix.words[0].start),
+                    }
+                    transcript, qa = prefix, prefix_qa
         if _is_borderline_transcript_failure(qa):
             adjudicator = adjudicate_fn or _adjudicate_borderline_transcript
             try:
@@ -1156,7 +1227,8 @@ def transcribe_and_validate_takes(
             build_take_trim_window(
                 qa,
                 take["duration_seconds"],
-                trim_head=beat.index > 0,
+                trim_head=beat.index > 0 or bool(take.get("excluded_provider_speech")),
+                head_pad_seconds=0.1 if take.get("excluded_provider_speech") else 0.25,
             )
             if qa.passed
             else None
@@ -2126,7 +2198,7 @@ def _plan_acoustic_delivery(
     maximum = float(duration_contract["maximum"])
     requested = float(duration_contract["requested"])
     plan_options = {}
-    if requested == 16.0:
+    if requested == 16.0 and not duration_contract.get("duration_mode"):
         plan_options["max_seam_word_gap_seconds"] = 0.480
         plan_options["target_duration_seconds"] = requested
     if requested >= 40.0:
@@ -2445,11 +2517,12 @@ def compose_and_caption(
     single_take_terminal_protection = bool(
         len(payload.get("takes") or []) == 1
         and requested_duration == float(MINIMUM_SEMANTIC_UGC_DURATION_SECONDS)
+        and not duration_contract.get("duration_mode")
     )
     exact_delivery_target = (
         requested_duration
         if (
-            requested_duration == float(EXACT_SHORT_FORM_DURATION_SECONDS)
+            requested_duration == float(EXACT_SHORT_FORM_DURATION_SECONDS) and not duration_contract.get("duration_mode")
             or single_take_terminal_protection
         )
         else None
@@ -2553,6 +2626,21 @@ def compose_and_caption(
         _atomic_write_json(manifest_path, payload)
     segment_videos = [path.read_bytes() for path in segment_paths]
     trim_windows = [take["trim_window"] for take in ordered]
+    if duration_contract.get("duration_mode") and len(ordered) == 1:
+        # Manual output ends on speech at native cadence, including sub-8s clips.
+        final_word_end = (ordered[0].get("transcript_qa") or {}).get("final_word_end_seconds")
+        try:
+            speech_end = semantic_terminal_speech_cut_floor(final_word_end)
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+        protected_end = float(ordered[0]["duration_seconds"]) - SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS
+        if speech_end > protected_end:
+            raise ValidationError(
+                "Manual take speech overlaps the protected source tail.",
+                {"failure_type": "terminal_tail_speech_overlap", "take_index": 0,
+                 "speech_cut_floor_seconds": speech_end, "protected_source_end_seconds": protected_end},
+            )
+        trim_windows = [{**trim_windows[0], "end_seconds": speech_end}]
     single_take_tail_exclusion_seconds = SEMANTIC_END_PAN_TAIL_EXCLUSION_SECONDS
     if single_take_terminal_protection:
         protected_source_end = (
@@ -2847,7 +2935,7 @@ def compose_and_caption(
             )
             if exact_delivery_target is not None:
                 operator_review_target_duration = exact_delivery_target
-            elif requested_duration >= 24.0:
+            elif requested_duration >= 24.0 and not duration_contract.get("duration_mode"):
                 # Use the same long-form cadence floor as ordinary acoustic
                 # planning, then retime the complete transcript-safe fallback
                 # only as much as needed to reach that approved floor.

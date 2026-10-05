@@ -18,11 +18,11 @@ from app.features.shot_frames.wheelchair_scene_plate import (
 )
 
 
-# v4 de-genders the seated framing contract so the actor's appearance is resolved
-# only from the immutable identity references. v1 described the original actress
-# literally, which fought the references whenever the batch actor changed.
+# v4 de-genders both presentation prompt contracts so the actor's appearance is
+# resolved only from immutable identity references. Earlier contracts described
+# one actor literally, which fought the references whenever the batch actor changed.
 VISUAL_CONTRACT_VERSION = "semantic_visual_contract_v4"
-STANDING_VISUAL_CONTRACT_VERSION = "semantic_visual_contract_v3"
+STANDING_VISUAL_CONTRACT_VERSION = "semantic_visual_contract_v4"
 DEFAULT_PRESENTATION_MODE = "wheelchair_seated"
 STANDING_PRESENTATION_MODE = "standing_presenter"
 ACTOR_FRONT_PASSTHROUGH_MODEL = "actor-front-passthrough-v1"
@@ -157,7 +157,7 @@ def build_scene_plate_generation_contract(
     mode = normalize_presentation_mode(presentation_mode)
     if mode != DEFAULT_PRESENTATION_MODE:
         fields["presentation_mode"] = mode
-        fields["standing_prompt_contract_version"] = "standing-presenter-v3"
+        fields["standing_prompt_contract_version"] = "standing-presenter-v4"
         fields["master_source_mode"] = ACTOR_FRONT_PASSTHROUGH_MODE
         fields["master_source_role"] = "actor_front"
     if not fields["version"] or not fields["model"] or not fields[

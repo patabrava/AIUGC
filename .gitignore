@@ -77,3 +77,6 @@ output/semantic-ugc-live-proof/
 
 # Worktrees
 .worktrees/
+
+# Nested agent worktrees are separate repositories
+.claude/worktrees/

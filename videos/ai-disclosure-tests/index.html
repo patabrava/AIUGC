@@ -1,0 +1,67 @@
+<!doctype html>
+<html
+  lang="en"
+  data-resolution="portrait"
+  data-composition-variables='[
+    {"id":"testNumber","type":"number","label":"Test number","default":1},
+    {"id":"theme","type":"string","label":"Theme","default":"cobalt"}
+  ]'
+>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <title>AI Disclosure Test</title>
+    <style>
+      html,
+      body {
+        width: 1080px;
+        height: 1920px;
+        margin: 0;
+        overflow: hidden;
+        background: #071a52;
+      }
+
+      #root {
+        position: relative;
+        width: 1080px;
+        height: 1920px;
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-no-timeline
+      data-start="0"
+      data-duration="8"
+      data-fps="30"
+      data-width="1080"
+      data-height="1920"
+    >
+      <div
+        id="ai-disclosure-test-mount"
+        class="clip"
+        data-composition-id="ai-disclosure-test-instance"
+        data-composition-src="compositions/index.html"
+        data-start="0"
+        data-duration="8"
+        data-track-index="1"
+        data-variable-values='{"testNumber":1,"theme":"cobalt"}'
+      ></div>
+    </div>
+
+    <script>
+      const variables = window.__hyperframes?.getVariables?.() || {};
+      const testNumber = Number(variables.testNumber) === 2 ? 2 : 1;
+      const theme = String(variables.theme || "").toLowerCase() === "vermilion"
+        ? "vermilion"
+        : "cobalt";
+      document.getElementById("ai-disclosure-test-mount").setAttribute(
+        "data-variable-values",
+        JSON.stringify({ testNumber, theme }),
+      );
+    </script>
+  </body>
+</html>

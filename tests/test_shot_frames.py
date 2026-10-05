@@ -109,9 +109,16 @@ def test_generate_shot_frame_candidates_uses_two_actor_refs_then_location_and_st
     assert "Image 1" in client.image_calls[0]["prompt"]
     assert "Image 2" in client.image_calls[0]["prompt"]
     assert "Image 3" in client.image_calls[0]["prompt"]
-    assert "blazer" in client.image_calls[0]["prompt"].lower()
+    assert "do not copy clothing" in client.image_calls[0]["prompt"].lower()
     assert "supplied identity references" in client.text_calls[0]["prompt"]
     assert "sole and authoritative visual identity evidence" in client.image_calls[0]["prompt"]
+    assert "one coherent in-camera photograph" in client.image_calls[0]["prompt"]
+    assert "discard their original room, exposure, white balance" in client.image_calls[0]["prompt"]
+    assert "location reference's actual light direction" in client.image_calls[0]["prompt"]
+    assert "occlusion and contact shadows" in client.image_calls[0]["prompt"]
+    assert "no segmentation halo, cutout edge, green-screen separation" in client.image_calls[0]["prompt"]
+    assert "upright portrait orientation with gravity correct" in client.image_calls[0]["prompt"]
+    assert "never rotate the camera view or subject 90 degrees" in client.image_calls[0]["prompt"]
     assert [candidate.image_bytes for candidate in result.candidates] == [b"candidate-1", b"candidate-2"]
 
 

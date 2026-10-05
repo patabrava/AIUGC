@@ -2479,6 +2479,40 @@ def _maybe_reconcile_batches_ready_for_qa(*, active_post_count: int) -> None:
     _reconcile_batches_ready_for_qa()
 
 
+RUNWAY_EVALUATION_IDLE_SWEEP_SECONDS = 60
+_last_runway_evaluation_sweep_at = 0.0
+_runway_evaluation_sweep_idle = True
+
+
+def _poll_runway_evaluations() -> None:
+    """Advance experimental Runway evaluations in isolation from Veo posts.
+
+    Runs while an API key is configured, even with the feature flag off, so
+    already-accepted paid tasks still finish. Failures never affect the Veo loop.
+    """
+    global _last_runway_evaluation_sweep_at, _runway_evaluation_sweep_idle
+    settings = get_settings()
+    if not any(str(getattr(settings, name, "") or "").strip() for name in ("runway_api_key", "modelark_api_key")):
+        return
+    interval = (
+        RUNWAY_EVALUATION_IDLE_SWEEP_SECONDS
+        if _runway_evaluation_sweep_idle
+        else max(int(settings.runway_poll_interval_seconds), 5)
+    )
+    now = time.time()
+    if now - _last_runway_evaluation_sweep_at < interval:
+        return
+    _last_runway_evaluation_sweep_at = now
+    try:
+        from app.features.runway_evaluations.service import poll_seedance_evaluations
+
+        result = poll_seedance_evaluations(worker_id=_poller_identity())
+        _runway_evaluation_sweep_idle = not result.get("claimed")
+    except Exception as exc:  # noqa: BLE001
+        _runway_evaluation_sweep_idle = True
+        logger.exception("runway_evaluation_sweep_failed", error_type=type(exc).__name__)
+
+
 if __name__ == "__main__":
     settings = get_settings()
 
@@ -2507,4 +2541,5 @@ if __name__ == "__main__":
             logger.exception("video_poller_unexpected_error", error=str(e))
             poll_succeeded = False
 
+        _poll_runway_evaluations()
         time.sleep(POLL_INTERVAL_SECONDS if poll_succeeded else POLL_ERROR_BACKOFF_SECONDS)

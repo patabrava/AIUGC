@@ -327,6 +327,37 @@ def freeze_provider_quota(*, provider: str, reason: str) -> Dict[str, Any]:
     return result
 
 
+RUNWAY_SEEDANCE_QUOTA_PROVIDER = "runway_seedance_2_5"
+
+
+def get_seedance_budget_snapshot(*, provider: str, daily_unit_limit: int) -> Dict[str, Any]:
+    """Each host owns its units: Runway credits or ModelArk USD microdollars."""
+    if provider not in {"runway_seedance_2_5", "modelark_seedance_2_5"}:
+        raise ValueError("Unsupported Seedance quota provider")
+    return _rpc("get_video_provider_quota_snapshot", {
+        "p_provider": provider, "p_daily_limit": int(daily_unit_limit),
+        "p_minute_limit": 0, "p_soft_buffer": 0,
+    })
+
+
+def get_runway_credit_snapshot(*, daily_credit_limit: int) -> Dict[str, Any]:
+    """Read the Runway credit ledger. Units are Runway credits, not Veo generations.
+
+    Runway reservations, consumption, and release run inside the evaluation RPCs
+    (see 20261001000000_runway_video_evaluations.sql), so Veo limits, freezes,
+    and the Veo bypass flags never apply to this provider.
+    """
+    return _rpc(
+        "get_video_provider_quota_snapshot",
+        {
+            "p_provider": RUNWAY_SEEDANCE_QUOTA_PROVIDER,
+            "p_daily_limit": int(daily_credit_limit),
+            "p_minute_limit": 0,
+            "p_soft_buffer": 0,
+        },
+    )
+
+
 def _is_model_specific_quota_error(reason: str) -> bool:
     normalized = str(reason or "").lower()
     return "per_base_model" in normalized or "base model:" in normalized

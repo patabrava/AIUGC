@@ -53,6 +53,7 @@ from app.features.semantic_videos.handlers import (
     batch_router as semantic_video_batches_router,
     router as semantic_videos_router,
 )
+from app.features.runway_evaluations.handlers import router as runway_evaluations_router, seedance_router as seedance_evaluations_router
 
 try:
     from app.features.publish.tiktok import router as tiktok_router
@@ -616,6 +617,8 @@ app.include_router(batches_router)
 app.include_router(topics_router)
 app.include_router(posts_router)
 app.include_router(videos_router)
+app.include_router(runway_evaluations_router)
+app.include_router(seedance_evaluations_router)
 app.include_router(qa_router)
 app.include_router(publish_router)
 app.include_router(blog_router)

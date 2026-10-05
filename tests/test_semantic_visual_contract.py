@@ -1493,7 +1493,7 @@ def test_standing_visual_contract_is_fenced_from_legacy_wheelchair_contract():
         actor_reference_fingerprint="b" * 64,
     )
 
-    assert standing["version"] == "semantic_visual_contract_v3"
+    assert standing["version"] == "semantic_visual_contract_v4"
     assert standing["presentation_mode"] == "standing_presenter"
     assert standing["master_source_mode"] == "actor_front_passthrough"
     assert standing["actor_front_sha256"] == "c" * 64
@@ -1502,7 +1502,7 @@ def test_standing_visual_contract_is_fenced_from_legacy_wheelchair_contract():
     assert validate_visual_contract(standing) == standing
     assert standing["contract_hash"] != seated["contract_hash"]
     assert standing_generation["contract_hash"] != seated_generation["contract_hash"]
-    assert standing_generation["standing_prompt_contract_version"] == "standing-presenter-v3"
+    assert standing_generation["standing_prompt_contract_version"] == "standing-presenter-v4"
     assert standing_generation["model"] == "actor-front-passthrough-v1"
 
 
@@ -1733,6 +1733,41 @@ def test_scene_plate_prompts_never_hardcode_the_actor_gender(presentation_mode):
 @pytest.mark.parametrize(
     "presentation_mode", ["wheelchair_seated", "standing_presenter"]
 )
+def test_scene_plate_prompts_require_one_photographically_integrated_exposure(
+    presentation_mode,
+):
+    from app.features.shot_frames.wheelchair_scene_plate import (
+        build_canonical_scene_plate_prompt,
+        build_derived_scene_plate_prompt,
+    )
+
+    prompts = (
+        build_canonical_scene_plate_prompt(
+            scene="the exact supplied accessible kitchen",
+            wardrobe="cream crewneck knit sweater",
+            presentation_mode=presentation_mode,
+        ),
+        build_derived_scene_plate_prompt(
+            scene="the exact supplied accessible kitchen",
+            wardrobe="cream crewneck knit sweater",
+            presentation_mode=presentation_mode,
+        ),
+    )
+
+    for prompt in prompts:
+        assert "one coherent in-camera photograph" in prompt
+        assert "discard their original room, exposure, white balance" in prompt
+        assert "location reference's actual light direction" in prompt
+        assert "occlusion and contact shadows" in prompt
+        assert "one consistent smartphone lens" in prompt
+        assert "no segmentation halo, cutout edge, green-screen separation" in prompt
+        assert "upright portrait orientation with gravity correct" in prompt
+        assert "never rotate the camera view or subject 90 degrees" in prompt
+
+
+@pytest.mark.parametrize(
+    "presentation_mode", ["wheelchair_seated", "standing_presenter"]
+)
 def test_veo_take_prompt_never_hardcodes_the_actor_gender_or_voice_gender(
     presentation_mode,
 ):
@@ -1823,3 +1858,7 @@ def test_reference_driven_prompt_copy_across_features_names_no_gender():
     }
 
     assert not leaks, f"reference-driven copy still asserts a gender: {leaks}"
+
+    shot_frame_composition = reference_driven_copy["shot_frame_composition"].lower()
+    assert "cream knit sweater" not in shot_frame_composition
+    assert "beige blazer" not in shot_frame_composition

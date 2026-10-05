@@ -73,6 +73,9 @@ class CreateBatchRequest(BaseModel):
         }:
             normalized = dict(data)
             normalized["target_length_tier"] = None
+            if data.get("creation_mode") == "manual_semantic_ugc":
+                # Compatibility metadata only; each approved script owns its duration.
+                normalized["target_duration_seconds"] = 8
             return normalized
         return data
     

@@ -59,6 +59,8 @@ def test_one_eight_second_full_model_audio_plan_costs_exactly_3_20(tmp_path):
     assert plan["estimated_cost_usd"] == "3.20"
     assert plan["approved_beat"] == APPROVED_BEAT
     assert 14 <= plan["approved_beat_word_count"] <= 18
+    assert "wardrobe" in plan["request_contract"]["prompt"]
+    assert "cream knit sweater" not in plan["request_contract"]["prompt"]
 
 
 @pytest.mark.parametrize(

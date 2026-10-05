@@ -1190,7 +1190,7 @@ def test_awaiting_paid_visual_can_be_regenerated_from_live_panel():
     assert "never discards paid take evidence" in html
 
 
-def test_initial_scene_render_disables_every_sibling_for_one_active_job():
+def test_initial_scene_render_keeps_idle_siblings_enabled_for_one_active_job():
     env = Environment(loader=FileSystemLoader("templates"))
     posts = []
     for index in range(2):
@@ -1228,7 +1228,8 @@ def test_initial_scene_render_disables_every_sibling_for_one_active_job():
         for fragment in html.split('data-action="generate-candidates"')[1:]
     ]
     assert len(buttons) == 2
-    assert all(" disabled" in button for button in buttons)
+    assert " disabled" in buttons[0]
+    assert " disabled" not in buttons[1]
     assert all('data-scene-image-domain-disabled="false"' in button for button in buttons)
     assert 'data-scene-image-busy="true"' in html
     assert 'data-scene-image-active-post-id="post-1"' in html
@@ -1773,7 +1774,7 @@ def test_scene_image_terminal_cleanup_and_workflow_gate_preserve_ui_contracts():
     assert waiting_clear < polling_clear < visual_clear < feedback_clear < gate_release
 
     assert "const sceneImageButtonDomainDisabled = new WeakMap();" in source
-    assert "button.disabled = domainDisabled || workflowBusy;" in gate
+    assert "button.disabled = domainDisabled || cardBusy;" in gate
     assert "candidateRoot.dataset.waitingForCandidates === 'true'" in gate
     assert "candidateRoot.dataset.candidateGenerationStatus === 'generating'" in gate
     assert "if (status === 'ready')" in lifecycle

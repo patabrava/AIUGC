@@ -38,7 +38,7 @@ DEFAULT_SEED = 240712
 MANIFEST_NAME = "manifest.json"
 PROMPT_TEMPLATE = (
     "Treat the supplied first frame as the sole visual truth. Keep the same adult actor's "
-    "identity and hair, cream knit sweater, room, posture, camera position, and framing exactly "
+    "identity, visible features, wardrobe, room, posture, camera position, and framing exactly "
     "as shown. Continue as restrained, natural phone-camera AI UGC with a subtle conversational "
     "expression, subtle blinking, minimal head movement, and no polished commercial performance. "
     "Use a warm adult German voice matching the person visible in the first frame, speaking native "

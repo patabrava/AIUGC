@@ -15,6 +15,26 @@ from app.core.image_generation_prompt import (
 )
 
 
+PHOTOGRAPHIC_INTEGRATION_CONTRACT = (
+    "Reconstruct the output as one coherent in-camera photograph, not as a portrait pasted, "
+    "masked, composited, or layered over a background. Identity references define the actor's "
+    "identity only; discard their original room, exposure, white balance, depth of field, edge "
+    "treatment, and lighting. Relight the actor, hair, wardrobe, hands, and wheelchair from the "
+    "location reference's actual light direction, softness, color temperature, exposure, and "
+    "ambient color spill. Preserve physically plausible occlusion and contact shadows at hair and "
+    "skin boundaries, under the chin, within garment folds, around the body and wheelchair, and "
+    "where the subject overlaps or approaches room surfaces. Apply one consistent smartphone lens, "
+    "perspective, depth of field, focus falloff, white balance, dynamic range, local contrast, "
+    "sensor noise, compression texture, and edge acuity across subject and room. Fine hair must "
+    "interact naturally with the background without a matte outline. The actor must feel physically "
+    "present in the room, with no segmentation halo, cutout edge, green-screen separation, floating "
+    "body, studio key light, relit-portrait look, mismatched sharpness, or mismatched color grade. "
+    "Keep the finished 9:16 image in upright portrait orientation with gravity correct: ceiling above, "
+    "floor below, and room verticals upright. Apply only the explicitly requested slight phone roll; "
+    "never rotate the camera view or subject 90 degrees and never produce sideways content."
+)
+
+
 
 @dataclass(frozen=True)
 class ShotFrameReference:
@@ -88,12 +108,13 @@ def _build_prompt_writer_brief(
 def _build_composition_prompt(*, prompt_writer_output: str) -> str:
     return (
         "Create one new vertical image using all three supplied images with these fixed roles. "
-        "Image 1 is the PRIMARY ACTOR IDENTITY reference and the cream knit sweater wardrobe reference. "
-        "Image 2 is the SAME ACTOR from a three-quarter view and is identity evidence only; ignore and do not copy "
-        "the beige blazer visible in Image 2. Image 3 is the ACTOR-FREE LOCATION reference; preserve its room geometry, "
-        "warm off-white wall, beige curtain, pale oak floor, narrow light-oak side table, white mug, terracotta rubber "
-        "plant, muted palette, and natural daylight. Place exactly one person—the same adult person from Images 1 and 2—"
-        "inside the room from Image 3. Do not average the actor into a new face, change the apparent age, change the "
+        "Image 1 and Image 2 show the SAME ACTOR from different views and are identity evidence only; do not copy "
+        "clothing, accessories, posture, or background details from either identity reference. Image 3 is the "
+        "ACTOR-FREE LOCATION reference; preserve its visible room geometry, objects, palette, and lighting. "
+        "Reconstruct one unified photograph containing exactly one person—the same adult person from Images 1 and 2—"
+        "physically present inside the room from Image 3. "
+        f"{PHOTOGRAPHIC_INTEGRATION_CONTRACT} "
+        "Do not average the actor into a new face, change the apparent age, change the "
         "hair, add another person, invent a wheelchair, redesign the room, add signage, add subtitles, or add readable text. "
         "Images 1 and 2 are the sole and authoritative visual identity evidence. Resolve every visible identity attribute "
         "from those images only; do not infer identity from the actor name or any written physical description. "

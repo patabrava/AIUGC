@@ -1,0 +1,268 @@
+{
+  "category": "kinetic-type",
+  "duration_s": 8,
+  "fps": 30,
+  "canvas": {
+    "w": 1080,
+    "h": 1920,
+    "aspect": "9:16"
+  },
+  "style": "Deterministic synthetic test signal with oversized uppercase typography, hard geometric wipes, visible timing marks, and no photographic texture. The shared timeline feels like a platform compliance instrument: immediate identifier hook, forceful AI-GENERATED declaration, DISCLOSURE TEST confirmation, then a stable end-state suitable for platform verification. TEST 1 uses a dark cobalt/cyan technical-signal treatment; TEST 2 uses a vermilion/cream verification-stamp treatment.",
+  "palette": [
+    "#071A52",
+    "#18E4FF",
+    "#F24C32",
+    "#FFF1D6",
+    "#111111"
+  ],
+  "font": "Space Grotesk",
+  "beats": [
+    0,
+    12,
+    24,
+    42,
+    72,
+    96,
+    126,
+    162,
+    198,
+    228
+  ],
+  "export": "mp4",
+  "asset_needs": [],
+  "block": "caption-kinetic-slam",
+  "customize": {
+    "reuse_directive": "Install caption-kinetic-slam with `npx hyperframes add caption-kinetic-slam`, then edit its words, emphasis classes, Space Grotesk typography, palette, and timing in place. Retain the block's paused seek-safe GSAP timeline and slam physics. Hand-author only the thin technical-signal or verification-stamp accent layer because no caption block supplies those product-specific motifs.",
+    "variant_strategy": "Build one 240-frame composition and render it twice. A required render-time variant key selects the identifier, color tokens, motif renderer, and output filename. The same DOM structure, hero-frame geometry, scene boundaries, typography, and GSAP frame schedule drive both variants, guaranteeing identical 8.000-second duration and comparable disclosure tests.",
+    "shared_variables": {
+      "duration_frames": 240,
+      "headline": "AI-GENERATED",
+      "purpose": "DISCLOSURE TEST",
+      "silent": true,
+      "safe_area_px": {
+        "top": 180,
+        "right": 90,
+        "bottom": 260,
+        "left": 90
+      },
+      "type": {
+        "identifier_px": 92,
+        "hero_px": 174,
+        "purpose_px": 138,
+        "proof_headline_px": 112,
+        "proof_support_px": 76,
+        "weight": 700,
+        "line_height": 0.92,
+        "tracking_em": -0.055
+      },
+      "hero_frame_layout": {
+        "stage": "full-bleed 1080x1920 field with all required copy inside the defined platform-safe area",
+        "identifier": "top-left at x=90, y=180; horizontal label with a 12px accent rule beneath",
+        "headline": "centered at x=540, y=850; AI and GENERATED stacked; maximum width 900px; optical center preserved across variants",
+        "purpose": "centered at x=540, y=1125; DISCLOSURE and TEST stacked; maximum width 900px",
+        "motif": "background and edge chrome only; it never crosses letterforms or reduces contrast",
+        "proof_frame": "identifier at y=480, AI-GENERATED centered at y=825, DISCLOSURE TEST centered at y=1045, progress rule x=90..990 at y=1370"
+      },
+      "determinism": "Use frame-derived GSAP positions only; no random values, wall-clock time, external fetches, audio, particle simulation, or end fade. Frame 240 is the exclusive end boundary and frame 228 through 239 is a static proof hold."
+    },
+    "variants": [
+      {
+        "key": "test-1",
+        "test_id": "TEST 1",
+        "output": "ai-disclosure-test-1.mp4",
+        "background": "#071A52",
+        "foreground": "#EAFDFF",
+        "accent": "#18E4FF",
+        "secondary": "#2459FF",
+        "motif": "technical signal bars, scanning line, and square registration ticks",
+        "motif_build": "Draw four 4px cyan corner ticks at frames 0-12; sweep one 3px cyan scanline top-to-bottom at frames 96-126; flash three right-edge signal bars at frames 126-138; return to static ticks for the proof frame.",
+        "field_states": {
+          "base": "cobalt background with near-white type and cyan emphasis",
+          "interrupt": "cyan background with cobalt type and near-white support copy",
+          "proof": "cobalt background, near-white type, cyan rule"
+        }
+      },
+      {
+        "key": "test-2",
+        "test_id": "TEST 2",
+        "output": "ai-disclosure-test-2.mp4",
+        "background": "#FFF1D6",
+        "foreground": "#111111",
+        "accent": "#F24C32",
+        "secondary": "#D72F19",
+        "motif": "vermilion verification stamp, radial impact ring, and hard ink-like rule lines",
+        "motif_build": "Draw two 4px vermilion rule lines at frames 0-12; scale a 520px vermilion ring from 0.72 to 1.00 at frames 96-126; land a 6-degree verification-stamp rectangle at frames 126-138; straighten it to 0 degrees for the proof frame.",
+        "field_states": {
+          "base": "cream background with ink type and vermilion emphasis",
+          "interrupt": "vermilion background with cream type and ink support copy",
+          "proof": "cream background, ink type, vermilion rule"
+        }
+      }
+    ],
+    "motion_timeline": [
+      {
+        "frames": "0-12",
+        "seconds": "0.000-0.400",
+        "action": "Apply caption-kinetic-slam entry to {{test_id}}: y -300px to 0px, scale 0.76 to 1.00, autoAlpha 0 to 1, power4.out. Draw the active variant's opening edge motif in the same interval."
+      },
+      {
+        "frames": "12-18",
+        "seconds": "0.400-0.600",
+        "action": "Land with one deterministic shake: x 0,-9,9,0 across four equal keyframe segments; keep identifier fully opaque."
+      },
+      {
+        "frames": "18-24",
+        "seconds": "0.600-0.800",
+        "action": "Hold identifier still through frame 21, then slide it 90px left and clip-wipe the scene out by frame 24 with power2.in."
+      },
+      {
+        "frames": "24-42",
+        "seconds": "0.800-1.400",
+        "action": "Bar-wipe AI left-to-right from scaleX 0 to 1; reveal AI in place with no opacity crossfade, power4.out."
+      },
+      {
+        "frames": "42-60",
+        "seconds": "1.400-2.000",
+        "action": "Slam GENERATED from y -300px to 0px and scale 0.84 to 1.00 using power4.out; AI remains fixed and readable."
+      },
+      {
+        "frames": "60-72",
+        "seconds": "2.000-2.400",
+        "action": "Underline-sweep the complete AI-GENERATED lockup from scaleX 0 to 1 with transform origin left center, power2.out."
+      },
+      {
+        "frames": "72-84",
+        "seconds": "2.400-2.800",
+        "action": "Scale-pulse AI only from 1.00 to 1.08 and back to 1.00 with sine.inOut while GENERATED remains locked."
+      },
+      {
+        "frames": "84-96",
+        "seconds": "2.800-3.200",
+        "action": "Hold through frame 90, then bar-wipe the full lockup and field out to the right by frame 96 with power2.in."
+      },
+      {
+        "frames": "96-114",
+        "seconds": "3.200-3.800",
+        "action": "Switch instantly to the variant interrupt field at frame 96. Word-reveal DISCLOSURE upward from y 120px with autoAlpha 0 to 1, power4.out; run the variant scanline or stamp-ring build behind it."
+      },
+      {
+        "frames": "114-126",
+        "seconds": "3.800-4.200",
+        "action": "Scale-punch TEST from 0.60 to 1.00 with back.out(2.2), centered below DISCLOSURE."
+      },
+      {
+        "frames": "126-138",
+        "seconds": "4.200-4.600",
+        "action": "Complete the variant signature: flash the three cyan signal bars for TEST 1 or land the vermilion stamp rectangle for TEST 2. Apply one 1.00 to 1.06 to 1.00 scale-pulse to DISCLOSURE."
+      },
+      {
+        "frames": "138-162",
+        "seconds": "4.600-5.400",
+        "action": "Hold DISCLOSURE TEST fully static and readable; only the non-overlapping motif may breathe from scale 1.00 to 1.015 and back once."
+      },
+      {
+        "frames": "162-174",
+        "seconds": "5.400-5.800",
+        "action": "Color-shift TEST from the support color to the variant accent and back, sine.inOut; all geometry stays fixed."
+      },
+      {
+        "frames": "174-186",
+        "seconds": "5.800-6.200",
+        "action": "Slide DISCLOSURE 120px left and TEST 120px right while clipping both to autoAlpha 0 by frame 186, power2.in."
+      },
+      {
+        "frames": "186-198",
+        "seconds": "6.200-6.600",
+        "action": "Restore the variant proof field at frame 186. Assemble {{test_id}}, AI-GENERATED, and DISCLOSURE TEST with three 4-frame bottom slides in sequence; each ends at its proof-frame coordinate with power4.out."
+      },
+      {
+        "frames": "198-228",
+        "seconds": "6.600-7.600",
+        "action": "Hold all proof copy. Draw the accent progress rule from x=90 to x=990 using scaleX 0 to 1, none/linear, reaching 100% exactly at frame 228."
+      },
+      {
+        "frames": "228-240",
+        "seconds": "7.600-8.000",
+        "action": "Freeze the complete proof frame with all three labels, progress rule, and static motif fully visible. No fade, motion, or audio."
+      }
+    ]
+  },
+  "content": {
+    "shared_copy": {
+      "test_id": "{{test_id}}",
+      "headline": "AI-GENERATED",
+      "purpose": "DISCLOSURE TEST"
+    },
+    "scenes": [
+      {
+        "id": "hook-identifier",
+        "start": 0,
+        "end": 0.8,
+        "text": "{{test_id}}",
+        "emphasis_words": [
+          "{{test_id}}"
+        ],
+        "emotion": "immediate, diagnostic, unmistakably synthetic",
+        "motion": "Frames 0-12 slam/scale-punch the identifier and draw the opening motif; frames 12-18 deterministic shake; frames 18-21 hold; frames 21-24 slide/clip-wipe out.",
+        "beats": [
+          0,
+          12,
+          24
+        ]
+      },
+      {
+        "id": "build-ai-declaration",
+        "start": 0.8,
+        "end": 3.2,
+        "text": "AI-GENERATED",
+        "emphasis_words": [
+          "AI",
+          "GENERATED"
+        ],
+        "emotion": "forceful, explicit, machine-authored",
+        "motion": "Frames 24-42 bar-wipe AI; frames 42-60 slam GENERATED; frames 60-72 underline-sweep; frames 72-84 scale-pulse AI; frames 84-90 hold; frames 90-96 bar-wipe out.",
+        "beats": [
+          24,
+          42,
+          72,
+          96
+        ]
+      },
+      {
+        "id": "punch-purpose",
+        "start": 3.2,
+        "end": 6.2,
+        "text": "DISCLOSURE TEST",
+        "emphasis_words": [
+          "DISCLOSURE"
+        ],
+        "emotion": "verified, procedural, unambiguous",
+        "motion": "At frame 96 switch the field; frames 96-114 word-reveal DISCLOSURE; frames 114-126 scale-punch TEST; frames 126-138 complete the signal/stamp motif and pulse DISCLOSURE; frames 138-162 hold; frames 162-174 color-shift TEST; frames 174-186 opposing slide-out.",
+        "beats": [
+          96,
+          126,
+          162,
+          186
+        ]
+      },
+      {
+        "id": "resolve-proof-frame",
+        "start": 6.2,
+        "end": 8,
+        "text": "{{test_id}} / AI-GENERATED / DISCLOSURE TEST",
+        "emphasis_words": [
+          "AI-GENERATED",
+          "DISCLOSURE"
+        ],
+        "emotion": "stable, auditable, final",
+        "motion": "Frames 186-198 assemble the three required labels in staggered 4-frame slide_bottom entries; frames 198-228 draw a linear progress rule; frames 228-240 freeze the fully readable proof frame with no fade to black.",
+        "beats": [
+          186,
+          198,
+          228,
+          240
+        ]
+      }
+    ]
+  }
+}

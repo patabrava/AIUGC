@@ -18,7 +18,10 @@ from PIL import Image, ImageChops, ImageStat, UnidentifiedImageError
 from app.adapters.llm_client import get_llm_client
 from app.core.errors import ThirdPartyError, ValidationError
 from app.core.image_generation_prompt import write_raw_camera_image_prompt
-from app.features.shot_frames.service import ShotFrameReference
+from app.features.shot_frames.service import (
+    PHOTOGRAPHIC_INTEGRATION_CONTRACT,
+    ShotFrameReference,
+)
 
 
 WHEELCHAIR_VISUAL_CONTRACT = (
@@ -347,8 +350,10 @@ def build_canonical_scene_plate_prompt(
         return (
             "Create one photorealistic vertical start image using all three supplied images with fixed roles. "
             "Image 1 is the PRIMARY ACTOR IDENTITY reference. Image 2 is the SAME ACTOR from another view and "
-            "is supporting identity evidence only. Image 3 is the ACTOR-FREE LOCATION reference. Place exactly "
-            "the same adult person from Images 1 and 2 inside Image 3. "
+            "is supporting identity evidence only. Image 3 is the ACTOR-FREE LOCATION reference. Reconstruct one "
+            "unified photograph with exactly the same adult person from Images 1 and 2 physically present inside "
+            "Image 3. "
+            f"{PHOTOGRAPHIC_INTEGRATION_CONTRACT} "
             f"{IDENTITY_SOURCE_CONTRACT} "
             "Preserve that person's exact facial geometry, hairline, "
             "hair, apparent age, body proportions, and ordinary camera-file skin texture with visible "
@@ -373,8 +378,10 @@ def build_canonical_scene_plate_prompt(
     return (
         "Create one photorealistic vertical start image using all three supplied images with fixed roles. "
         "Image 1 is the PRIMARY ACTOR IDENTITY reference. Image 2 is the SAME ACTOR from another view and "
-        "is supporting identity evidence only. Image 3 is the ACTOR-FREE LOCATION reference. Place exactly "
-        "the same adult person from Images 1 and 2 inside Image 3. "
+        "is supporting identity evidence only. Image 3 is the ACTOR-FREE LOCATION reference. Reconstruct one "
+        "unified photograph with exactly the same adult person from Images 1 and 2 physically present inside "
+        "Image 3. "
+        f"{PHOTOGRAPHIC_INTEGRATION_CONTRACT} "
         f"{IDENTITY_SOURCE_CONTRACT} "
         "Preserve that person's exact facial geometry, "
         "hairline, hair, apparent age, body proportions, and ordinary camera-file skin texture with visible "
@@ -411,6 +418,7 @@ def build_derived_scene_plate_prompt(
             "scale, and upright posture. Image 2 is the unchanged front identity reference and exists only to prevent "
             "facial drift. Image 3 is the ACTOR-FREE LOCATION reference. Preserve the exact person from Images 1 and 2, "
             "their standing pose, camera height, camera distance, and face size from Image 1. "
+            f"{PHOTOGRAPHIC_INTEGRATION_CONTRACT} "
             f"{IDENTITY_SOURCE_CONTRACT} {EYEWEAR_SOURCE_CONTRACT} Image 1's "
             "clothing is not authoritative: replace every visible upper-body garment with the requested outfit. "
             f"{STANDING_PRESENTATION_CONTRACT} {STANDING_FRAMING_CONTRACT} "
@@ -435,6 +443,7 @@ def build_derived_scene_plate_prompt(
         "facial drift. Image 3 is the ACTOR-FREE LOCATION reference. Preserve the exact person from Images 1 "
         "and 2 and preserve the exact manual wheelchair, seated pose, camera height, camera distance, and "
         "face size from Image 1. "
+        f"{PHOTOGRAPHIC_INTEGRATION_CONTRACT} "
         f"{IDENTITY_SOURCE_CONTRACT} {EYEWEAR_SOURCE_CONTRACT} "
         "Image 1's clothing is not authoritative: replace every visible upper-body "
         "garment with the requested outfit below, making its garment type and color visibly unmistakable. "

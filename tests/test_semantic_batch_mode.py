@@ -144,7 +144,7 @@ def test_manual_semantic_batch_uses_manual_drafts_and_numeric_duration():
     assert payload.creation_mode == "manual_semantic_ugc"
     assert payload.manual_post_count == 2
     assert payload.post_type_counts is None
-    assert payload.target_duration_seconds == 50
+    assert payload.target_duration_seconds == 8
     assert payload.target_length_tier is None
 
 
@@ -152,9 +152,6 @@ def test_manual_semantic_batch_uses_manual_drafts_and_numeric_duration():
     "payload",
     [
         {"target_duration_seconds": 50},
-        {"manual_post_count": 2},
-        {"manual_post_count": 2, "target_duration_seconds": 7},
-        {"manual_post_count": 2, "target_duration_seconds": 61},
     ],
 )
 def test_manual_semantic_batch_requires_manual_count_and_valid_dynamic_duration(payload):
@@ -586,7 +583,7 @@ async def test_manual_semantic_form_creates_drafts_and_skips_discovery(monkeypat
     response = await batch_handlers.create_batch_endpoint(FakeRequest())
 
     assert captured["target_length_tier"] is None
-    assert captured["target_duration_seconds"] == 50
+    assert captured["target_duration_seconds"] == 8
     assert captured["creation_mode"] == "manual_semantic_ugc"
     assert draft_calls == [("batch-manual-semantic", 2, 8)]
     assert discovery_calls == []
@@ -1010,7 +1007,7 @@ def test_production_deploy_pins_resumable_flash_scene_plate_traffic_contract():
 
     assert '"SEMANTIC_SCENE_PLATE_MODEL": "gemini-3.1-flash-image"' in workflow
     assert '"SEMANTIC_SCENE_PLATE_BUNDLE_ENABLED": "false"' in workflow
-    assert '"SEMANTIC_SCENE_PLATE_CONTRACT_VERSION": "flash-identity-independent-qa-global-v12"' in workflow
+    assert '"SEMANTIC_SCENE_PLATE_CONTRACT_VERSION": "flash-photographic-integration-v13"' in workflow
     assert '"SEMANTIC_SCENE_IDENTITY_GATE_LOCATION": "global"' in workflow
     assert '"VERTEX_GEMINI_IMAGE_LOCATION": "global"' in workflow
     assert '"SEMANTIC_SCENE_IMAGE_WORKER_CONCURRENCY": "2"' in workflow
@@ -1048,3 +1045,9 @@ def test_identity_qa_resume_migration_reuses_durable_paid_takes_without_new_subm
     assert "insert into public.semantic_video_takes" not in sql
     assert "reserved_submission_count" not in sql
     assert "to service_role" in sql
+
+
+@pytest.mark.parametrize("seconds", [None, 7, 61, 300])
+def test_manual_duration_input_is_optional_compatibility_metadata(seconds):
+    request = CreateBatchRequest(brand="Test", creation_mode="manual_semantic_ugc", manual_post_count=2, target_duration_seconds=seconds)
+    assert request.target_duration_seconds == 8

@@ -1,0 +1,12 @@
+services:
+  semantic-video-worker:
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: /var/run/google/application_default_credentials.json
+    volumes:
+      - ${GOOGLE_APPLICATION_CREDENTIALS_HOST:?Set GOOGLE_APPLICATION_CREDENTIALS_HOST to the local ADC JSON}:/var/run/google/application_default_credentials.json:ro
+
+  semantic-scene-image-worker:
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: /var/run/google/application_default_credentials.json
+    volumes:
+      - ${GOOGLE_APPLICATION_CREDENTIALS_HOST:?Set GOOGLE_APPLICATION_CREDENTIALS_HOST to the local ADC JSON}:/var/run/google/application_default_credentials.json:ro

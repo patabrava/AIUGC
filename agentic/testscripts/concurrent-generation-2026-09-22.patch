@@ -1,0 +1,625 @@
+--- a/app/adapters/vertex_ai_client.py
++++ b/app/adapters/vertex_ai_client.py
+@@ -9,7 +9,13 @@
+ 
+ import os
+ import base64
++import math
++import random
++import threading
++import time
+ from copy import deepcopy
++from datetime import datetime, timezone
++from email.utils import parsedate_to_datetime
+ from typing import Optional, Dict, Any
+ 
+ import httpx
+@@ -27,6 +33,49 @@
+ 
+ _DEFAULT_VERTEX_MODEL = "veo-3.1-generate-001"
+ _DEFAULT_VERTEX_FAST_MODEL = "veo-3.1-fast-generate-001"
++
++
++class _VeoSubmitGate:
++    """Pace process-local submissions; accepted video operations run in parallel."""
++
++    def __init__(self):
++        self.lock = threading.Lock()
++        self.not_before = 0.0
++        self.last_rejection = None
++
++    def wait(self):
++        delay = self.not_before - time.monotonic()
++        if delay > _VEO_THROTTLE_MAX_WAIT_SECONDS and self.last_rejection is not None:
++            # Preserve a long server cooldown without parking a worker/lease
++            # indefinitely or making another paid HTTP request prematurely.
++            self.last_rejection.raise_for_status()
++        if delay > 0:
++            time.sleep(delay)
++
++
++_VEO_SUBMIT_GATE = _VeoSubmitGate()
++_VEO_SUBMIT_INTERVAL_SECONDS = 2.0
++_VEO_THROTTLE_MAX_ATTEMPTS = 4
++_VEO_THROTTLE_MAX_WAIT_SECONDS = 60.0
++
++
++def _veo_throttle_delay(response: httpx.Response, attempt: int) -> float:
++    """Honor provider Retry-After, with jitter for simultaneous clients."""
++    delay = min(30.0, 2.0 ** (attempt + 1)) + random.uniform(0.0, 1.0)
++    raw = str(response.headers.get("Retry-After") or "").strip()
++    try:
++        requested = float(raw)
++    except ValueError:
++        try:
++            parsed = parsedate_to_datetime(raw)
++            if parsed.tzinfo is None:
++                parsed = parsed.replace(tzinfo=timezone.utc)
++            requested = (parsed - datetime.now(timezone.utc)).total_seconds()
++        except (TypeError, ValueError, OverflowError):
++            requested = 0.0
++    if math.isfinite(requested):
++        delay = max(delay, requested)
++    return delay
+ 
+ 
+ class VertexSettings(BaseSettings):
+@@ -296,7 +345,34 @@
+             request_payload=logged_payload,
+         )
+ 
+-        response = self._http_client.post(url, headers=headers, json=payload)
++        # Retry only an explicit capacity rejection: transport failures and 5xx
++        # responses can hide an accepted paid operation and must remain unknown.
++        # The lock also shares pacing/cooldown across every local caller. Polling
++        # uses a separate path and is never held behind this submission gate.
++        with _VEO_SUBMIT_GATE.lock:
++            waited = 0.0
++            for attempt in range(_VEO_THROTTLE_MAX_ATTEMPTS):
++                _VEO_SUBMIT_GATE.wait()
++                if attempt:
++                    headers = self._build_headers(include_json=True)
++                response = self._http_client.post(url, headers=headers, json=payload)
++                _VEO_SUBMIT_GATE.not_before = time.monotonic() + _VEO_SUBMIT_INTERVAL_SECONDS
++                if response.status_code != 429:
++                    _VEO_SUBMIT_GATE.last_rejection = None
++                    break
++                delay = _veo_throttle_delay(response, attempt)
++                _VEO_SUBMIT_GATE.last_rejection = response
++                _VEO_SUBMIT_GATE.not_before = time.monotonic() + delay
++                if attempt == _VEO_THROTTLE_MAX_ATTEMPTS - 1 or waited + delay > _VEO_THROTTLE_MAX_WAIT_SECONDS:
++                    break
++                waited += delay
++                logger.warning(
++                    "vertex_ai_submit_throttled",
++                    correlation_id=correlation_id,
++                    attempt=attempt + 1,
++                    delay_seconds=delay,
++                    model=model_name,
++                )
+         logger.info(
+             "vertex_ai_rest_response",
+             correlation_id=correlation_id,
+--- a/static/js/batches/semantic_video.js
++++ b/static/js/batches/semantic_video.js
+@@ -126,8 +126,10 @@
+             if (!button) return;
+             rememberSceneImageButton(button);
+             const domainDisabled = sceneImageButtonDomainDisabled.get(button) === true;
+-            button.disabled = domainDisabled || workflowBusy;
+-            button.dataset.sceneImageWorkflowBlocked = String(workflowBusy && !domainDisabled);
++            const cardBusy = candidateRoot.dataset.waitingForCandidates === 'true'
++                || candidateRoot.dataset.candidateGenerationStatus === 'generating';
++            button.disabled = domainDisabled || cardBusy;
++            button.dataset.sceneImageWorkflowBlocked = String(cardBusy && !domainDisabled);
+         });
+         return workflowBusy;
+     }
+@@ -516,7 +518,8 @@
+         if (label) {
+             label.textContent = status === 'stalled'
+                 ? 'Generation needs attention'
+-                : (labels[phase] || (status === 'ready' ? labels.ready : 'Preparing scene plates'));
++                : (progress.stage === 'scene_image_queued' ? 'Waiting for an image worker'
++                    : (labels[phase] || (status === 'ready' ? labels.ready : 'Preparing scene plates')));
+         }
+         if (detail) detail.textContent = progress.status_message || '';
+         if (spinner) spinner.classList.toggle('hidden', !isGenerating);
+--- a/templates/batches/detail/_semantic_video.html
++++ b/templates/batches/detail/_semantic_video.html
+@@ -341,7 +341,7 @@
+ 
+             {% if semantic_step == 'scene' %}
+             <div class="mt-5 flex flex-wrap gap-2">
+-                <button type="button" class="brand-button-primary rounded-xl px-4 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40" data-action="generate-candidates" data-scene-image-domain-disabled="{{ 'true' if scene_image_domain_disabled else 'false' }}" {% if scene_image_domain_disabled or scene_image_gate.busy %}disabled{% endif %}>{% if item.scene_image_job_is_active %}Generating script image…{% elif item.candidates or item.stage in ['awaiting_paid_approval', 'completed', 'failed'] %}Regenerate script image{% else %}Generate script image{% endif %}</button>
++                <button type="button" class="brand-button-primary rounded-xl px-4 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40" data-action="generate-candidates" data-scene-image-domain-disabled="{{ 'true' if scene_image_domain_disabled else 'false' }}" {% if scene_image_domain_disabled or item.scene_image_job_is_active %}disabled{% endif %}>{% if item.scene_image_job_is_active %}Generating script image…{% elif item.candidates or item.stage in ['awaiting_paid_approval', 'completed', 'failed'] %}Regenerate script image{% else %}Generate script image{% endif %}</button>
+                 <button type="button" class="rounded-xl border border-[#006AAB] px-4 py-2 text-sm font-bold text-[#006AAB] disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-master" aria-describedby="identity-approval-help-{{ item.post_id }}" {% if semantic_locked or item.stage != 'awaiting_reference_approval' or not item.has_passed_candidate %}disabled{% endif %}>Approve image and confirm identity</button>
+             </div>
+             <section
+--- a/workers/semantic_video_worker.py
++++ b/workers/semantic_video_worker.py
+@@ -1748,7 +1748,12 @@
+         try:
+             takes = _latest_attempts(self.repo.list_attempts(claimed_id))
+             if stage == "generating":
+-                if self.generation_gate is None:
++                # Accepted operations can finish while another slot submits a
++                # paid wave or waits for provider capacity. Only new submissions
++                # need the shared gate; polling never buys another take.
++                if self.generation_gate is None or any(
++                    take.get("submission_state") == "submitted" for take in takes
++                ):
+                     return self._run_generation_wave(run, takes, lease_token)
+                 if not self.generation_gate.acquire(blocking=False):
+                     return WorkerTickResult(
+--- a/app/features/semantic_videos/handlers.py
++++ b/app/features/semantic_videos/handlers.py
+@@ -2507,14 +2507,16 @@
+     error_message = str(error.get("message") or "").strip()
+     if is_stalled:
+         message = error_message or (
+-            "The image operation exceeded its eight-minute deadline. Retry this script."
++            ("The image exceeded its queue waiting limit. Retry this script."
++             if job_status == "queued" and not job.get("started_at")
++             else "The image operation exceeded its eight-minute deadline. Retry this script.")
+             if deadline_expired
+             else "Image generation failed safely. Retry this script."
+         )
+     elif lease_expired:
+         message = "The image worker is reclaiming this operation safely."
+     elif job_status == "queued":
+-        message = "Queued for fast script-image generation."
++        message = "Queued for script-image generation. Waiting for an available image worker."
+     else:
+         message = "Generating one script image and checking actor identity."
+ 
+@@ -2550,7 +2552,7 @@
+         progress_percent=20 if job_status == "processing" else (5 if not is_stalled else 20),
+         elapsed_seconds=elapsed,
+         estimated_remaining_seconds=(
+-            None if is_stalled else max(0, _TYPICAL_SCENE_PLATE_SECONDS - elapsed)
++            None if is_stalled or job_status == "queued" else max(0, _TYPICAL_SCENE_PLATE_SECONDS - elapsed)
+         ),
+         status_message=message,
+         failed_take_indexes=[],
+--- /dev/null
++++ b/supabase/migrations/20260922000100_concurrent_scene_image_admission.sql
+@@ -0,0 +1,438 @@
++-- Admit independent script images from the same batch. Keep two global claims,
++-- per-post idempotency, paid-attempt budgets and existing worker lease fences.
++-- Queue waiting has a one-hour bound; the eight-minute execution budget starts
++-- on first claim and is never reset by a crash/reclaim.
++BEGIN;
++SET LOCAL lock_timeout = '5s';
++DROP INDEX IF EXISTS public.semantic_scene_image_jobs_one_active_batch;
++
++CREATE OR REPLACE FUNCTION public.enqueue_semantic_scene_image(
++  p_post_id UUID,
++  p_expected_revision INTEGER,
++  p_requested_by TEXT,
++  p_correlation_id TEXT
++)
++RETURNS SETOF public.semantic_scene_image_jobs
++LANGUAGE plpgsql
++SECURITY DEFINER
++SET search_path = ''
++AS $$
++DECLARE
++  target_post public.posts%ROWTYPE;
++  active_job public.semantic_scene_image_jobs%ROWTYPE;
++  active_run public.semantic_video_runs%ROWTYPE;
++  inserted_job public.semantic_scene_image_jobs%ROWTYPE;
++  terminalized_job public.semantic_scene_image_jobs%ROWTYPE;
++  terminalized_run public.semantic_video_runs%ROWTYPE;
++  terminalized_run_previous_revision INTEGER;
++  terminalized_run_revision INTEGER;
++  persisted_script TEXT;
++  persisted_review_status TEXT;
++  persisted_expected_run_id UUID;
++  persisted_expected_revision INTEGER;
++BEGIN
++  IF p_post_id IS NULL
++     OR NULLIF(pg_catalog.btrim(p_requested_by), '') IS NULL
++     OR NULLIF(pg_catalog.btrim(p_correlation_id), '') IS NULL
++     OR (p_expected_revision IS NOT NULL AND p_expected_revision < 0) THEN
++    RAISE EXCEPTION USING
++      ERRCODE = '22023',
++      MESSAGE = 'semantic scene image enqueue contract is invalid';
++  END IF;
++
++  SELECT post.* INTO target_post
++  FROM public.posts AS post
++  WHERE post.id = p_post_id;
++  IF NOT FOUND THEN
++    RAISE EXCEPTION USING
++      ERRCODE = 'P0002',
++      MESSAGE = 'semantic scene image post does not exist';
++  END IF;
++
++  persisted_review_status := pg_catalog.lower(pg_catalog.btrim(
++    COALESCE(target_post.seed_data ->> 'script_review_status', '')
++  ));
++  persisted_script := pg_catalog.btrim(COALESCE(
++    target_post.seed_data ->> 'script',
++    target_post.seed_data ->> 'dialog_script',
++    target_post.topic_rotation,
++    ''
++  ));
++  IF persisted_review_status IS DISTINCT FROM 'approved'
++     OR NULLIF(persisted_script, '') IS NULL THEN
++    RAISE EXCEPTION USING
++      ERRCODE = '22023',
++      MESSAGE = 'semantic scene image requires one approved non-empty script';
++  END IF;
++
++  -- Keep the short batch transaction lock for compatibility with in-flight old callers.
++  -- Admission is idempotent per post; the claim RPC owns global render capacity.
++  PERFORM pg_catalog.pg_advisory_xact_lock(
++    pg_catalog.hashtextextended(
++      'semantic-scene-image-batch:' || target_post.batch_id::TEXT,
++      0
++    )
++  );
++
++  UPDATE public.semantic_scene_image_jobs AS job
++  SET status = 'failed',
++      error = pg_catalog.jsonb_build_object(
++        'code', CASE
++          WHEN job.status = 'processing'
++               AND job.lease_expires_at <= pg_catalog.clock_timestamp()
++               AND job.deadline_at <= pg_catalog.clock_timestamp() + INTERVAL '4 minutes'
++            THEN 'insufficient_execution_budget'
++          WHEN job.deadline_at <= pg_catalog.clock_timestamp()
++            THEN 'operation_deadline_exceeded'
++          ELSE 'lease_attempts_exhausted'
++        END,
++        'message', 'Image generation stopped safely. Retry this script.'
++      ),
++      worker_id = NULL,
++      lease_token = NULL,
++      lease_expires_at = NULL,
++      finished_at = pg_catalog.clock_timestamp(),
++      updated_at = pg_catalog.clock_timestamp()
++  WHERE job.post_id = p_post_id
++    AND job.status IN ('queued', 'processing')
++    AND (
++      job.deadline_at <= pg_catalog.clock_timestamp()
++      OR (
++        job.status = 'processing'
++        AND job.lease_expires_at <= pg_catalog.clock_timestamp()
++        AND job.deadline_at <= pg_catalog.clock_timestamp() + INTERVAL '4 minutes'
++      )
++      OR (
++        job.status = 'processing'
++        AND job.lease_expires_at <= pg_catalog.clock_timestamp()
++        AND job.attempt_count >= job.max_attempts
++      )
++    )
++  RETURNING job.* INTO terminalized_job;
++
++  SELECT job.* INTO active_job
++  FROM public.semantic_scene_image_jobs AS job
++  WHERE job.post_id = p_post_id
++    AND job.status IN ('queued', 'processing')
++  ORDER BY job.created_at DESC
++  LIMIT 1;
++  IF FOUND THEN
++    RETURN NEXT active_job;
++    RETURN;
++  END IF;
++
++  -- The global claim sweep may have terminalized this job immediately before
++  -- enqueue acquired the batch lock. With no active job for this post, recover that
++  -- exact failed reservation here as well as one terminalized above. Scoping
++  -- this fallback to the requested post prevents an old failure from clearing
++  -- a different script's reservation.
++  IF terminalized_job.id IS NULL THEN
++    SELECT job.* INTO terminalized_job
++    FROM public.semantic_scene_image_jobs AS job
++    WHERE job.post_id = p_post_id
++      AND job.batch_id = target_post.batch_id
++      AND job.status = 'failed'
++      AND job.run_id IS NOT NULL
++      AND job.worker_id IS NULL
++      AND job.lease_token IS NULL
++      AND job.error ->> 'code' IN (
++        'insufficient_execution_budget',
++        'operation_deadline_exceeded',
++        'lease_attempts_exhausted'
++      )
++      AND EXISTS (
++        SELECT 1
++        FROM public.semantic_video_runs AS run
++        WHERE run.id = job.run_id
++          AND run.post_id = job.post_id
++          AND run.stage = 'awaiting_reference_approval'
++          AND run.candidate_reservation_token IS NOT NULL
++          AND pg_catalog.jsonb_array_length(
++            CASE
++              WHEN pg_catalog.jsonb_typeof(run.master_snapshot -> 'candidates') = 'array'
++                THEN run.master_snapshot -> 'candidates'
++              ELSE '[]'::JSONB
++            END
++          ) = 0
++      )
++    ORDER BY job.finished_at DESC NULLS LAST, job.updated_at DESC, job.id DESC
++    LIMIT 1
++    FOR UPDATE;
++  END IF;
++
++  -- A terminalized lease cannot retain ownership of an empty run. Release its
++  -- candidate token and revision-fence the displaced worker in this same batch
++  -- admission transaction. A fresh retry's first claim cannot run attempt-two
++  -- cleanup for the prior job's reservation.
++  IF terminalized_job.run_id IS NOT NULL THEN
++    SELECT run.* INTO terminalized_run
++    FROM public.semantic_video_runs AS run
++    WHERE run.id = terminalized_job.run_id
++      AND run.post_id = terminalized_job.post_id
++      AND run.stage = 'awaiting_reference_approval'
++      AND pg_catalog.jsonb_array_length(
++        CASE
++          WHEN pg_catalog.jsonb_typeof(run.master_snapshot -> 'candidates') = 'array'
++            THEN run.master_snapshot -> 'candidates'
++          ELSE '[]'::JSONB
++        END
++      ) = 0
++    FOR UPDATE;
++
++    IF FOUND AND terminalized_run.candidate_reservation_token IS NOT NULL THEN
++      terminalized_run_previous_revision := terminalized_run.revision;
++      UPDATE public.semantic_video_runs AS run
++      SET candidate_reservation_owner = NULL,
++          candidate_reservation_token = NULL,
++          candidate_reservation_expires_at = NULL,
++          revision = run.revision + 1,
++          updated_at = pg_catalog.clock_timestamp()
++      WHERE run.id = terminalized_run.id
++        AND run.revision = terminalized_run.revision
++      RETURNING run.revision INTO terminalized_run_revision;
++    END IF;
++  END IF;
++
++  SELECT run.* INTO active_run
++  FROM public.semantic_video_runs AS run
++  WHERE run.post_id = p_post_id
++    AND run.stage NOT IN ('completed', 'failed')
++  ORDER BY run.created_at DESC, run.id DESC
++  LIMIT 1;
++  IF FOUND THEN
++    IF p_expected_revision IS NULL
++       OR (
++         active_run.revision IS DISTINCT FROM p_expected_revision
++         AND NOT (
++           terminalized_job.post_id IS NOT DISTINCT FROM p_post_id
++           AND terminalized_job.run_id IS NOT DISTINCT FROM active_run.id
++           AND terminalized_run_previous_revision IS NOT DISTINCT FROM p_expected_revision
++           AND terminalized_run_revision IS NOT DISTINCT FROM active_run.revision
++         )
++       ) THEN
++      RAISE EXCEPTION USING
++        ERRCODE = '40001',
++        MESSAGE = 'semantic_video_conflict: scene image revision is stale';
++    END IF;
++    persisted_expected_run_id := active_run.id;
++    persisted_expected_revision := active_run.revision;
++  ELSE
++    -- A fresh progress projection historically reported revision zero. Accept
++    -- that sentinel as no run while new clients send NULL explicitly.
++    IF p_expected_revision IS NOT NULL AND p_expected_revision <> 0 THEN
++      RAISE EXCEPTION USING
++        ERRCODE = '40001',
++        MESSAGE = 'semantic_video_conflict: scene image run does not exist at the expected revision';
++    END IF;
++    persisted_expected_run_id := NULL;
++    persisted_expected_revision := NULL;
++  END IF;
++
++  INSERT INTO public.semantic_scene_image_jobs (
++    post_id,
++    batch_id,
++    expected_run_id,
++    expected_revision,
++    requested_by,
++    correlation_id,
++    deadline_at
++  ) VALUES (
++    p_post_id,
++    target_post.batch_id,
++    persisted_expected_run_id,
++    persisted_expected_revision,
++    p_requested_by,
++    p_correlation_id,
++    pg_catalog.clock_timestamp() + INTERVAL '1 hour'
++  ) RETURNING * INTO inserted_job;
++  RETURN NEXT inserted_job;
++END;
++$$;
++
++CREATE OR REPLACE FUNCTION public.claim_semantic_scene_image(
++  p_worker_id TEXT,
++  p_lease_seconds INTEGER
++)
++RETURNS SETOF public.semantic_scene_image_jobs
++LANGUAGE plpgsql
++SECURITY DEFINER
++SET search_path = ''
++AS $$
++DECLARE
++  active_claim_count INTEGER;
++  claimed_job public.semantic_scene_image_jobs%ROWTYPE;
++  reclaimed_run_revision INTEGER;
++BEGIN
++  IF NULLIF(pg_catalog.btrim(p_worker_id), '') IS NULL
++     OR p_lease_seconds IS NULL
++     OR p_lease_seconds < 30
++     OR p_lease_seconds > 900 THEN
++    RAISE EXCEPTION 'semantic scene image worker lease is invalid';
++  END IF;
++
++  -- Migration-first cutover fence: the deployed v1 worker used this stable
++  -- prefix and called the now-retired direct reservation RPC. Returning no
++  -- work quiesces it without crashing or terminally failing queued jobs while
++  -- v2 containers are rolling out.
++  IF p_worker_id LIKE 'semantic-scene-image-v1-%' THEN
++    RETURN;
++  END IF;
++
++  PERFORM pg_catalog.pg_advisory_xact_lock(
++    pg_catalog.hashtextextended('semantic-scene-image-global-claims', 0)
++  );
++
++  UPDATE public.semantic_scene_image_jobs AS job
++  SET status = 'failed',
++      error = pg_catalog.jsonb_build_object(
++        'code', CASE
++          WHEN job.deadline_at <= pg_catalog.clock_timestamp() + INTERVAL '4 minutes'
++               AND (
++                 job.status = 'queued'
++                 OR job.lease_expires_at <= pg_catalog.clock_timestamp()
++               )
++            THEN 'insufficient_execution_budget'
++          WHEN job.deadline_at <= pg_catalog.clock_timestamp()
++            THEN 'operation_deadline_exceeded'
++          ELSE 'lease_attempts_exhausted'
++        END,
++        'message', 'Image generation stopped safely. Retry this script.'
++      ),
++      worker_id = NULL,
++      lease_token = NULL,
++      lease_expires_at = NULL,
++      finished_at = pg_catalog.clock_timestamp(),
++      updated_at = pg_catalog.clock_timestamp()
++  WHERE job.status IN ('queued', 'processing')
++    AND (
++      (
++        job.status = 'queued'
++        AND job.started_at IS NOT NULL
++        AND job.deadline_at <= pg_catalog.clock_timestamp() + INTERVAL '4 minutes'
++      )
++      OR job.deadline_at <= pg_catalog.clock_timestamp()
++      OR (
++        job.status = 'processing'
++        AND job.lease_expires_at <= pg_catalog.clock_timestamp()
++        AND job.deadline_at <= pg_catalog.clock_timestamp() + INTERVAL '4 minutes'
++      )
++      OR (
++        job.status = 'processing'
++        AND job.lease_expires_at <= pg_catalog.clock_timestamp()
++        AND job.attempt_count >= job.max_attempts
++      )
++    );
++
++  SELECT pg_catalog.count(*) INTO active_claim_count
++  FROM public.semantic_scene_image_jobs AS job
++  WHERE job.status = 'processing'
++    AND job.lease_expires_at > pg_catalog.clock_timestamp()
++    AND job.deadline_at > pg_catalog.clock_timestamp();
++  IF active_claim_count >= 2 THEN
++    RETURN;
++  END IF;
++
++  WITH claimable AS (
++    SELECT job.id
++    FROM public.semantic_scene_image_jobs AS job
++    WHERE (
++        job.status = 'queued'
++        OR (
++          job.status = 'processing'
++          AND job.lease_expires_at <= pg_catalog.clock_timestamp()
++        )
++      )
++      AND job.attempt_count < job.max_attempts
++      AND job.deadline_at > pg_catalog.clock_timestamp()
++      AND (job.started_at IS NULL
++           OR job.deadline_at > pg_catalog.clock_timestamp() + INTERVAL '4 minutes')
++    ORDER BY job.created_at, job.id
++    LIMIT 1
++    FOR UPDATE SKIP LOCKED
++  )
++  UPDATE public.semantic_scene_image_jobs AS job
++  SET status = 'processing',
++      attempt_count = job.attempt_count + 1,
++      worker_id = p_worker_id,
++      lease_token = gen_random_uuid(),
++      deadline_at = CASE WHEN job.started_at IS NULL
++        THEN pg_catalog.clock_timestamp() + INTERVAL '8 minutes'
++        ELSE job.deadline_at END,
++      lease_expires_at = LEAST(
++        CASE WHEN job.started_at IS NULL
++          THEN pg_catalog.clock_timestamp() + INTERVAL '8 minutes'
++          ELSE job.deadline_at END,
++        pg_catalog.clock_timestamp() + pg_catalog.make_interval(secs => p_lease_seconds)
++      ),
++      heartbeat_at = pg_catalog.clock_timestamp(),
++      started_at = COALESCE(job.started_at, pg_catalog.clock_timestamp()),
++      updated_at = pg_catalog.clock_timestamp()
++  FROM claimable
++  WHERE job.id = claimable.id
++  RETURNING job.* INTO claimed_job;
++
++  IF FOUND THEN
++    -- A reclaimed job is the sole current owner of its linked run. Clear the
++    -- prior worker's candidate token in this same claim transaction so a
++    -- process crash can recover after one lease, not after the legacy
++    -- 30-minute reservation. The displaced worker remains fenced by both its
++    -- job token and its candidate token.
++    IF claimed_job.attempt_count > 1 AND claimed_job.run_id IS NOT NULL THEN
++      UPDATE public.semantic_video_runs AS run
++      SET candidate_reservation_owner = NULL,
++          candidate_reservation_token = NULL,
++          candidate_reservation_expires_at = NULL,
++          revision = run.revision + 1,
++          updated_at = pg_catalog.clock_timestamp()
++      WHERE run.id = claimed_job.run_id
++        AND run.post_id = claimed_job.post_id
++        AND run.stage = 'awaiting_reference_approval'
++        AND run.candidate_reservation_token IS NOT NULL
++        AND pg_catalog.jsonb_array_length(
++          CASE
++            WHEN pg_catalog.jsonb_typeof(run.master_snapshot -> 'candidates') = 'array'
++              THEN run.master_snapshot -> 'candidates'
++            ELSE '[]'::JSONB
++          END
++        ) = 0;
++
++      -- The displaced handler may have released its candidate token in the
++      -- narrow interval after lease expiry and before this claim. Always read
++      -- the linked run's current revision, even when no token remained for the
++      -- claim itself to clear.
++      SELECT run.revision INTO reclaimed_run_revision
++      FROM public.semantic_video_runs AS run
++      WHERE run.id = claimed_job.run_id
++        AND run.post_id = claimed_job.post_id
++        AND run.stage = 'awaiting_reference_approval'
++        AND pg_catalog.jsonb_array_length(
++          CASE
++            WHEN pg_catalog.jsonb_typeof(run.master_snapshot -> 'candidates') = 'array'
++              THEN run.master_snapshot -> 'candidates'
++            ELSE '[]'::JSONB
++          END
++        ) = 0
++      FOR UPDATE;
++
++      IF FOUND THEN
++        UPDATE public.semantic_scene_image_jobs AS job
++        SET expected_revision = reclaimed_run_revision,
++            updated_at = pg_catalog.clock_timestamp()
++        WHERE job.id = claimed_job.id
++        RETURNING job.* INTO claimed_job;
++      END IF;
++    END IF;
++    RETURN NEXT claimed_job;
++  END IF;
++END;
++$$;
++
++REVOKE ALL ON FUNCTION public.enqueue_semantic_scene_image(UUID, INTEGER, TEXT, TEXT)
++  FROM PUBLIC, anon, authenticated;
++GRANT EXECUTE ON FUNCTION public.enqueue_semantic_scene_image(UUID, INTEGER, TEXT, TEXT)
++  TO service_role;
++-- Only the existing v3 wrapper may expose claim to workers.
++REVOKE ALL ON FUNCTION public.claim_semantic_scene_image(TEXT, INTEGER)
++  FROM PUBLIC, anon, authenticated, service_role;
++NOTIFY pgrst, 'reload schema';
++COMMIT;

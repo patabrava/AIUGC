@@ -39,7 +39,7 @@
                 </h2>
             </div>
             <div class="rounded-full bg-white px-3 py-1.5 text-sm font-semibold text-[#1C2740] ring-1 ring-[#006AAB]/15">
-                Requested delivery: {{ semantic.requested_duration_seconds }}s
+                {% if batch is defined and batch.creation_mode == 'manual_semantic_ugc' %}Duration follows each script{% else %}Requested delivery: {{ semantic.requested_duration_seconds }}s{% endif %}
             </div>
         </div>
         {% if semantic_step == 'plan' and batch_plan.count > 1 %}
@@ -114,7 +114,7 @@
                     {% endif %}
                     <h3 class="mt-2 font-bold text-[#1C2740]">{{ item.topic_title }}</h3>
                     <p class="mt-1 text-sm text-[#1C2740]/65">
-                        Requested {{ item.requested_duration_seconds or semantic.requested_duration_seconds }}s ·
+                        {% if item.adaptive_duration %}Estimated {{ item.estimated_speech_seconds }}s ·{% elif batch is not defined or batch.creation_mode != 'manual_semantic_ugc' %}Requested {{ item.requested_duration_seconds or semantic.requested_duration_seconds }}s ·{% endif %}
                         Delivery {% if item.delivery_duration_seconds is not none %}{{ item.delivery_duration_seconds }}s{% else %}pending{% endif %}
                     </p>
                 </div>
@@ -341,7 +341,7 @@
 
             {% if semantic_step == 'scene' %}
             <div class="mt-5 flex flex-wrap gap-2">
-                <button type="button" class="brand-button-primary rounded-xl px-4 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40" data-action="generate-candidates" data-scene-image-domain-disabled="{{ 'true' if scene_image_domain_disabled else 'false' }}" {% if scene_image_domain_disabled or scene_image_gate.busy %}disabled{% endif %}>{% if item.scene_image_job_is_active %}Generating script image…{% elif item.candidates or item.stage in ['awaiting_paid_approval', 'completed', 'failed'] %}Regenerate script image{% else %}Generate script image{% endif %}</button>
+                <button type="button" class="brand-button-primary rounded-xl px-4 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40" data-action="generate-candidates" data-scene-image-domain-disabled="{{ 'true' if scene_image_domain_disabled else 'false' }}" {% if scene_image_domain_disabled or item.scene_image_job_is_active %}disabled{% endif %}>{% if item.scene_image_job_is_active %}Generating script image…{% elif item.candidates or item.stage in ['awaiting_paid_approval', 'completed', 'failed'] %}Regenerate script image{% else %}Generate script image{% endif %}</button>
                 <button type="button" class="rounded-xl border border-[#006AAB] px-4 py-2 text-sm font-bold text-[#006AAB] disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-master" aria-describedby="identity-approval-help-{{ item.post_id }}" {% if semantic_locked or item.stage != 'awaiting_reference_approval' or not item.has_passed_candidate %}disabled{% endif %}>Approve image and confirm identity</button>
             </div>
             <section

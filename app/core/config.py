@@ -301,7 +301,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("SEMANTIC_SCENE_PLATE_IMAGE_SIZE"),
     )
     semantic_scene_plate_contract_version: str = Field(
-        default="flash-identity-independent-qa-global-v12",
+        default="flash-photographic-integration-v13",
         validation_alias=AliasChoices("SEMANTIC_SCENE_PLATE_CONTRACT_VERSION"),
         min_length=1,
     )
@@ -328,6 +328,125 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("SEMANTIC_VIDEO_IDENTITY_MIN_CONFIDENCE"),
         ge=0.0,
         le=1.0,
+    )
+
+    # New evaluations use BytePlus directly; historical rows keep their persisted host.
+    seedance_evaluation_provider: Literal["modelark", "runway"] = "modelark"
+    modelark_api_key: str = Field("", repr=False, validation_alias=AliasChoices("MODELARK_API_KEY", "ARK_API_KEY"))
+    modelark_api_base_url: str = "https://ark.ap-southeast.bytepluses.com/api/v3"
+    modelark_api_timeout_seconds: float = Field(30, gt=0, le=120)
+    modelark_evaluation_enabled: bool = False
+    modelark_evaluation_operator_emails: str = ""
+    modelark_evaluation_allowed_resolutions: str = "480p,720p"
+    modelark_usd_per_million_tokens: Decimal = Field(Decimal("10.70"), gt=0)
+    # Quota/admission units are integer USD microdollars, not Runway credits.
+    modelark_evaluation_max_credits_per_run: int = Field(2_000_000, ge=1)
+    modelark_evaluation_daily_credit_limit: int = Field(10_000_000, ge=1)
+    modelark_evaluation_max_active: int = Field(1, ge=1, le=5)
+    modelark_evaluation_min_submit_interval_seconds: int = Field(30, ge=0)
+    modelark_poll_interval_seconds: int = Field(10, ge=5)
+    modelark_poll_max_age_seconds: int = Field(7200, ge=300)
+    modelark_output_allowed_hosts: str = "ark-content-generation-ap-southeast-1.tos-ap-southeast-1.volces.com"
+    modelark_output_max_bytes: int = Field(150 * 1024 * 1024, ge=1024)
+    modelark_output_download_timeout_seconds: float = Field(180, gt=0)
+    # Trusted asset registration is external; pin its exact original upload checksum.
+    modelark_reference_asset_uri: str = ""
+    modelark_reference_asset_sha256: str = ""
+
+    # Runway Seedance 2.5 evaluation provider (experimental; off in every environment by default).
+    # Pricing defaults are Runway list prices that must be confirmed in the account before enabling.
+    runway_evaluation_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("RUNWAY_EVALUATION_ENABLED"),
+        description="Allow explicitly selected Runway Seedance 2.5 evaluation submissions",
+    )
+    runway_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("RUNWAY_API_KEY", "RUNWAYML_API_SECRET"),
+        description="Server-only Runway Developer API key",
+    )
+    runway_api_base_url: str = Field(
+        default="https://api.dev.runwayml.com",
+        validation_alias=AliasChoices("RUNWAY_API_BASE_URL"),
+    )
+    runway_api_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        le=120,
+        validation_alias=AliasChoices("RUNWAY_API_TIMEOUT_SECONDS"),
+    )
+    runway_output_allowed_hosts: str = Field(
+        default="",
+        validation_alias=AliasChoices("RUNWAY_OUTPUT_ALLOWED_HOSTS"),
+        description="Comma-separated exact hosts or *.suffix patterns allowed for task output downloads",
+    )
+    runway_output_max_bytes: int = Field(
+        default=150 * 1024 * 1024,
+        ge=1024 * 1024,
+        validation_alias=AliasChoices("RUNWAY_OUTPUT_MAX_BYTES"),
+    )
+    runway_output_download_timeout_seconds: float = Field(
+        default=180.0,
+        gt=0,
+        le=900,
+        validation_alias=AliasChoices("RUNWAY_OUTPUT_DOWNLOAD_TIMEOUT_SECONDS"),
+    )
+    runway_evaluation_operator_emails: str = Field(
+        default="",
+        validation_alias=AliasChoices("RUNWAY_EVALUATION_OPERATOR_EMAILS"),
+        description="Comma-separated operator emails allowed to start paid Runway evaluations",
+    )
+    runway_evaluation_allowed_resolutions: str = Field(
+        default="720p,1080p",
+        validation_alias=AliasChoices("RUNWAY_EVALUATION_ALLOWED_RESOLUTIONS"),
+        description="Seedance 2.5 resolutions allowed for evaluations; 480p is a screening tier only",
+    )
+    runway_seedance_credits_per_second_480p: int = Field(
+        default=20, ge=1, validation_alias=AliasChoices("RUNWAY_SEEDANCE_CREDITS_PER_SECOND_480P")
+    )
+    runway_seedance_credits_per_second_720p: int = Field(
+        default=30, ge=1, validation_alias=AliasChoices("RUNWAY_SEEDANCE_CREDITS_PER_SECOND_720P")
+    )
+    runway_seedance_credits_per_second_1080p: int = Field(
+        default=68, ge=1, validation_alias=AliasChoices("RUNWAY_SEEDANCE_CREDITS_PER_SECOND_1080P")
+    )
+    runway_seedance_minimum_credits: int = Field(
+        default=80, ge=0, validation_alias=AliasChoices("RUNWAY_SEEDANCE_MINIMUM_CREDITS")
+    )
+    runway_usd_per_credit: Decimal = Field(
+        default=Decimal("0.01"), gt=0, validation_alias=AliasChoices("RUNWAY_USD_PER_CREDIT")
+    )
+    runway_evaluation_max_credits_per_run: int = Field(
+        default=600,
+        ge=1,
+        validation_alias=AliasChoices("RUNWAY_EVALUATION_MAX_CREDITS_PER_RUN"),
+    )
+    runway_evaluation_daily_credit_limit: int = Field(
+        default=2000,
+        ge=1,
+        validation_alias=AliasChoices("RUNWAY_EVALUATION_DAILY_CREDIT_LIMIT"),
+        description="Runway credits reservable per Pacific day in the shared provider quota ledger",
+    )
+    runway_evaluation_max_active: int = Field(
+        default=1,
+        ge=1,
+        le=5,
+        validation_alias=AliasChoices("RUNWAY_EVALUATION_MAX_ACTIVE"),
+    )
+    runway_evaluation_min_submit_interval_seconds: int = Field(
+        default=30,
+        ge=0,
+        validation_alias=AliasChoices("RUNWAY_EVALUATION_MIN_SUBMIT_INTERVAL_SECONDS"),
+    )
+    runway_poll_interval_seconds: int = Field(
+        default=10,
+        ge=5,
+        validation_alias=AliasChoices("RUNWAY_POLL_INTERVAL_SECONDS"),
+    )
+    runway_poll_max_age_seconds: int = Field(
+        default=7200,
+        ge=600,
+        validation_alias=AliasChoices("RUNWAY_POLL_MAX_AGE_SECONDS"),
     )
 
     # Caption reliability
@@ -431,7 +550,23 @@ class Settings(BaseSettings):
         if not math.isfinite(value):
             raise ValueError("Semantic identity confidence must be finite.")
         return value
-    
+
+    @field_validator("runway_evaluation_allowed_resolutions")
+    @classmethod
+    def validate_runway_resolutions(cls, value: str) -> str:
+        entries = [entry.strip().lower() for entry in str(value or "").split(",") if entry.strip()]
+        unsupported = sorted(set(entries) - {"480p", "720p", "1080p"})
+        if unsupported:
+            raise ValueError(f"Unsupported Runway Seedance 2.5 resolutions: {', '.join(unsupported)}")
+        return ",".join(entries)
+
+    @field_validator("runway_api_base_url")
+    @classmethod
+    def validate_runway_base_url(cls, value: str) -> str:
+        if not str(value or "").startswith("https://"):
+            raise ValueError("Runway API base URL must start with https://")
+        return str(value).rstrip("/")
+
     @property
     def is_production(self) -> bool:
         return self.environment == "production"

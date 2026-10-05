@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/Users/patabrava/Documents/AI/github/Camilo/AIUGC/.codex/hooks/bridgecode-turn.mjs\"",
+            "timeout": 10,
+            "additionalContextLimit": 1000
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "^compact$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/Users/patabrava/Documents/AI/github/Camilo/AIUGC/.codex/hooks/bridgecode-turn.mjs\"",
+            "timeout": 10,
+            "additionalContextLimit": 9000
+          }
+        ]
+      }
+    ]
+  }
+}

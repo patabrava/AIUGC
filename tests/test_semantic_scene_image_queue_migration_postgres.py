@@ -989,6 +989,70 @@ def test_scene_image_queue_is_batch_serial_lease_fenced_and_stress_proven() -> N
             "WHERE status IN ('queued', 'processing')"
         ) == "0"
 
+        # Current admission: siblings queue together; only two jobs may own
+        # processing leases globally. Exercise the real transaction boundary.
+        _psql(DATABASE, (ROOT / "supabase/migrations/20260814093000_fence_semantic_scene_image_worker_v3.sql").read_text())
+        _psql(DATABASE, (ROOT / "supabase/migrations/20260922000100_concurrent_scene_image_admission.sql").read_text())
+        def claim_v3(worker):
+            value = _psql(DATABASE, "SET ROLE service_role; "
+                "SELECT id::TEXT || '|' || lease_token::TEXT "
+                f"FROM public.claim_semantic_scene_image_v3('{worker}', 60);").stdout.strip()
+            return value.split('|') if value else []
+
+        for run_number, script_count in enumerate(batch_sizes):
+            _, concurrent_posts = _insert_batch_with_posts(f"concurrent-{run_number}", script_count)
+            enqueues = [_psql_process("SET ROLE service_role; "
+                "SELECT id FROM public.enqueue_semantic_scene_image("
+                f"'{post}', NULL, 'operator@example.com', 'concurrent');")
+                for post in concurrent_posts]
+            job_ids = []
+            for process in enqueues:
+                out, err = process.communicate(timeout=30)
+                assert process.returncode == 0, err
+                job_ids.append(out.strip())
+            assert len(set(job_ids)) == script_count
+            assert _enqueue(concurrent_posts[0]) == job_ids[0]
+            assert _scalar("SELECT count(*)::TEXT FROM public.semantic_scene_image_jobs "
+                "WHERE status = 'queued' AND deadline_at > clock_timestamp() + interval '50 minutes'") == str(script_count)
+            remaining = set(job_ids)
+            while remaining:
+                wave = []
+                for slot in range(2):
+                    worker = f"semantic-scene-image-v3-test-{slot}"
+                    claimed = claim_v3(worker)
+                    if claimed:
+                        assert claimed[0] in remaining
+                        remaining.remove(claimed[0])
+                        wave.append((worker, claimed))
+                assert wave
+                assert not claim_v3("semantic-scene-image-v3-overflow")
+                for worker, claimed in wave:
+                    assert _scalar("SELECT (deadline_at BETWEEN clock_timestamp() + interval '7 minutes' "
+                        "AND clock_timestamp() + interval '8 minutes')::TEXT FROM public.semantic_scene_image_jobs "
+                        f"WHERE id = '{claimed[0]}'") == "true"
+                    _fail(claimed[0], worker, claimed[1])
+
+        # Queue waiting cannot consume execution time; reclaim cannot reset it.
+        _, delayed_posts = _insert_batch_with_posts("delayed-concurrent", 2)
+        delayed_job = _enqueue(delayed_posts[0])
+        sibling_job = _enqueue(delayed_posts[1])
+        _psql(DATABASE, "UPDATE public.semantic_scene_image_jobs SET "
+            "created_at = clock_timestamp() - interval '10 minutes', "
+            f"deadline_at = clock_timestamp() + interval '1 minute' WHERE id = '{delayed_job}';")
+        owner = "semantic-scene-image-v3-delayed"
+        delayed = claim_v3(owner)
+        assert delayed[0] == delayed_job
+        deadline = _scalar(f"SELECT deadline_at::TEXT FROM public.semantic_scene_image_jobs WHERE id = '{delayed_job}'")
+        _psql(DATABASE, "UPDATE public.semantic_scene_image_jobs SET lease_expires_at = clock_timestamp() - interval '1 second' "
+            f"WHERE id = '{delayed_job}';")
+        reclaimed = claim_v3(owner)
+        assert reclaimed[0] == delayed_job
+        assert _scalar(f"SELECT deadline_at::TEXT FROM public.semantic_scene_image_jobs WHERE id = '{delayed_job}'") == deadline
+        _fail(delayed_job, owner, reclaimed[1])
+        sibling_claim = claim_v3(owner)
+        assert sibling_claim[0] == sibling_job
+        _fail(sibling_job, owner, sibling_claim[1])
+
         heartbeat = _psql(
             DATABASE,
             "SET ROLE service_role; "

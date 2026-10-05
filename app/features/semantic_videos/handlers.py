@@ -40,7 +40,7 @@ from app.features.shot_frames.wheelchair_scene_plate import (
     ScenePlateCandidate,
     generate_scene_plate_candidates,
 )
-from app.features.shot_production.duration import build_semantic_duration_contract
+from app.features.shot_production.duration import resolve_post_duration_contract
 from app.features.shot_production.provenance import (
     build_semantic_script_snapshot,
 )
@@ -1000,7 +1000,7 @@ def _reference_run_payload(
 ) -> dict[str, Any]:
     post = context["post"]
     batch = context["batch"]
-    contract = build_semantic_duration_contract(batch.get("target_duration_seconds"))
+    contract = resolve_post_duration_contract(post, batch)
     script_snapshot = _approved_semantic_script_snapshot(context)
     return {
         "post_id": str(post["id"]),
@@ -1064,13 +1064,14 @@ def _approved_semantic_script_snapshot(context: Mapping[str, Any]) -> dict[str, 
     post = context.get("post") if isinstance(context.get("post"), Mapping) else {}
     batch = context.get("batch") if isinstance(context.get("batch"), Mapping) else {}
     _script, snapshot = _approved_script(dict(post))
-    contract = build_semantic_duration_contract(batch.get("target_duration_seconds"))
+    contract = resolve_post_duration_contract(post, batch)
     return build_semantic_script_snapshot(
         text=str(snapshot["text"]),
         review_status=str(snapshot["review_status"]),
         word_count=int(snapshot["word_count"]),
         creation_mode=str(batch.get("creation_mode") or "semantic_ugc"),
         target_duration_seconds=contract.requested_duration_seconds,
+        duration_mode=contract.duration_mode,
     )
 
 
@@ -2506,14 +2507,16 @@ def _scene_image_job_progress(
     error_message = str(error.get("message") or "").strip()
     if is_stalled:
         message = error_message or (
-            "The image operation exceeded its eight-minute deadline. Retry this script."
+            ("The image exceeded its queue waiting limit. Retry this script."
+             if job_status == "queued" and not job.get("started_at")
+             else "The image operation exceeded its eight-minute deadline. Retry this script.")
             if deadline_expired
             else "Image generation failed safely. Retry this script."
         )
     elif lease_expired:
         message = "The image worker is reclaiming this operation safely."
     elif job_status == "queued":
-        message = "Queued for fast script-image generation."
+        message = "Queued for script-image generation. Waiting for an available image worker."
     else:
         message = "Generating one script image and checking actor identity."
 
@@ -2549,7 +2552,7 @@ def _scene_image_job_progress(
         progress_percent=20 if job_status == "processing" else (5 if not is_stalled else 20),
         elapsed_seconds=elapsed,
         estimated_remaining_seconds=(
-            None if is_stalled else max(0, _TYPICAL_SCENE_PLATE_SECONDS - elapsed)
+            None if is_stalled or job_status == "queued" else max(0, _TYPICAL_SCENE_PLATE_SECONDS - elapsed)
         ),
         status_message=message,
         failed_take_indexes=[],
@@ -2943,9 +2946,7 @@ def _assert_plan_sources_current(
         )
 
     try:
-        current_duration_contract = build_semantic_duration_contract(
-            context["batch"].get("target_duration_seconds")
-        )
+        current_duration_contract = resolve_post_duration_contract(context["post"], context["batch"])
     except (ValidationError, ValueError) as exc:
         raise StateTransitionError("Semantic video duration contract changed after planning.") from exc
     if current_duration_contract.contract_hash != str(run.get("duration_contract_hash") or ""):

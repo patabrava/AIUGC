@@ -1,0 +1,28 @@
+{
+  "package": "@bridgecode/cli",
+  "version": "4.3.2",
+  "schemaVersion": 2,
+  "projectRoot": "/Users/patabrava/Documents/AI/github/Camilo/AIUGC",
+  "instructionMode": "auto",
+  "instructionFiles": [],
+  "managedFiles": {
+    "README_HUMAN.txt": "20ad5364c6b590d492ba88a2d0c9f6033f68d0a00205df74352be5d401ac4b9d",
+    "bridgecode/best-agent.md": "206f1265724511347344adb17d66f2135a093e092baf27e4d3936c304e14a464",
+    "bridgecode/taste.md": "190c7802e0db34bfe431eea08013446559af8ddbcb30300ac46ce370068e71bf",
+    "bridgecode/design.md": "d74c4e58bc4eb5fd7c63dc963c4a6f2fab5275bd68c791b37497636ee6fd2be7",
+    "bridgecode/writing.md": "1b8c0ef066fce37d8cffdfe1653eb73d90cbc33d7a243c0dda145198a47b864d",
+    "bridgecode/copywriting.md": "3012f09c1d4fbd7056d90b0411086ec5338d54b122574c20c81fda817ac5c564",
+    "bridgecode/monoprompting.md": "936f5a872eb1c7ca2e60d054b03395796609db3bd0e9d9449e4cc59bed278fc2",
+    ".codex/hooks/bridgecode-turn.mjs": "c0a1a902d776457abc80f6dc719b6b0cbf41241177bbeb2f2cc1196b483abaad"
+  },
+  "agents": {
+    "path": "AGENTS.md",
+    "managedHash": "3cb4a5d509fb0dbfaccfa368a4bd31445e180a37a2db8be7bd4bed13a84a6d5b"
+  },
+  "bootstraps": {},
+  "hooksEnabled": true,
+  "hookEntries": {
+    "UserPromptSubmit": "265bd09e883cb30be8a3b1134eba1c5e843bf6a3a21e5cdf048993b5a007d2a2",
+    "SessionStart": "0b8b7199822a1834e8aadf85b91bfc06c608747d1143b3cd5f92b1760f79a1ba"
+  }
+}

@@ -7,7 +7,7 @@ separately from the estimated spoken duration.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 import math
 import re
@@ -175,7 +175,7 @@ def _semantic_parts(tokens: Sequence[str]) -> Optional[List[str]]:
     return None
 
 
-def plan_editorial_beats(script: str) -> List[EditorialBeat]:
+def plan_editorial_beats(script: str, *, allow_short_script: bool = False) -> List[EditorialBeat]:
     """Plan the minimum number of ordered semantic beats that fit Veo's 8-second ceiling."""
     cleaned = " ".join(str(script or "").split())
     if not cleaned:
@@ -183,13 +183,13 @@ def plan_editorial_beats(script: str) -> List[EditorialBeat]:
     validate_spoken_punctuation_spacing(cleaned)
 
     total_words = script_word_count(cleaned)
-    if total_words < MIN_SCRIPT_WORDS:
+    if total_words < (1 if allow_short_script else MIN_SCRIPT_WORDS):
         raise ValueError(
             f"Editorial beat planning requires at least {MIN_SCRIPT_WORDS} words; got {total_words}."
         )
 
     tokens = cleaned.split()
-    parts = _semantic_parts(tokens)
+    parts = [cleaned] if allow_short_script and len(tokens) < MIN_SCRIPT_WORDS else _semantic_parts(tokens)
     if parts is None:
         raise ValueError(
             "Script cannot form complete semantic beats inside the eight-second Veo limit."
@@ -211,10 +211,17 @@ def plan_editorial_beats(script: str) -> List[EditorialBeat]:
     return beats
 
 
+def plan_manual_editorial_beats(script: str) -> List[EditorialBeat]:
+    """Keep 1080p source takes at eight seconds; trim delivery to verified speech."""
+    return [replace(beat, provider_duration_seconds=8)
+            for beat in plan_editorial_beats(script, allow_short_script=True)]
+
+
 __all__ = [
     "EditorialBeat",
     "estimate_speech_seconds",
     "plan_editorial_beats",
+    "plan_manual_editorial_beats",
     "provider_duration_for_estimate",
     "validate_spoken_punctuation_spacing",
 ]

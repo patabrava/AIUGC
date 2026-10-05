@@ -34,7 +34,7 @@ def test_background_brief_preserves_scene_and_is_strictly_actor_free():
 
     brief = build_raw_camera_background_brief("home_living_room_advice_a")
 
-    assert "quiet modern living room" in brief
+    assert "lived-in middle-class German living room" in brief
     assert "narrow light-oak side table" in brief
     assert "Soft window light from left side" in brief
     assert "No people, faces, bodies, body parts, hands, or wheelchairs" in brief
@@ -64,6 +64,34 @@ def test_lived_in_kitchen_brief_preserves_fixed_domestic_realism_without_identit
     assert "fruit bowl" not in bible.scene_specific_rejectors
     assert "displayed appliances" not in bible.scene_specific_rejectors
     assert "legible writing or numbers" in bible.scene_specific_rejectors
+
+
+def test_every_canonical_scene_has_versioned_fixed_lived_in_detail_without_accessibility_regression():
+    from app.features.characters.scene_reference import SCENE_BIBLES
+    from app.features.scenes.background_comparison import build_raw_camera_background_brief
+
+    expected_details = {
+        "bathroom_accessibility_a": ("blank amber soap dispenser", "wheelchair turning area"),
+        "car_transfer_residential_a": ("folded charcoal travel blanket", "transfer path"),
+        "home_living_room_advice_a": ("closed blank-cover paperback", "small muted abstract print"),
+        "hallway_stairlift_a": ("blank-faced wall thermostat", "clear of the stairlift"),
+        "entryway_ramp_a": ("shallow cream key bowl", "clear of the ramp"),
+        "bedroom_accessibility_a": ("folded oatmeal cardigan", "clear transfer space"),
+        "garden_patio_a": ("small galvanized watering can", "clear of the wheelchair route"),
+        "home_kitchen_advice_a": ("white wire drying rack", "clear knee space"),
+        "home_dining_nook_advice_a": ("clear half-filled water carafe", "clear wheelchair approach"),
+        "home_office_advice_a": ("closed blank-cover sage notebook", "actively used"),
+    }
+
+    assert set(expected_details) == set(SCENE_BIBLES)
+    for scene_id, required_phrases in expected_details.items():
+        bible = SCENE_BIBLES[scene_id]
+        brief = build_raw_camera_background_brief(scene_id)
+        assert bible.version == 2, scene_id
+        for phrase in required_phrases:
+            assert phrase in brief, f"{scene_id}: missing {phrase!r}"
+        assert "No people, faces, bodies, body parts, hands, or wheelchairs" in brief, scene_id
+        assert "specified density" in brief, scene_id
 
 
 def test_generate_raw_camera_background_uses_long_prompt_then_generates_one_image():

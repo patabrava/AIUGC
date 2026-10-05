@@ -1015,7 +1015,8 @@ def _apply_minimal_scene_bible_lock(scene_text: str) -> str:
         "Minimal scene Bible lock:\n"
         f"Object budget: only these set anchors may be visible beyond the actor and wheelchair context: {bible.anchor_lock}.\n"
         f"Layout lock: {bible.layout_lock}.\n"
-        "Simplicity rule: keep the background sparse, uncluttered, and secondary; use no decorative props beyond the listed anchors.\n"
+        "Environmental realism rule: keep the listed anchors restrained, fixed, physically plausible, and secondary; "
+        "preserve their mild wear and natural asymmetry as orderly everyday use, with no decorative props beyond them.\n"
         f"Forbidden scene additions: {_join_scene_terms(bible.scene_specific_rejectors)}.\n"
         f"Camera boundary: {bible.composition} Do not widen into an establishing shot or reveal unlisted room areas."
     )
