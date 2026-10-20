@@ -30,6 +30,11 @@ _REQUIRED_NEGATIVE_LOCKS = (
     "zoom",
     "pan",
     "tilt",
+    "dutch angle",
+    "camera roll",
+    "rolled horizon",
+    "high-angle view",
+    "low-angle view",
     "dolly",
     "orbit",
     "tripod-locked",
@@ -69,7 +74,8 @@ EFFECTIVE_NEGATIVE_PROMPT = (
     "expression, completion smile, downward gaze, gaze drop, looking down, exaggerated mouth closure, "
     "pursed-lip end pose, held end pose, frozen stare, robotic motion, stiff motion, mouth warping, "
     "teeth artifacts, lip-sync drift, tripod-locked, gimbal-smooth, motorized camera move, large camera "
-    "shake, wobbly footage, camera pan, camera tilt, camera "
+    "shake, wobbly footage, camera pan, camera tilt, Dutch angle, camera roll, rolled horizon, "
+    "high-angle view, low-angle view, steep downward camera angle, camera "
     "zoom, push-in, dolly, orbit, reframe, cut, jump cut, scene transition, wipe transition, end card, "
     "freeze frame, repeated dialogue, extra speech, English speech, music, background voices, subtitles, "
     "captions, generated text, logos, watermarks, gibberish text, plastic skin, waxy skin, over-smoothed "
@@ -84,7 +90,8 @@ STANDING_EFFECTIVE_NEGATIVE_PROMPT = (
     "large head movement, exaggerated nodding, concluding nod, farewell expression, completion smile, downward "
     "gaze, gaze drop, looking down, exaggerated mouth closure, pursed-lip end pose, held end pose, frozen stare, "
     "robotic motion, stiff motion, mouth warping, teeth artifacts, lip-sync drift, tripod-locked, gimbal-smooth, "
-    "motorized camera move, large camera shake, wobbly footage, camera pan, camera tilt, camera zoom, push-in, "
+    "motorized camera move, large camera shake, wobbly footage, camera pan, camera tilt, Dutch angle, camera "
+    "roll, rolled horizon, high-angle view, low-angle view, steep downward camera angle, camera zoom, push-in, "
     "dolly, orbit, reframe, cut, jump cut, scene transition, wipe transition, end card, freeze frame, repeated "
     "dialogue, extra speech, English speech, music, background voices, subtitles, captions, generated text, logos, "
     "watermarks, gibberish text, plastic skin, waxy skin, over-smoothed skin, beauty filter, CGI look, 3D render"
@@ -178,15 +185,15 @@ def build_veo_take_prompt(
             f"Cinematography: one continuous, unedited {beat.provider_duration_seconds}-second vertical "
             "smartphone UGC take, animated from the supplied first frame. Raw unfiltered front-camera look "
             "with modern smartphone HDR auto-tone, preserved natural skin texture, and deep depth of field.",
-            "Camera: handheld arm's-length front-camera framing at the source frame's exact angle and "
-            f"composition, held by the {posture} actor rather than by a second person. The actor's arm stays "
+            "Camera: handheld arm's-length front-camera framing at the source frame's eye-level, level-horizon "
+            f"angle and composition, held by the {posture} actor rather than by a second person. The actor's arm stays "
             "locked at one fixed length for the entire take, so the phone holds a constant distance from the "
             "face: the head fills exactly "
             "the same fraction of the frame in the first and final frames, and every background object "
             "keeps exactly the same on-screen size from start to finish. Continuous low-amplitude "
-            "handheld micro-motion runs through the whole take: small irregular sideways drift, subtle "
-            "roll, faint breathing rise and fall, and occasional tiny wrist corrections. That motion is "
-            "sideways and rotational only, stays under two percent of frame width, and always drifts "
+            "handheld micro-motion runs through the whole take: small irregular sideways drift, faint "
+            "breathing rise and fall, and occasional tiny level-preserving wrist corrections. The horizon and "
+            "room verticals stay level; that motion is translational only, stays under two percent of frame width, and always drifts "
             "back toward the source framing.",
             f"Visual continuity: {_visual_contract_text(visual_contract)}",
             f"Subject motion: the {posture} actor speaks directly to the lens with accurate native-German lip and "

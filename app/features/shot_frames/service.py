@@ -30,8 +30,9 @@ PHOTOGRAPHIC_INTEGRATION_CONTRACT = (
     "present in the room, with no segmentation halo, cutout edge, green-screen separation, floating "
     "body, studio key light, relit-portrait look, mismatched sharpness, or mismatched color grade. "
     "Keep the finished 9:16 image in upright portrait orientation with gravity correct: ceiling above, "
-    "floor below, and room verticals upright. Apply only the explicitly requested slight phone roll; "
-    "never rotate the camera view or subject 90 degrees and never produce sideways content."
+    "floor below, a level horizon, and upright room verticals. Use a natural eye-level phone position "
+    "with no Dutch angle, camera roll, or steep upward or downward pitch; never rotate the camera view "
+    "or subject 90 degrees and never produce sideways content."
 )
 
 
@@ -93,9 +94,9 @@ def _build_prompt_writer_brief(
         "Use an arm's-length selfie crop: the top edge sits just above the hair and the bottom edge cuts across the "
         "chest below the armpits, so the head alone fills about 40 to 45 percent of the frame height and the face "
         "reads large and identity-readable. This tight crop takes priority over showing the room; a single corner of "
-        "the supplied location past the shoulder is all the background this frame needs. The phone sits above the eye "
-        "line and angles down a few degrees, the horizon is visibly tilted three to six degrees off level, and the "
-        "actor sits well off-center. "
+        "the supplied location past the shoulder is all the background this frame needs. Keep the phone at eye level, "
+        "with a level horizon and upright room verticals. Keep the actor naturally within the central third with enough "
+        "minor asymmetry to feel handheld, without a Dutch angle, strong off-centering, or high/low-angle view. "
         "The actor has turned to face the phone: the shoulders are square to the lens and the nose points "
         "straight at it, so the frame reads as the actor's own selfie rather than a photograph someone else took. "
         "The actor faces the phone camera with a quiet, conversational expression immediately before speaking. "

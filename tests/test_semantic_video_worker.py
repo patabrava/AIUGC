@@ -980,8 +980,9 @@ def test_acoustic_validation_failure_never_reclaims_an_unknown_manifest_status(
     [
         ValidationError("Deterministic acoustic validation failed."),
         StateTransitionError("Deterministic acoustic artifact state failed."),
+        ValueError("Deterministic acoustic value validation failed."),
     ],
-    ids=["validation-error", "state-transition-error"],
+    ids=["validation-error", "state-transition-error", "value-error"],
 )
 def test_worker_terminalizes_every_deterministic_acoustic_exception_once(error):
     repo = FakeRepo(stage="acoustic_qa", take_count=2)

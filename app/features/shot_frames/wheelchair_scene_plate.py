@@ -31,16 +31,18 @@ WHEELCHAIR_VISUAL_CONTRACT = (
 )
 FRAMING_CONTRACT = (
     "Use a vertical 9:16 arm's-length selfie framing, as if the actor is holding the phone in one "
-    "hand just above eye level. The actor has turned to face the phone: the actor's shoulders "
+    "hand at eye level. The actor has turned to face the phone: the actor's shoulders "
     "are square to the lens and the nose points straight at it, so the frame reads as the actor's own "
-    "selfie rather than a photograph someone else took. The room sits behind the actor at "
-    "whatever angle it happens to fall. Crop tight: the top edge of the frame sits just above the hair, "
+    "selfie rather than a photograph someone else took. The room remains naturally visible behind "
+    "the actor with a level horizon and upright room verticals. Crop tight: the top edge of the frame "
+    "sits just above the hair, "
     "and the bottom edge cuts straight across the chest below the armpits. The head alone fills "
     "about 40 to 45 percent of the frame height, so the face reads large and identity-readable. "
     "This tight crop takes priority over showing the room: a single corner of the location past "
-    "the shoulder is all the background this frame needs. The phone angles down a few degrees, the "
-    "horizon is visibly tilted three to six degrees off level, and the actor sits well off-center rather "
-    "than centered. Render it with close front-camera perspective at roughly a 24mm equivalent, "
+    "the shoulder is all the background this frame needs. Keep the phone at eye level, with a level horizon "
+    "and upright room verticals. Keep the actor naturally within the central third with minor asymmetry "
+    "rather than rigid centering, but no Dutch angle, strong off-centering, or high/low-angle view. "
+    "Render it with close front-camera perspective at roughly a 24mm equivalent, "
     "deep depth of field, and modern smartphone HDR auto-tone. The wheelchair may fall outside "
     "this crop."
 )
@@ -75,7 +77,8 @@ STANDING_FRAMING_CONTRACT = (
     "holding the phone. Keep the actor square to the lens and identity-readable in a waist-up crop: the top "
     "edge sits just above the hair and the bottom edge falls below the waist. Show enough upright torso and "
     "room geometry that the unsupported standing position is unmistakable. Preserve raw modern smartphone "
-    "perspective, deep depth of field, slight natural roll, and quiet handheld imperfection."
+    "perspective, deep depth of field, a level horizon, upright room verticals, and quiet handheld "
+    "imperfection without a Dutch angle, camera roll, or high/low-angle view."
 )
 DEFAULT_PRESENTATION_MODE = "wheelchair_seated"
 STANDING_PRESENTATION_MODE = "standing_presenter"
@@ -84,38 +87,36 @@ ACTOR_FRONT_PASSTHROUGH_MODE = "actor_front_passthrough"
 _REFERENCE_ROLES = ("identity_primary", "identity_support", "location")
 _CANDIDATE_VARIATIONS = (
     (
-        "Candidate 1 composition: the actor faces the phone straight on with the shoulders "
-        "square to the lens, the phone rolled about four degrees counter-clockwise so "
-        "the horizon is visibly tilted. The head sits clearly left of frame center."
+        "Candidate 1 composition: the actor faces the eye-level phone straight on with the shoulders "
+        "square to the lens, a level horizon, and upright room verticals. The head sits naturally "
+        "inside the central third, just left of exact frame center."
     ),
     (
-        "Candidate 2 composition: the actor faces the phone straight on with the shoulders "
-        "square to the lens, the phone rolled about five degrees clockwise and held a "
-        "little lower so the downward angle is slight. The head sits clearly right of "
-        "frame center, with a small natural tilt toward the actor's right."
+        "Candidate 2 composition: the actor faces the eye-level phone straight on with the shoulders "
+        "square to the lens, a level horizon, and upright room verticals. The head sits naturally "
+        "inside the central third, just right of exact frame center."
     ),
     (
-        "Candidate 3 composition: the actor faces the phone straight on with the shoulders "
-        "square to the lens, the phone rolled about three degrees counter-clockwise and "
-        "raised higher so the downward angle is obvious. The head sits clearly left of "
-        "frame center, with a small natural tilt toward the actor's left."
+        "Candidate 3 composition: the actor faces the eye-level phone straight on with the shoulders "
+        "square to the lens, a level horizon, and upright room verticals. The head remains inside "
+        "the central third with only a small natural offset from exact center."
     ),
 )
 _STANDING_CANDIDATE_VARIATIONS = (
     (
-        "Candidate 1 composition: the actor faces the phone straight on with the shoulders square to the lens, "
-        "the phone rolled about four degrees counter-clockwise so the horizon is visibly tilted. The head "
-        "sits clearly left of frame center."
+        "Candidate 1 composition: the actor faces the eye-level phone straight on with the shoulders square to the "
+        "lens, a level horizon, and upright room verticals. The head sits naturally inside the central third, just "
+        "left of exact frame center."
     ),
     (
-        "Candidate 2 composition: the actor faces the phone straight on with the shoulders square to the lens, "
-        "the phone rolled about five degrees clockwise and held a little lower. The head sits clearly right "
-        "of frame center, with a small natural tilt toward the actor's right."
+        "Candidate 2 composition: the actor faces the eye-level phone straight on with the shoulders square to the "
+        "lens, a level horizon, and upright room verticals. The head sits naturally inside the central third, just "
+        "right of exact frame center."
     ),
     (
-        "Candidate 3 composition: the actor faces the phone straight on with the shoulders square to the lens, "
-        "the phone rolled about three degrees counter-clockwise and raised slightly higher. The head sits "
-        "clearly left of frame center, with a small natural tilt toward the actor's left."
+        "Candidate 3 composition: the actor faces the eye-level phone straight on with the shoulders square to the "
+        "lens, a level horizon, and upright room verticals. The head remains inside the central third with only a "
+        "small natural offset from exact center."
     ),
 )
 _MAX_DIVERSITY_ATTEMPTS = 3
@@ -473,8 +474,9 @@ def build_derived_scene_plate_prompt(
         f"{IDENTITY_SOURCE_CONTRACT} {EYEWEAR_SOURCE_CONTRACT} "
         "Image 1's clothing is not authoritative: replace every visible upper-body "
         "garment with the requested outfit below, making its garment type and color visibly unmistakable. "
-        "Apply only the modest candidate-specific roll, phone height, and off-center placement "
-        "described below, keeping the actor square to the lens; preserve the overall selfie framing "
+        "Apply only the modest candidate-specific horizontal placement described below, keeping the "
+        "actor square to the eye-level lens, with a level horizon and upright room verticals; preserve the overall "
+        "selfie framing "
         "contract. "
         f"{WHEELCHAIR_VISUAL_CONTRACT} {FRAMING_CONTRACT} "
         f"Keep the actor-free location exactly: {scene}; and the upper-body outfit exactly: {wardrobe}. "
@@ -507,8 +509,8 @@ def _variation_directive(
         return directive
     return (
         f"{directive} DIVERSITY RECOVERY ATTEMPT {attempt}: the prior render was "
-        "perceptually indistinguishable from another option. Make the specified roll, "
-        "phone height, and off-center placement unmistakably visible while keeping the actor "
+        "perceptually indistinguishable from another option. Make the specified subtle horizontal "
+        "placement unmistakably visible while keeping the phone eye-level and the actor "
         "square to the lens and preserving actor identity, presentation posture, outfit, room, "
         "face size, and crop."
     )

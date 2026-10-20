@@ -563,6 +563,32 @@ def test_seam_gap_qa_enforces_each_semantic_cut_at_six_tenths_or_less():
     assert report["failed_seam_indexes"] == [1]
 
 
+def test_seam_gap_qa_reports_final_transcript_token_count_mismatch():
+    transcript = _transcript(
+        ("eins", 0.0, 0.3),
+        ("zwei", 0.4, 0.8),
+        ("drei", 1.0, 1.4),
+    )
+
+    report = evaluate_seam_gaps(
+        transcript,
+        beat_word_counts=[2, 2],
+        max_gap_seconds=0.6,
+    )
+
+    assert report == {
+        "status": "unavailable",
+        "passed": False,
+        "failure_reasons": ["final_transcript_word_count_mismatch"],
+        "expected_word_count": 4,
+        "actual_word_count": 3,
+        "max_allowed_seconds": 0.6,
+        "gaps_seconds": [],
+        "max_observed_seconds": None,
+        "failed_seam_indexes": [0],
+    }
+
+
 def test_offset_and_merge_reject_non_monotonic_word_timings():
     non_monotonic = _transcript(
         ("später", 0.8, 1.0),

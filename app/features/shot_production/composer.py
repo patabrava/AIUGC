@@ -477,8 +477,20 @@ def evaluate_seam_gaps(
     if len(counts) < 2 or any(count <= 0 for count in counts):
         raise ValueError("Seam QA requires at least two positive beat word counts.")
     timed_words = _validated_word_timings(transcript)
-    if len(timed_words) != sum(counts):
-        raise ValueError("Final transcript word count must match semantic beat word counts.")
+    expected_word_count = sum(counts)
+    actual_word_count = len(timed_words)
+    if actual_word_count != expected_word_count:
+        return {
+            "status": "unavailable",
+            "passed": False,
+            "failure_reasons": ["final_transcript_word_count_mismatch"],
+            "expected_word_count": expected_word_count,
+            "actual_word_count": actual_word_count,
+            "max_allowed_seconds": threshold,
+            "gaps_seconds": [],
+            "max_observed_seconds": None,
+            "failed_seam_indexes": list(range(len(counts) - 1)),
+        }
     boundary_indexes = []
     cumulative = 0
     for count in counts[:-1]:

@@ -1493,7 +1493,7 @@ def test_standing_visual_contract_is_fenced_from_legacy_wheelchair_contract():
         actor_reference_fingerprint="b" * 64,
     )
 
-    assert standing["version"] == "semantic_visual_contract_v4"
+    assert standing["version"] == "semantic_visual_contract_v5"
     assert standing["presentation_mode"] == "standing_presenter"
     assert standing["master_source_mode"] == "actor_front_passthrough"
     assert standing["actor_front_sha256"] == "c" * 64
@@ -1502,7 +1502,7 @@ def test_standing_visual_contract_is_fenced_from_legacy_wheelchair_contract():
     assert validate_visual_contract(standing) == standing
     assert standing["contract_hash"] != seated["contract_hash"]
     assert standing_generation["contract_hash"] != seated_generation["contract_hash"]
-    assert standing_generation["standing_prompt_contract_version"] == "standing-presenter-v4"
+    assert standing_generation["standing_prompt_contract_version"] == "standing-presenter-v5"
     assert standing_generation["model"] == "actor-front-passthrough-v1"
 
 
@@ -1820,7 +1820,50 @@ def test_scene_plate_prompts_require_one_photographically_integrated_exposure(
         assert "one consistent smartphone lens" in prompt
         assert "no segmentation halo, cutout edge, green-screen separation" in prompt
         assert "upright portrait orientation with gravity correct" in prompt
-        assert "never rotate the camera view or subject 90 degrees" in prompt
+        assert "never rotate the camera view or subject 90 degrees" in prompt.lower()
+
+
+@pytest.mark.parametrize(
+    "presentation_mode", ["wheelchair_seated", "standing_presenter"]
+)
+def test_scene_plate_prompts_require_natural_level_camera_geometry(
+    presentation_mode,
+):
+    from app.features.shot_frames.wheelchair_scene_plate import (
+        FRAMING_CONTRACT,
+        STANDING_FRAMING_CONTRACT,
+        _CANDIDATE_VARIATIONS,
+        _STANDING_CANDIDATE_VARIATIONS,
+        _variation_directive,
+        build_canonical_scene_plate_prompt,
+    )
+
+    standing = presentation_mode == "standing_presenter"
+    prompt = build_canonical_scene_plate_prompt(
+        scene="the exact supplied accessible kitchen",
+        wardrobe="cream crewneck knit sweater",
+        variation_directive=_variation_directive(
+            index=1, attempt=2, presentation_mode=presentation_mode
+        ),
+        presentation_mode=presentation_mode,
+    )
+    framing = STANDING_FRAMING_CONTRACT if standing else FRAMING_CONTRACT
+    variations = (
+        _STANDING_CANDIDATE_VARIATIONS if standing else _CANDIDATE_VARIATIONS
+    )
+
+    for text in (prompt, framing, *variations):
+        normalized = text.lower()
+        assert "level horizon" in normalized
+        assert "upright room verticals" in normalized
+        assert "visibly tilted" not in normalized
+        assert "rolled about" not in normalized
+        assert "downward angle" not in normalized
+    assert "eye-level" in prompt.lower()
+    assert "dutch angle" in prompt.lower()
+    assert "central third" in prompt.lower()
+    assert "above eye level" not in prompt.lower()
+    assert "whatever angle" not in prompt.lower()
 
 
 @pytest.mark.parametrize(

@@ -2154,7 +2154,7 @@ class SemanticVideoWorker:
                     ),
                 },
             }
-        except (ValidationError, StateTransitionError) as exc:
+        except (ValidationError, StateTransitionError, ValueError) as exc:
             result = self._terminalize_acoustic_stage_error(stage, takes, exc)
         if not isinstance(result, Mapping):
             result = self._terminalize_acoustic_stage_error(

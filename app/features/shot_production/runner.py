@@ -3298,7 +3298,12 @@ def compose_and_caption(
         _atomic_write_json(manifest_path, payload)
         raise ValidationError(
             "Final stitched seam-gap QA failed.",
-            {"gaps_seconds": seam_qa["gaps_seconds"]},
+            {
+                "gaps_seconds": seam_qa["gaps_seconds"],
+                "failure_reasons": list(seam_qa.get("failure_reasons") or []),
+                "expected_word_count": seam_qa.get("expected_word_count"),
+                "actual_word_count": seam_qa.get("actual_word_count"),
+            },
         )
 
     if acoustic_plan is not None:

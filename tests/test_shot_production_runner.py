@@ -2967,6 +2967,93 @@ def test_long_form_operator_review_always_delivers_complete_captioned_stitch(
     assert bool(duration_advisories) is expects_duration_advisory
 
 
+def test_long_form_operator_review_delivers_when_final_transcript_token_count_differs(
+    tmp_path,
+):
+    from app.features.shot_production.runner import compose_and_caption
+
+    manifest_path = _manifest_with_raw_takes(
+        tmp_path,
+        script=THIRTY_TWO_SECOND_SCRIPT,
+        target_length_tier=32,
+    )
+    payload = _read(manifest_path)
+    for take in payload["takes"]:
+        beat_words = take["beat"]["text"].split()
+        take["status"] = "transcribed"
+        take["transcript_qa"] = {
+            "passed": True,
+            "actual_words": beat_words,
+            "first_word_start_seconds": 0.16,
+            "final_word_end_seconds": 6.8,
+        }
+        take["trim_window"] = {
+            "start_seconds": 0.0,
+            "end_seconds": 7.05,
+            "source": "deepgram_word_window",
+        }
+    payload["visual_qa"] = {"passed": True}
+    payload["voice_qa"] = {"passed": True}
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    def fail_plan(_evidence, **_kwargs):
+        raise ValidationError(
+            "No transcript-safe acoustic seam candidate exists.",
+            {"seam_index": 2, "recommended_retry_take_indexes": [3]},
+        )
+
+    def caption_fn(**_kwargs):
+        output = manifest_path.parent / "review-captioned.mp4"
+        output.write_bytes(b"review-captioned")
+        return str(output)
+
+    final_transcript_with_one_joined_token = " ".join(
+        THIRTY_TWO_SECOND_SCRIPT.split()[:-1]
+    )
+    compose_and_caption(
+        manifest_path,
+        _DeepgramByCall([final_transcript_with_one_joined_token]),
+        acoustic_seams=True,
+        analyze_audio_fn=lambda _path: (),
+        plan_acoustic_fn=fail_plan,
+        stitch_fn=lambda **_kwargs: (
+            b"complete-long-form-review",
+            {
+                "stitch_segment_count": 4,
+                "stitch_fps": 24.0,
+                "stitch_audio_video_duration_delta_s": 0.0,
+            },
+        ),
+        caption_fn=caption_fn,
+        probe_fn=lambda _path: _valid_final_probe("28.8"),
+        visual_seam_evaluator=lambda *_args, **_kwargs: {
+            "passed": True,
+            "seams": [],
+            "failed_seam_indexes": [],
+        },
+        visual_seam_sheet_fn=lambda *_args, **_kwargs: {"frames": []},
+        operator_review_delivery=True,
+    )
+
+    saved = _read(manifest_path)
+    assert saved["status"] == "captioned"
+    assert saved["seam_qa"]["passed"] is True
+    assert saved["seam_qa"]["provider_passed"] is False
+    assert saved["seam_qa"]["failure_reasons"] == [
+        "final_transcript_word_count_mismatch"
+    ]
+    assert saved["seam_qa"]["expected_word_count"] == len(
+        THIRTY_TWO_SECOND_SCRIPT.split()
+    )
+    assert saved["seam_qa"]["actual_word_count"] == len(
+        final_transcript_with_one_joined_token.split()
+    )
+    assert any(
+        finding["stage"] == "seam_gap_qa"
+        for finding in saved["delivery_review_advisories"]
+    )
+
+
 def test_operator_review_policy_preserves_failed_gate_evidence():
     from app.features.shot_production.runner import (
         _accept_operator_review_delivery_finding,
