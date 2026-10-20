@@ -939,21 +939,33 @@ def approve_master_transition(
     reason: Optional[str],
     client=None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    result = _transition_result(
-        _client(client).rpc(
-            "approve_semantic_video_master",
-            {
-                "p_run_id": run_id,
-                "p_expected_revision": expected_revision,
-                "p_candidate_index": candidate_index,
-                "p_approved_by": approved_by,
-                "p_identity_attestation": identity_attestation,
-                "p_attestation_version": attestation_version,
-                "p_reason": reason,
-            },
-        ),
-        operation="master approval",
-    )
+    try:
+        result = _transition_result(
+            _transition_rpc_query(
+                function_name="approve_semantic_video_master",
+                payload={
+                    "p_run_id": run_id,
+                    "p_expected_revision": expected_revision,
+                    "p_candidate_index": candidate_index,
+                    "p_approved_by": approved_by,
+                    "p_identity_attestation": identity_attestation,
+                    "p_attestation_version": attestation_version,
+                    "p_reason": reason,
+                },
+                client=client,
+                timeout_seconds=10.0 if client is None else None,
+            ),
+            operation="master approval",
+        )
+    except (httpx.TransportError, StateTransitionError) as exc:
+        if isinstance(exc, StateTransitionError) and "absolute deadline" not in str(exc):
+            raise
+        # The transaction may have committed. The browser reconciles persisted
+        # progress before offering another revision-fenced approval attempt.
+        raise StateTransitionError(
+            "Image approval could not be confirmed. Reload to check its status, "
+            "then retry approval if the image is still awaiting review."
+        ) from exc
     run = result.get("run")
     approval = result.get("approval")
     if not isinstance(run, Mapping) or not isinstance(approval, Mapping):

@@ -297,7 +297,11 @@ def _generation_progress(
             5,
             elapsed,
             None,
-            "The free Veo plan is ready. No paid Veo generation has started.",
+            (
+                "The free Veo plan is ready. No paid Veo generation has started."
+                if run.get("plan_hash")
+                else "Image approved. Waiting to build the free Veo plan after all scene images are approved. No paid Veo generation has started."
+            ),
         )
     if stage == "generating":
         submitted = any(

@@ -2319,6 +2319,7 @@ def test_progress_endpoint_does_not_claim_paid_generation_before_approval(monkey
 
     client = TestClient(app, base_url="http://localhost")
     _seed_awaiting_paid_run(state)
+    state["run"]["plan_hash"] = "a" * 64
 
     payload = client.get("/semantic-videos/posts/post-1/progress").json()["data"]
 
@@ -5606,3 +5607,14 @@ def test_completed_delivery_repair_helper_uses_fenced_non_provider_rpc():
             },
         }
     ]
+
+
+def test_progress_distinguishes_approved_image_from_missing_free_plan(monkeypatch):
+    _handlers, state, _storage = _install_repository(monkeypatch)
+    from app.main import app
+    client = TestClient(app, base_url='http://localhost')
+    _seed_awaiting_paid_run(state)
+    state['run']['plan_hash'] = None
+    payload = client.get('/semantic-videos/posts/post-1/progress').json()['data']
+    assert 'Image approved. Waiting to build' in payload['status_message']
+    assert 'plan is ready' not in payload['status_message']

@@ -297,3 +297,26 @@ def test_video_lease_injected_client_does_not_replace_shared_transport(monkeypat
     monkeypatch.setattr(queries, "get_supabase", unexpected_global_client)
     with pytest.raises(httpx.RemoteProtocolError):
         queries.acquire_run_lease(worker_id="worker", lease_seconds=120, client=Client())
+
+
+@pytest.mark.parametrize('failure', ['timeout', 'disconnect'])
+def test_master_approval_uses_fresh_bounded_rpc_and_exposes_recoverable_failure(monkeypatch, failure):
+    import httpx
+    from app.features.semantic_videos import queries
+    from app.core.errors import StateTransitionError
+
+    calls = []
+    async def rpc(**kwargs):
+        calls.append(kwargs)
+        if failure == 'timeout':
+            raise TimeoutError('deadline')
+        raise httpx.ReadTimeout('broken transport')
+    monkeypatch.setattr(queries, '_async_transition_rpc_with_deadline', rpc)
+    monkeypatch.setattr(queries, '_client', lambda *_args: pytest.fail('must not use shared HTTP2 client'))
+    with pytest.raises(StateTransitionError, match='Image approval could not be confirmed'):
+        queries.approve_master_transition('run', expected_revision=0, candidate_index=1,
+            approved_by='operator', identity_attestation=True,
+            attestation_version='semantic-actor-identity-v1', reason=None)
+    assert len(calls) == 1  # No blind replay after an ambiguous write.
+    assert calls[0]['timeout_seconds'] == 10.0
+    assert calls[0]['payload']['p_expected_revision'] == 0
