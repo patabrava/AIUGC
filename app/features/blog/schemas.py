@@ -29,7 +29,7 @@ class BlogSource(BaseModel):
     """A source reference from the research dossier."""
 
     title: str = Field(..., min_length=1, max_length=400, description="Source title")
-    url: str = Field(..., min_length=1, description="Source URL")
+    url: str = Field(default="", description="Internal provenance URL; never displayed in public references")
 
     @field_validator("title", "url")
     @classmethod
@@ -266,7 +266,8 @@ def _extract_sentences(value: str) -> List[str]:
     return [_compact_text(part) for part in parts if _compact_text(part)]
 
 
-def _sanitize_source_list(raw_sources: Any) -> List[Dict[str, str]]:
+def normalize_blog_sources(raw_sources: Any) -> List[Dict[str, str]]:
+    """Keep named references, with optional internal provenance URLs."""
     if not isinstance(raw_sources, list):
         return []
     cleaned: List[Dict[str, str]] = []
@@ -274,8 +275,10 @@ def _sanitize_source_list(raw_sources: Any) -> List[Dict[str, str]]:
         if not isinstance(source, dict):
             continue
         title = _compact_text(source.get("title"))
+        # Some legacy references use a URL as their title or append it to a name.
+        title = re.sub(r"https?://\S+", "", title, flags=re.IGNORECASE).strip(" -–:()")
         url = _compact_text(source.get("url"))
-        if title and url:
+        if title:
             cleaned.append({"title": title, "url": url})
     return cleaned
 
@@ -596,7 +599,7 @@ def normalize_blog_content(
         "author_name": _compact_text(content.get("author_name")) or None,
         "meta_title": _strip_markdown_bold(content.get("meta_title")) or name,
         "meta_description": _strip_markdown_bold(content.get("meta_description")) or _truncate(preview_text or plain_body, 160),
-        "sources": _sanitize_source_list(content.get("sources")),
+        "sources": normalize_blog_sources(content.get("sources")),
         "internal_links": _sanitize_internal_links(content.get("internal_links")),
         "seo_brief": content.get("seo_brief") if isinstance(content.get("seo_brief"), dict) else None,
         "word_count": word_count,

@@ -16,6 +16,7 @@ import httpx
 
 from app.core.errors import ThirdPartyError, ValidationError
 from app.core.logging import get_logger
+from app.features.blog.schemas import normalize_blog_sources
 
 logger = get_logger(__name__)
 
@@ -210,8 +211,7 @@ class WebflowClient:
 
         if sources_field is not None:
             sources_html = self._render_sources_rich_text(blog_content.get("sources") or [])
-            if sources_html:
-                field_data[self._field_slug(sources_field)] = sources_html
+            field_data[self._field_slug(sources_field)] = sources_html
 
         preview_image_url = (blog_content.get("preview_image_url") or "").strip()
         if preview_image_url:
@@ -255,18 +255,8 @@ class WebflowClient:
 
     def _render_sources_rich_text(self, sources: Sequence[Dict[str, Any]]) -> str:
         items: List[str] = []
-        for source in sources:
-            if not isinstance(source, dict):
-                continue
-            title = str(source.get("title") or "").strip()
-            url = str(source.get("url") or "").strip()
-            if not title or not url:
-                continue
-            safe_title = escape(title)
-            safe_url = escape(url, quote=True)
-            items.append(
-                f'<li><a href="{safe_url}" target="_blank" rel="noopener noreferrer">{safe_title}</a></li>'
-            )
+        for source in normalize_blog_sources(list(sources)):
+            items.append(f'<li>{escape(source["title"])}</li>')
         if not items:
             return ""
         return f"<ul>{''.join(items)}</ul>"
