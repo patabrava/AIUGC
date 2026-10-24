@@ -35,6 +35,7 @@ from app.features.blog.schemas import (
     build_blog_content_from_llm,
     merge_blog_content_updates,
 )
+from app.features.blog.sources import filter_blog_sources
 from app.features.blog.webflow_client import WebflowClient
 from app.features.topics.queries import get_topic_research_dossiers
 from app.features.topics.seo_catalog import (
@@ -660,15 +661,11 @@ def generate_blog_draft(post_id: str) -> Dict[str, Any]:
         dossier_payload = dossier.get("normalized_payload") or {}
         dossier_id = dossier.get("id", "")
 
-        llm = get_llm_client()
         dossier_sources = dossier_payload.get("sources") or []
+        sources = filter_blog_sources(dossier_sources)
+        llm = get_llm_client()
         seo_brief = _resolve_blog_seo_brief(dossier_payload)
-        prompt = _build_blog_prompt(dossier_payload)
-        sources = [
-            {"title": s.get("title", ""), "url": str(s.get("url", ""))}
-            for s in dossier_sources
-            if s.get("title") and s.get("url")
-        ]
+        prompt = _build_blog_prompt({**dossier_payload, "sources": sources})
 
         blog_content: Optional[Dict[str, Any]] = None
         current_prompt = prompt
@@ -801,6 +798,9 @@ def publish_blog_post(post_id: str, *, publication_date: Optional[str] = None) -
         raise ValueError(f"No blog content to publish for post {post_id}")
     if blog_content.get("image_prompt") and not blog_content.get("preview_image_url"):
         raise ValueError(f"Generate and accept a preview image before publishing post {post_id}")
+
+    # Recheck saved drafts as well as newly generated articles before any CMS write.
+    blog_content = {**blog_content, "sources": filter_blog_sources(blog_content.get("sources"))}
 
     client = WebflowClient(
         api_token=settings.webflow_api_token,

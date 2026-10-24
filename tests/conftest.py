@@ -1,6 +1,7 @@
 """Deterministic, non-production defaults for app settings during tests."""
 
 import os
+import sys
 
 import pytest
 
@@ -26,6 +27,7 @@ def pytest_configure() -> None:
 @pytest.fixture(autouse=True)
 def reset_cached_settings(monkeypatch):
     """Build each Settings snapshot from that test's own environment."""
-    import app.core.config as config_module
-
-    monkeypatch.setattr(config_module, "_settings", None)
+    # Standalone PostgreSQL gates install pytest only; do not import app settings.
+    config_module = sys.modules.get("app.core.config")
+    if config_module is not None:
+        monkeypatch.setattr(config_module, "_settings", None)

@@ -30,6 +30,7 @@ from app.adapters.llm_client import LLMClient
 from app.features.blog import handlers as blog_handlers
 from app.features.blog import blog_runtime
 from app.features.blog import queries as blog_queries
+from app.features.blog import sources as blog_sources
 from app.features.blog.schemas import (
     BlogContent,
     BlogSource,
@@ -39,6 +40,7 @@ from app.features.blog.schemas import (
 )
 from app.features.blog.webflow_client import WebflowClient
 from pathlib import Path
+from types import SimpleNamespace
 
 
 def _make_png_bytes() -> bytes:
@@ -535,6 +537,9 @@ def test_webflow_client_build_blog_field_data_maps_sources_to_rich_text_field():
             "sources": [
                 {"title": "Quelle A", "url": "https://example.com/a?x=1&y=2"},
                 {"title": "Quelle B", "url": "https://example.com/b"},
+                {"title": "Quelle ohne URL"},
+                {"title": "Studie <B> & C", "url": "javascript:alert(1)"},
+                {"title": "", "url": "https://example.com/untitled"},
             ],
         },
         publication_date="2026-04-01T09:00:00Z",
@@ -542,10 +547,110 @@ def test_webflow_client_build_blog_field_data_maps_sources_to_rich_text_field():
 
     assert field_data["quellen"] == (
         "<ul>"
-        '<li><a href="https://example.com/a?x=1&amp;y=2" target="_blank" rel="noopener noreferrer">Quelle A</a></li>'
-        '<li><a href="https://example.com/b" target="_blank" rel="noopener noreferrer">Quelle B</a></li>'
+        '<li>Quelle A</li>'
+        '<li>Quelle B</li>'
+        '<li>Quelle ohne URL</li>'
+        '<li>Studie &lt;B&gt; &amp; C</li>'
         "</ul>"
     )
+
+
+def test_named_blog_sources_survive_normalization_without_losing_provenance():
+    sources = [
+        {"title": "  Gedruckte Studie  "},
+        {"title": "Medikationsplan", "url": "https://www.bundesaerztekammer.de/medikationsplan"},
+        {"title": ""},
+        None,
+        {"title": "https://journal.de/unnamed", "url": "https://journal.de/unnamed"},
+        {"title": "Anhang https://journal.de/appendix", "url": "https://journal.de/appendix"},
+    ]
+    normalized = normalize_blog_content({"name": "Gespeicherter Entwurf", "sources": sources})
+    assert normalized["sources"] == [
+        {"title": "Gedruckte Studie", "url": ""},
+        sources[1],
+        {"title": "Anhang", "url": "https://journal.de/appendix"},
+    ]
+    assert normalize_blog_content(normalized)["sources"] == normalized["sources"]
+    assert BlogSource(title="Gedruckte Studie").url == ""
+
+
+def test_webflow_sources_empty_list_clears_old_links():
+    client = WebflowClient(api_token="test-token", collection_id="col-1", site_id="site-1")
+    client._collection_cache = {"fields": [
+        {"slug": slug} for slug in (
+            "merksatz", "tipp", "zusammenfassung", "inhalt", "quellen",
+            "veroeffentlichungsdatum", "vorschautext", "lesedauer", "vorschaubild",
+            "autor", "meta-titel", "meta-beschreibung",
+        )
+    ]}
+    fields = client.build_blog_field_data({"name": "Entwurf", "sources": []}, publication_date="2026-10-24")
+    assert fields["quellen"] == ""
+
+
+@pytest.mark.parametrize("scheduled", [False, True])
+@pytest.mark.parametrize("all_invalid", [False, True])
+def test_publication_omits_invalid_sources_but_keeps_names_and_internal_links(monkeypatch, scheduled, all_invalid):
+    invalid = [
+        {"title": "Platzhalter", "url": "https://example.com/community-peer-support"},
+        {"title": "KVWL", "url": "https://www.kvwl.de/missing"},
+    ]
+    retained = [] if all_invalid else [
+        {"title": "Studie & Anhang", "url": "https://journal.de/valid"},
+        {"title": "Druckausgabe", "url": ""},
+        {"title": "Vorübergehend blockiert", "url": "https://journal.de/blocked"},
+    ]
+    body = '<p>Weiterlesen: <a href="https://www.lippelift.de/blog">Ratgeber</a>.</p>'
+    post = {
+        "id": "post-1", "blog_enabled": True, "blog_status": "scheduled" if scheduled else "draft",
+        "blog_content": normalize_blog_content({"name": "Entwurf", "body_html": body, "sources": invalid + retained}),
+        "blog_webflow_item_id": "existing-staged-item",
+    }
+    monkeypatch.setattr(blog_runtime, "_load_post_for_blog", lambda _id: post)
+    monkeypatch.setattr(blog_runtime, "get_settings", lambda: SimpleNamespace(
+        webflow_api_token="test-token", webflow_collection_id="collection", webflow_site_id="site",
+    ))
+    def source_probe(url, method, timeout):
+        if "example.com" in url:
+            raise blog_sources._InvalidSource("placeholder")
+        return (404 if "kvwl.de" in url else 403 if "blocked" in url else 200), None
+
+    monkeypatch.setattr(blog_sources, "_request_status", source_probe)
+    fields = [{"slug": slug} for slug in (
+        "merksatz", "tipp", "zusammenfassung", "inhalt", "quellen", "veroeffentlichungsdatum",
+        "vorschautext", "lesedauer", "vorschaubild", "autor", "meta-titel", "meta-beschreibung",
+    )]
+    monkeypatch.setattr(WebflowClient, "get_collection_fields", lambda self: fields)
+    cms_calls = []
+
+    def cms_request(self, method, path, *, json=None):
+        cms_calls.append((method, path, json))
+        return {}
+
+    monkeypatch.setattr(WebflowClient, "_request", cms_request)
+    updates = []
+    monkeypatch.setattr(blog_runtime, "update_blog_status", lambda _id, **kwargs: updates.append(kwargs))
+
+    if scheduled:
+        database = MagicMock()
+        database.client.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value.data = [{"id": "post-1"}]
+        monkeypatch.setattr(blog_runtime, "get_supabase", lambda: database)
+        monkeypatch.setattr(blog_runtime, "get_due_scheduled_blog_posts", lambda limit: [{"id": "post-1", "blog_scheduled_at": "2026-10-24T10:00:00Z"}])
+        result = asyncio.run(blog_runtime.dispatch_due_blog_posts())
+        assert result["published"] == 1 and result["failed"] == 0
+    else:
+        assert blog_runtime.publish_blog_post("post-1")["blog_status"] == "published"
+
+    assert cms_calls[0][0] == "PATCH"
+    payload = cms_calls[0][2]["fieldData"]
+    assert payload["quellen"] == ("" if all_invalid else (
+        "<ul><li>Studie &amp; Anhang</li><li>Druckausgabe</li><li>Vorübergehend blockiert</li></ul>"
+    ))
+    assert payload["inhalt"] == body
+    assert "<a" not in payload["quellen"] and "https://" not in payload["quellen"]
+    assert cms_calls[1][2] == {"itemIds": ["existing-staged-item"]}
+    assert updates[-1]["status"] == "published"
+    assert updates[-1]["blog_content"]["sources"] == retained
+    assert len(post["blog_content"]["sources"]) == len(invalid + retained)
 
 
 def test_webflow_client_create_and_publish_payloads_are_correct():
@@ -1136,7 +1241,12 @@ def test_generate_blog_draft_retries_until_contract_is_complete(monkeypatch):
                 "Wie gute Prozesse aussehen",
                 "Welche Schritte sofort helfen",
             ],
-            "sources": [{"title": "Quelle", "url": "https://example.com"}],
+            "sources": [
+                {"title": "Medikationsplan", "url": "https://www.bundesaerztekammer.de/themen/aerzte/digitalisierung/digitale-anwendungen/telematikinfrastruktur/medikationsplan"},
+                {"title": "Gedruckter Leitfaden"},
+                {"title": "Platzhalter", "url": "https://example.com/community-peer-support"},
+                {"title": "Alte KVWL-Seite", "url": "https://www.kvwl.de/praxis/verordnungen/arzneimittel/medikationsplan"},
+            ],
             "risk_notes": [],
             "disclaimer": "",
         },
@@ -1204,9 +1314,11 @@ Meta-Beschreibung: So werden Arzttermine fuer Betroffene klarer und verlaesslich
     class _FakeLLM:
         def __init__(self):
             self.calls = 0
+            self.prompts = []
 
         def generate_gemini_text(self, **_kwargs):
             self.calls += 1
+            self.prompts.append(_kwargs["prompt"])
             return invalid_text if self.calls == 1 else valid_text
 
     update_calls = []
@@ -1217,7 +1329,14 @@ Meta-Beschreibung: So werden Arzttermine fuer Betroffene klarer und verlaesslich
 
     monkeypatch.setattr(blog_runtime, "_load_post_for_blog", lambda _post_id: fake_post)
     monkeypatch.setattr(blog_runtime, "_lookup_dossier", lambda _post: fake_dossier)
-    monkeypatch.setattr(blog_runtime, "get_llm_client", lambda: _FakeLLM())
+    llm = _FakeLLM()
+    monkeypatch.setattr(blog_runtime, "get_llm_client", lambda: llm)
+    def source_probe(url, method, timeout):
+        if "example.com" in url:
+            raise blog_sources._InvalidSource("placeholder")
+        return (404 if "kvwl.de" in url else 200), None
+
+    monkeypatch.setattr(blog_sources, "_request_status", source_probe)
     monkeypatch.setattr(blog_runtime, "update_blog_status", _fake_update_blog_status)
 
     content = blog_runtime.generate_blog_draft("post-1")
@@ -1226,6 +1345,11 @@ Meta-Beschreibung: So werden Arzttermine fuer Betroffene klarer und verlaesslich
     assert content["intro_heading"] == "Warum Terminwege oft scheitern"
     assert content["conclusion_heading"] == "Was am Ende wirklich entlastet"
     assert len(content["introduction_paragraphs"]) == 2
+    assert content["sources"] == [
+        fake_dossier["normalized_payload"]["sources"][0],
+        {"title": "Gedruckter Leitfaden", "url": ""},
+    ]
+    assert all("https://example.com/community-peer-support" not in prompt and "Alte KVWL-Seite" not in prompt for prompt in llm.prompts)
     assert len(update_calls) == 2
     assert update_calls[0][1]["status"] == "generating"
     assert update_calls[1][1]["status"] == "draft"
