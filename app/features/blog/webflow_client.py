@@ -16,6 +16,7 @@ import httpx
 
 from app.core.errors import ThirdPartyError, ValidationError
 from app.core.logging import get_logger
+from app.features.blog.schemas import normalize_blog_content
 
 logger = get_logger(__name__)
 
@@ -176,6 +177,7 @@ class WebflowClient:
 
     def build_blog_field_data(self, blog_content: Dict[str, Any], *, publication_date: str) -> Dict[str, Any]:
         """Map normalized blog JSON into the configured Webflow collection schema."""
+        blog_content = normalize_blog_content(blog_content)
         fields = self.get_collection_fields()
         field_data: Dict[str, Any] = {
             "name": blog_content.get("name", ""),
