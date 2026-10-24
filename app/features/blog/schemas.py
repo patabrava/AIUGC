@@ -7,7 +7,8 @@ Per Constitution § II: Validated Boundaries
 from __future__ import annotations
 
 from datetime import datetime
-from html import escape
+from html import escape, unescape
+from html.parser import HTMLParser
 import math
 import re
 import unicodedata
@@ -274,7 +275,7 @@ def normalize_blog_sources(raw_sources: Any) -> List[Dict[str, str]]:
     for source in raw_sources:
         if not isinstance(source, dict):
             continue
-        title = _compact_text(source.get("title"))
+        title = _strip_markdown_bold(source.get("title"))
         # Some legacy references use a URL as their title or append it to a name.
         title = re.sub(r"https?://\S+", "", title, flags=re.IGNORECASE).strip(" -–:()")
         url = _compact_text(source.get("url"))
@@ -327,7 +328,7 @@ def _render_inline_html(value: Any, internal_links: Optional[List[Dict[str, str]
         if link and anchor:
             parts.append(f'<a href="{escape(link["url"], quote=True)}">{escape(anchor)}</a>')
         else:
-            parts.append(escape(match.group(0)))
+            parts.append(_render_text_html(match.group(0)))
         cursor = match.end()
     parts.append(_render_text_html(text[cursor:]))
     return "".join(parts)
@@ -351,7 +352,73 @@ def _render_plain_text_html(value: str) -> str:
     paragraphs = _split_plain_paragraphs(value)
     if not paragraphs:
         return ""
-    return "".join(f"<p>{escape(paragraph)}</p>" for paragraph in paragraphs)
+    return "".join(f"<p>{_render_inline_html(paragraph)}</p>" for paragraph in paragraphs)
+
+
+class _StoredBoldRenderer(HTMLParser):
+    """Repair legacy HTML text without interpreting markup inside escaped text or attributes."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self.parts: List[str] = []
+        self.text: List[str] = []
+        self.heading: Optional[str] = None
+        self.raw_tag: Optional[str] = None
+
+    def _flush(self) -> None:
+        text = "".join(self.text)
+        self.text.clear()
+        if self.raw_tag:
+            self.parts.append(text)
+        elif self.heading:
+            self.parts.append(escape(_MD_BOLD_MARKER_RE.sub("", unescape(text))))
+        else:
+            self.parts.append(_render_text_html(unescape(text)))
+
+    def handle_starttag(self, tag: str, attrs: Any) -> None:
+        self._flush()
+        self.parts.append(self.get_starttag_text())
+        if tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+            self.heading = tag
+        if tag in {"script", "style"}:
+            self.raw_tag = tag
+
+    def handle_startendtag(self, tag: str, attrs: Any) -> None:
+        self._flush()
+        self.parts.append(self.get_starttag_text())
+
+    def handle_endtag(self, tag: str) -> None:
+        self._flush()
+        self.parts.append(f"</{tag}>")
+        if tag == self.heading:
+            self.heading = None
+        if tag == self.raw_tag:
+            self.raw_tag = None
+
+    def handle_data(self, data: str) -> None:
+        self.text.append(data)
+
+    def handle_entityref(self, name: str) -> None:
+        self.text.append(f"&{name};")
+
+    def handle_charref(self, name: str) -> None:
+        self.text.append(f"&#{name};")
+
+    def handle_comment(self, data: str) -> None:
+        self._flush()
+        self.parts.append(f"<!--{data}-->")
+
+
+def _render_stored_rich_text(value: str) -> str:
+    if not _looks_like_html(value):
+        return _render_plain_text_html(value)
+    if "**" not in value:
+        return value
+    parser = _StoredBoldRenderer()
+    parser.feed(value)
+    parser.close()
+    parser._flush()
+    return "".join(parser.parts)
 
 
 def render_body_html(
@@ -498,7 +565,7 @@ def normalize_blog_content(
     if not name:
         return content
 
-    summary_title = _compact_text(content.get("summary_title") or DEFAULT_SUMMARY_TITLE)
+    summary_title = _strip_markdown_bold(content.get("summary_title") or DEFAULT_SUMMARY_TITLE)
 
     intro_heading = _compact_text(content.get("intro_heading")) or None
     introduction_paragraphs = [
@@ -531,7 +598,7 @@ def normalize_blog_content(
 
     # Structured drafts are re-rendered so renderer fixes also reach drafts stored before them.
     body_html = ""
-    if intro_heading or sections or conclusion_heading or conclusion_paragraphs:
+    if intro_heading or introduction_paragraphs or sections or conclusion_heading or conclusion_paragraphs:
         internal_links = _sanitize_internal_links(content.get("internal_links"))
         body_html = render_body_html(
             intro_heading=intro_heading,
@@ -542,27 +609,27 @@ def normalize_blog_content(
             internal_links=internal_links,
         )
     if not body_html:
-        body_html = content.get("body_html") or ""
-    if not body_html:
-        legacy_body = str(content.get("body") or "")
-        body_html = legacy_body if _looks_like_html(legacy_body) else _render_plain_text_html(legacy_body)
+        body_html = _render_stored_rich_text(str(content.get("body_html") or content.get("body") or ""))
 
     plain_body = _strip_html(body_html)
     stored_summary_html = "" if summary_bullets else content.get("summary_html")
-    if not summary_bullets:
+    if not summary_bullets and not stored_summary_html:
         summary_bullets = _extract_sentences(plain_body)[:4]
-    if not summary_bullets and content.get("preview_text"):
+    if not summary_bullets and not stored_summary_html and content.get("preview_text"):
         summary_bullets = [_compact_text(content.get("preview_text"))]
 
-    summary_html = stored_summary_html or render_summary_html(summary_title, summary_bullets)
+    summary_html = (
+        _render_stored_rich_text(str(stored_summary_html))
+        if stored_summary_html else render_summary_html(summary_title, summary_bullets)
+    )
 
     sentences = _extract_sentences(plain_body)
-    merksatz = _strip_markdown_bold(content.get("merksatz")) or (sentences[0] if sentences else name)
-    tipp = _strip_markdown_bold(content.get("tipp")) or (sentences[1] if len(sentences) > 1 else merksatz)
+    merksatz = _strip_markdown_bold(content.get("merksatz") or (sentences[0] if sentences else name))
+    tipp = _strip_markdown_bold(content.get("tipp") or (sentences[1] if len(sentences) > 1 else merksatz))
     preview_text = _strip_markdown_bold(content.get("preview_text"))
     if not preview_text:
         paragraphs = _split_plain_paragraphs(plain_body)
-        preview_text = _truncate(paragraphs[0] if paragraphs else plain_body, 220)
+        preview_text = _truncate(_strip_markdown_bold(paragraphs[0] if paragraphs else plain_body), 220)
 
     word_count = int(content.get("word_count") or _count_words(summary_html, body_html, merksatz, tipp))
     publication_date = (
@@ -576,7 +643,7 @@ def normalize_blog_content(
         "schema_version": 2,
         "name": name,
         "title": name,
-        "slug": _compact_text(content.get("slug")) or _slugify(name),
+        "slug": _strip_markdown_bold(content.get("slug")) or _slugify(name),
         "merksatz": merksatz,
         "tipp": tipp,
         "summary_title": summary_title,
@@ -591,12 +658,12 @@ def normalize_blog_content(
         "body": body_html,
         "publication_date": publication_date,
         "preview_text": preview_text,
-        "reading_time": _compact_text(content.get("reading_time")) or format_reading_time(word_count),
+        "reading_time": _strip_markdown_bold(content.get("reading_time")) or format_reading_time(word_count),
         "image_prompt": _compact_limited_text(content.get("image_prompt"), 500) or None,
         "image_model": _compact_text(content.get("image_model")) or None,
         "image_generated_at": _compact_text(content.get("image_generated_at")) or None,
         "preview_image_url": _compact_text(content.get("preview_image_url")) or None,
-        "author_name": _compact_text(content.get("author_name")) or None,
+        "author_name": _strip_markdown_bold(content.get("author_name")) or None,
         "meta_title": _strip_markdown_bold(content.get("meta_title")) or name,
         "meta_description": _strip_markdown_bold(content.get("meta_description")) or _truncate(preview_text or plain_body, 160),
         "sources": normalize_blog_sources(content.get("sources")),
