@@ -19,6 +19,7 @@ from app.features.blog.schemas import (
     merge_blog_content_updates,
     normalize_blog_content,
 )
+from app.features.blog.sources import filter_blog_sources
 
 logger = get_logger(__name__)
 
@@ -96,6 +97,12 @@ def _load_post_for_blog(post_id: str) -> Dict[str, Any]:
         published_at=_isoformat_optional(post.get("blog_published_at")),
     )
     return post
+
+
+def get_blog_preview_source_names(post_id: str) -> List[str]:
+    """Project available source names without changing the saved article."""
+    post = _load_post_for_blog(post_id)
+    return [source["title"] for source in filter_blog_sources(post["blog_content"].get("sources"))]
 
 
 def toggle_blog_enabled(post_id: str, *, enabled: bool) -> Dict[str, Any]:
