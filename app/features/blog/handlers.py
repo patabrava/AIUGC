@@ -7,7 +7,7 @@ Per Constitution § V: Locality & Vertical Slices
 import asyncio
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
@@ -16,6 +16,7 @@ from app.core.logging import get_logger
 from app.features.blog.queries import (
     _load_post_for_blog,
     get_blog_enabled_posts,
+    get_blog_preview_source_names,
     toggle_blog_enabled,
     update_blog_status,
     update_blog_content_fields,
@@ -73,6 +74,14 @@ def _queue_near_term_blog_dispatch(scheduled_at: datetime) -> bool:
 
 class ToggleRequest(BaseModel):
     enabled: bool = Field(..., description="Whether to enable blog for this post")
+
+
+@router.get("/posts/{post_id}/blog/sources-preview", response_model=SuccessResponse)
+async def preview_blog_sources(post_id: str, response: Response):
+    """Check saved source references on demand, off the application event loop."""
+    response.headers["Cache-Control"] = "no-store"
+    names = await asyncio.to_thread(get_blog_preview_source_names, post_id)
+    return SuccessResponse(data={"post_id": post_id, "sources": names})
 
 
 @router.put("/posts/{post_id}/blog-toggle", response_model=SuccessResponse)

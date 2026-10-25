@@ -242,10 +242,16 @@
 
                     <div>
                         <label class="block text-xs text-gray-400 uppercase tracking-wide mb-1">Sources (from dossier)</label>
-                        <div class="bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-xs text-gray-400 leading-relaxed">
-                            <template x-for="(src, index) in (post.blog_content.sources || []).filter(s => s && s.title)" :key="index">
-                                <span class="block break-words" x-text="'• ' + src.title"></span>
+                        <div class="bg-[#0f0f1e] border border-white/10 rounded-lg px-3 py-2 text-xs text-gray-400 leading-relaxed" aria-live="polite">
+                            <p x-show="post.sourcePreview.status === 'idle' || post.sourcePreview.status === 'loading'">Checking sources…</p>
+                            <template x-for="(name, index) in post.sourcePreview.names" :key="index">
+                                <span class="block break-words" x-text="'• ' + name"></span>
                             </template>
+                            <p x-show="post.sourcePreview.status === 'ready' && !post.sourcePreview.names.length">No sources to display.</p>
+                            <div x-show="post.sourcePreview.status === 'error'">
+                                <p>Sources could not be checked.</p>
+                                <button type="button" class="mt-2 underline underline-offset-2 brand-focus" @click="loadSourcePreview(post)">Retry source check</button>
+                            </div>
                         </div>
                     </div>
 
@@ -332,6 +338,7 @@ function blogPanelComponent() {
                 busyAction: null,
                 clientStatus: null,
                 clientNote: '',
+                sourcePreview: { status: 'idle', names: [] },
             };
         },
         initPosts(rawPosts) {
@@ -419,6 +426,26 @@ function blogPanelComponent() {
             this.expanded = this.expanded === postId ? null : postId;
             window.batchDetailExpanded = !!this.expanded;
             this.closeCalendar();
+            if (this.expanded) this.loadSourcePreview(this.findPost(postId));
+        },
+        async loadSourcePreview(post) {
+            if (!post || ['loading', 'ready'].includes(post.sourcePreview.status)) return;
+            const preview = post.sourcePreview;
+            preview.status = 'loading';
+            preview.names = [];
+            try {
+                const response = await fetch('/blog/posts/' + post.id + '/blog/sources-preview', { cache: 'no-store' });
+                const payload = await this.readPayload(response);
+                if (!response.ok || payload?.ok !== true || !Array.isArray(payload?.data?.sources)
+                    || !payload.data.sources.every(name => typeof name === 'string')) {
+                    throw new Error('Source preview unavailable');
+                }
+                if (post.sourcePreview !== preview) return;
+                preview.names = payload.data.sources;
+                preview.status = 'ready';
+            } catch (_) {
+                if (post.sourcePreview === preview) preview.status = 'error';
+            }
         },
         // `publication_date` can arrive as an ISO timestamp or as free text the model
         // wrote (e.g. "10.08.2026"), so accept both before giving up on a prefill.
@@ -686,6 +713,8 @@ function blogPanelComponent() {
                     throw new Error(errorMessage || `Generate failed (${response.status})`);
                 }
                 post.blog_content = payload.data;
+                post.sourcePreview = { status: 'idle', names: [] };
+                this.loadSourcePreview(post);
                 post.blog_status = post.blog_scheduled_at ? 'scheduled' : 'draft';
                 this.flashNote(post, 'Draft generated.');
             } catch (error) {
