@@ -38,6 +38,7 @@ from app.features.blog.schemas import (
 from app.features.blog.sources import filter_blog_sources
 from app.features.blog.webflow_client import WebflowClient
 from app.features.topics.queries import get_topic_research_dossiers
+from app.features.topics.product_knowledge import get_product_knowledge_base
 from app.features.topics.seo_catalog import (
     derive_primary_keyword,
     format_seo_prompt_block,
@@ -638,8 +639,42 @@ def _lookup_dossier(post: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _resolve_blog_input(post: Dict[str, Any]) -> tuple[Dict[str, Any], str]:
+    """Resolve approved product facts or the existing research dossier contract."""
+    seed_data = post.get("seed_data") or {}
+    post_type = _compact_line(post.get("post_type") or seed_data.get("post_type")).casefold()
+    if post_type == "product":
+        product_name = _compact_line(seed_data.get("product_name"))
+        entry = next(
+            (item for item in get_product_knowledge_base()
+             if item.is_active and item.product_name.casefold() == product_name.casefold()),
+            None,
+        )
+        if entry is None:
+            raise ValueError("No approved product knowledge found for this post's product.")
+        topic = _compact_line(post.get("topic_title") or seed_data.get("product_angle"))
+        payload = {
+            "topic": f"{entry.product_name}: {topic}" if topic else entry.product_name,
+            "cluster_summary": entry.summary,
+            "facts": list(entry.facts),
+            "angle_options": [topic] if topic else [],
+            "sources": [{"title": f"LIPPE Lift Produktwissen – {entry.product_name}", "url": ""}],
+            "source_summary": f"Freigegebene interne Produktinformationen zu {entry.product_name}. {entry.summary}",
+            "risk_notes": ["Nur die freigegebenen Produktfakten verwenden; keine Preise, Förderzusagen oder zusätzlichen technischen Eigenschaften erfinden."],
+            "disclaimer": "Die Eignung und Ausführung müssen für die konkrete Einbausituation geprüft werden.",
+        }
+        logger.info("blog_product_knowledge_resolved", post_id=post.get("id"), product_name=entry.product_name)
+        # Product knowledge has no research-dossier row; never invent an ID.
+        return payload, ""
+
+    dossier = _lookup_dossier(post)
+    if not dossier:
+        raise ValueError("No research dossier found for this topic.")
+    return dossier.get("normalized_payload") or {}, dossier.get("id", "")
+
+
 def generate_blog_draft(post_id: str) -> Dict[str, Any]:
-    """Generate a blog draft for a post from its research dossier."""
+    """Generate a blog draft from approved product knowledge or research."""
     post = _load_post_for_blog(post_id)
     seed_data = post.get("seed_data") or {}
 
@@ -652,14 +687,7 @@ def generate_blog_draft(post_id: str) -> Dict[str, Any]:
     update_blog_status(post_id, status="generating")
 
     try:
-        dossier = _lookup_dossier(post)
-        if not dossier:
-            error_content = _build_error_content(post, "No research dossier found for this topic.")
-            update_blog_status(post_id, status="failed", blog_content=error_content)
-            return error_content
-
-        dossier_payload = dossier.get("normalized_payload") or {}
-        dossier_id = dossier.get("id", "")
+        dossier_payload, dossier_id = _resolve_blog_input(post)
 
         dossier_sources = dossier_payload.get("sources") or []
         sources = filter_blog_sources(dossier_sources)
@@ -742,11 +770,7 @@ def generate_blog_image(post_id: str, *, image_prompt: Optional[str] = None) -> 
     if not blog_has_draft_content(blog_content):
         raise ValueError(f"No blog content to generate an image for post {post_id}")
 
-    dossier = _lookup_dossier(post)
-    if not dossier:
-        raise ValueError(f"No research dossier found for post {post_id}")
-
-    dossier_payload = dossier.get("normalized_payload") or {}
+    dossier_payload, _ = _resolve_blog_input(post)
     effective_prompt = (image_prompt or blog_content.get("image_prompt") or "").strip()
     if not effective_prompt:
         effective_prompt = _build_blog_image_prompt(blog_content, dossier_payload)
