@@ -59,14 +59,14 @@ def _load_post_for_blog(post_id: str) -> Dict[str, Any]:
     try:
         response = (
             supabase.client.table("posts")
-            .select("id, batch_id, seed_data, blog_enabled, blog_status, blog_content, blog_webflow_item_id, blog_scheduled_at, blog_published_at, topic_title")
+            .select("id, batch_id, post_type, seed_data, blog_enabled, blog_status, blog_content, blog_webflow_item_id, blog_scheduled_at, blog_published_at, topic_title")
             .eq("id", post_id)
             .execute()
         )
     except Exception:
         response = (
             supabase.client.table("posts")
-            .select("id, batch_id, seed_data, blog_enabled, blog_status, blog_content, blog_webflow_item_id, blog_published_at, topic_title")
+            .select("id, batch_id, post_type, seed_data, blog_enabled, blog_status, blog_content, blog_webflow_item_id, blog_published_at, topic_title")
             .eq("id", post_id)
             .execute()
         )
