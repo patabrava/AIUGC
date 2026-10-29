@@ -1,5 +1,13 @@
 # Architecture
 
+## Product image model and living-room release (2026-10-29)
+
+- Product scene defaults (`Settings.semantic_scene_plate_model`, scene/background and shot-frame defaults, examples and production deployment pin) select `gemini-nano-banana-2.1`. Both `VertexGeminiClient` image methods use `global` and omit unsupported temperature only for this model. Generic/blog image2.5 and immutable actor3q3-pro remain unchanged. Model selection already participates in the generation-contract/anchor hash; no evaluator/SQL migration is needed.
+- `scene_reference.py` maps historical `hallway_stairlift_a` to livingroom `home_living_room_advice_a` (biblev4), including specialized product routes. Shared `LIFT_FREE_SCENE_CONTRACT` excludes stairs and lift equipment across backgrounds and actor plates. Current-version canonical lookup prevents reuse of staircasebiblev2. All nine current canonical backgrounds are generated through Vertex2.1,9:16/1K: livingroomv4 and eightother scenesv3 (hosted inventory verifiedOctober29). Image contract config is `flash-photographic-integration-v15`; preserve main's existing level eye-height/central-third geometry and visualcontractv5.
+- This release changes model and lift-free scene routing; it does not promote the custom evaluation prompt that locks source coordinates. The previous isolated automatic plate widened crop despite passing identityQA; the approved-frame8s Veo trial passed speech/scene checks but failed skin/teeth realismQA. Neither is production-quality visual acceptance; original references and all gates remain enforced. No additional paid generation is required for deployment verification.
+- Regression:455 adapter/prompt/contract/scene/handler tests plus11 isolatedconfigtests passed; native release integration review PASS (release-nb21-20261029,no correction). Coverage includes payload/reference/retry contracts, modelhash invalidation and liftfree alias/cache behavior. Original development workspace holds trial artifacts under `output/nb21-product8s-2026-10-29/`; generated/private artifacts are excluded from the release.
+
+
 ## Maintained instruction and validation entry points
 
 - `AGENTS.md`: canonical Bridgecode 4.3.2 core plus editable AIUGC migration notice and harness constraints. `.bridgecode/installation.json` owns release hashes; use `npx -y @bridgecode/cli@4.3.2 doctor --project .` for integrity. `bridgecode/legacy/AGENTS.pre-4.3.2.md`, `general-functions.md`, and `specific-functions/` preserve the historical policy; the current specialist index governs new tasks.

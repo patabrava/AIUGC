@@ -14,6 +14,7 @@ from app.core.image_generation_prompt import (
     load_raw_camera_system_prompt,
 )
 
+from app.features.characters.scene_reference import LIFT_FREE_SCENE_CONTRACT
 
 PHOTOGRAPHIC_INTEGRATION_CONTRACT = (
     "Reconstruct the output as one coherent in-camera photograph, not as a portrait pasted, "
@@ -91,6 +92,7 @@ def _build_prompt_writer_brief(
         "attribute come from those images alone; never infer them from the actor name or from this text. "
         f"Wardrobe: {wardrobe_description} "
         f"Location: {scene_description} "
+        f"{LIFT_FREE_SCENE_CONTRACT} "
         "Use an arm's-length selfie crop: the top edge sits just above the hair and the bottom edge cuts across the "
         "chest below the armpits, so the head alone fills about 40 to 45 percent of the frame height and the face "
         "reads large and identity-readable. This tight crop takes priority over showing the room; a single corner of "
@@ -115,6 +117,7 @@ def _build_composition_prompt(*, prompt_writer_output: str) -> str:
         "Reconstruct one unified photograph containing exactly one person—the same adult person from Images 1 and 2—"
         "physically present inside the room from Image 3. "
         f"{PHOTOGRAPHIC_INTEGRATION_CONTRACT} "
+        f"{LIFT_FREE_SCENE_CONTRACT} "
         "Do not average the actor into a new face, change the apparent age, change the "
         "hair, add another person, invent a wheelchair, redesign the room, add signage, add subtitles, or add readable text. "
         "Images 1 and 2 are the sole and authoritative visual identity evidence. Resolve every visible identity attribute "
@@ -144,7 +147,7 @@ def generate_shot_frame_candidates(
     location_reference: ShotFrameReference,
     candidate_count: int = 3,
     llm_client: Optional[Any] = None,
-    image_model: str = "gemini-3.1-flash-image",
+    image_model: str = "gemini-nano-banana-2.1",
     sleep_fn: Callable[[float], None] = time.sleep,
     quota_retry_delay_seconds: float = 65.0,
 ) -> ShotFrameGenerationResult:

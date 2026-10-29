@@ -337,11 +337,13 @@ class VertexGeminiClient:
         provider_timeout_seconds: Optional[float] = None,
     ) -> Dict[str, Any]:
         target_model = model or self._settings.vertex_gemini_image_model
+        # Nano Banana 2.1 is global-only and does not accept sampling controls.
+        is_nano_banana_21 = target_model == "gemini-nano-banana-2.1"
         payload = self._build_generate_content_payload(
             prompt=prompt,
             system_prompt=system_prompt,
             max_tokens=max_tokens,
-            temperature=temperature,
+            temperature=None if is_nano_banana_21 else temperature,
             input_images=input_images,
         )
         payload.setdefault("generationConfig", {})
@@ -352,7 +354,11 @@ class VertexGeminiClient:
         }
         data = self._post_generate_content(
             model=target_model,
-            location=self._settings.vertex_gemini_image_location or self._settings.vertex_ai_location,
+            location=(
+                "global"
+                if is_nano_banana_21
+                else self._settings.vertex_gemini_image_location or self._settings.vertex_ai_location
+            ),
             payload=payload,
             log_event="vertex_gemini_generate_image",
             max_attempts=provider_max_attempts,
@@ -383,11 +389,13 @@ class VertexGeminiClient:
     ) -> Dict[str, Any]:
         """Generate every inline image returned by one Gemini request."""
         target_model = model or self._settings.vertex_gemini_image_model
+        # Nano Banana 2.1 is global-only and does not accept sampling controls.
+        is_nano_banana_21 = target_model == "gemini-nano-banana-2.1"
         payload = self._build_generate_content_payload(
             prompt=prompt,
             system_prompt=system_prompt,
             max_tokens=max_tokens,
-            temperature=temperature,
+            temperature=None if is_nano_banana_21 else temperature,
             input_images=input_images,
         )
         payload.setdefault("generationConfig", {})
@@ -398,7 +406,11 @@ class VertexGeminiClient:
         }
         data = self._post_generate_content(
             model=target_model,
-            location=self._settings.vertex_gemini_image_location or self._settings.vertex_ai_location,
+            location=(
+                "global"
+                if is_nano_banana_21
+                else self._settings.vertex_gemini_image_location or self._settings.vertex_ai_location
+            ),
             payload=payload,
             log_event="vertex_gemini_generate_images",
             max_attempts=provider_max_attempts,

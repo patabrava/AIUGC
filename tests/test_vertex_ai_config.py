@@ -41,11 +41,11 @@ def test_gemini_provider_defaults_to_vertex_without_legacy_fallback(monkeypatch,
     assert settings.vertex_gemini_image_model == "gemini-2.5-flash-image"
     assert settings.vertex_grounded_research_model == "gemini-2.5-pro"
     assert settings.vertex_grounded_research_location == "global"
-    assert settings.semantic_scene_plate_model == "gemini-3.1-flash-image"
+    assert settings.semantic_scene_plate_model == "gemini-nano-banana-2.1"
     assert settings.semantic_scene_plate_image_size == "2K"
     assert (
         settings.semantic_scene_plate_contract_version
-        == "flash-level-camera-v14"
+        == "flash-photographic-integration-v15"
     )
     assert settings.semantic_scene_identity_gate_location == "global"
     assert settings.semantic_scene_identity_gate_model == "gemini-2.5-flash"

@@ -5,6 +5,19 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+# Shared by environment generation, actor references and scene-plate composition.
+LIFT_EQUIPMENT_REJECTORS = (
+    "stairlifts, stairlift chairs, and stairlift rail tracks",
+    "platform lifts, cabin lifts, home lifts, elevators, and lift shafts",
+)
+LIFT_FREE_SCENE_CONTRACT = (
+    "Show an ordinary domestic background without stairs or lift equipment. "
+    "No stairs, staircases, stairwells, steps, split-level floors, or stair railings may appear. "
+    "Exclude " + ", ".join(LIFT_EQUIPMENT_REJECTORS) + ". "
+    "If any supplied reference contains this equipment, omit it and reconstruct the ordinary "
+    "continuous floor or wall behind it. Preserve the actor's manual wheelchair when applicable."
+)
+
 SCENE_REFERENCE_IDENTITY_STRENGTH = 100
 SCENE_REFERENCE_FIXED_GENERATION = False
 SCENE_REFERENCE_ENGINE = "magnific_sparkle"
@@ -44,6 +57,12 @@ class SceneBible:
     forbidden_changes: str
     scene_moment: str
     wardrobe_lock: str = "cream crewneck sweater, neutral trousers, no logos, no jewelry"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "scene_specific_rejectors",
+            self.scene_specific_rejectors + LIFT_EQUIPMENT_REJECTORS,
+        )
 
     def scene_consistency_contract(self) -> dict[str, Any]:
         return {
@@ -89,7 +108,7 @@ class SceneReferenceAngle:
 SCENE_BIBLES = {
     "bathroom_accessibility_a": SceneBible(
         scene_id="bathroom_accessibility_a",
-        version=2,
+        version=3,
         name="Accessible bathroom A",
         scene_identity=(
             "Accessible bathroom scene A. Keep this exact room identity across all generated angles: a lived-in compact German accessible bathroom, matte off-white square wall tiles with subtle grout variation, pale grey microcement floor with ordinary edge wear, single horizontal brushed-steel grab rail on the actor's left, wall-mounted white sink at rear right with one blank amber soap dispenser and one cream ceramic toothbrush tumbler, folded sage-green towel on a narrow oak shelf beside a small plain soap dish, frosted window high on rear wall, soft imperfect daylight entering from upper left. The fixed objects have natural asymmetry and orderly everyday placement while the clear wheelchair turning area remains completely open. No readable text, brand marks, mirror, shower curtain, plants, extra furniture, or decorative staging."
@@ -144,7 +163,7 @@ SCENE_BIBLES = {
     ),
     "car_transfer_residential_a": SceneBible(
         scene_id="car_transfer_residential_a",
-        version=2,
+        version=3,
         name="Residential car transfer A",
         scene_identity=(
             "Residential car transfer scene A. Keep this exact location identity across all generated angles: an ordinary lived-in residential curb, silver compact hatchback with mild road dust parked beside pale sidewalk paving with a few darker weather marks, front passenger door open, dark grey car interior visible with one folded charcoal travel blanket on the rear seat and one plain unbranded canvas tote standing in the passenger footwell, low brick garden wall with uneven weathering behind the car, two or three fallen leaves near the curb, muted green hedge in the far background, soft overcast daylight. Keep the transfer path open. No readable plates, logos, labels, traffic, pedestrians, storefronts, or decorative staging."
@@ -199,7 +218,7 @@ SCENE_BIBLES = {
     ),
     "home_living_room_advice_a": SceneBible(
         scene_id="home_living_room_advice_a",
-        version=2,
+        version=4,
         name="Home living room advice A",
         scene_identity=(
             "Home living room advice scene A. Keep this exact room identity across all generated angles: a lived-in middle-class German living room photographed as an ordinary home, warm off-white wall with one small muted abstract print in a thin oak frame, narrow light-oak side table on actor's right holding one matte white ceramic mug, one closed blank-cover paperback and a small plain remote, one small green rubber plant in a terracotta pot, linen beige curtain at far left with a natural uneven fold, pale oak floor with mild everyday wear. The fixed objects have varied heights and relaxed asymmetry without crowding the actor or wheelchair. No readable text, brand marks, television, bed, kitchen, gallery wall, extra furniture, or decorative staging."
@@ -232,6 +251,7 @@ SCENE_BIBLES = {
             "light-oak side table with one white mug, blank-cover paperback and plain remote, one terracotta plant, one muted abstract print, beige curtain, and warm off-white wall stay visible as the same living room setup"
         ),
         scene_specific_rejectors=(
+            "stairs, staircases, stairwells, steps, split-level floors, and stair railings",
             "television",
             "bed",
             "kitchen",
@@ -252,50 +272,9 @@ SCENE_BIBLES = {
         ),
         scene_moment="Mid-motion while making a natural conversational gesture beside the side table.",
     ),
-    "hallway_stairlift_a": SceneBible(
-        scene_id="hallway_stairlift_a",
-        version=2,
-        name="Home stairlift hallway A",
-        scene_identity="Home stairlift hallway scene A. Keep this exact room identity across all generated angles: a lived-in middle-class German entry hallway meeting a straight wooden staircase, neutral warm-grey painted walls with one small blank-faced wall thermostat, mid-oak stair treads with mild edge scuffs and white-painted risers, an installed stairlift with a brushed-aluminium rail track running along the right edge of the treads and a folded grey-upholstered stairlift chair parked at the bottom landing, a white-painted wooden handrail mounted on the left wall opposite the rail, a narrow charcoal-and-cream patterned hallway runner on the landing floor, and one slim matte charcoal umbrella stand holding a single closed umbrella tucked against the wall clear of the stairlift. A small landing window high on the upper stairs lets in soft imperfect daylight. No readable text, labels, people, open front door, loose coats or shoes, framed pictures, plants, or objects obstructing the lift path.",
-        generation_anchor="the same lived-in home stairlift hallway behind the actor: straight mildly scuffed oak staircase with white risers, brushed-aluminium stairlift rail along the right of the treads, folded grey stairlift chair parked at the bottom landing, white-painted handrail on the left wall, charcoal-and-cream hallway runner, one blank-faced wall thermostat, one slim charcoal umbrella stand with a single closed umbrella tucked clear of the lift, soft daylight from a high landing window",
-        consistency_anchor="same stairlift rail and folded chair, mildly scuffed oak staircase, left-wall handrail, hallway runner, blank-faced thermostat, single-umbrella stand, high landing window, and soft daylight",
-        layout_lock="same home stairlift hallway: brushed-aluminium stairlift rail along the right of the oak treads, folded grey stairlift chair at the bottom landing, white-painted handrail on the left wall, charcoal-and-cream runner on the landing, high landing window",
-        must_match=(
-            "brushed-aluminium stairlift rail remains along the right of the treads",
-            "folded grey stairlift chair remains parked at the bottom landing",
-            "white-painted handrail remains on the left wall opposite the rail",
-            "charcoal-and-cream runner remains on the landing floor",
-            "soft daylight from the high landing window stays consistent across all three angles",
-        ),
-        acceptance_checklist=(
-            "Does this look like the same stairlift hallway as the other two angles?",
-            "Are the stairlift rail, folded chair, left-wall handrail, and hallway runner still present?",
-            "Do the anchor objects stay in the same relative positions?",
-            "Is the actor still the dominant visible subject with wheelchair context?",
-            "Is the lighting still soft landing daylight rather than a different room mood?",
-        ),
-        anchor_lock="stairlift rail along the treads, folded grey stairlift chair at the bottom landing, white-painted left-wall handrail, hallway runner, blank-faced thermostat, and slim stand with one closed umbrella stay visible as the same stairlift setup",
-        scene_specific_rejectors=(
-            "curved or spiral staircase",
-            "second flight of stairs",
-            "elevator or platform lift",
-            "carpeted full stairs",
-            "open front door",
-            "coat rack or shoe rack",
-            "framed wall pictures",
-            "potted plants",
-            "readable thermostat markings or product labels",
-            "objects obstructing the stairlift path",
-        ),
-        composition="Vertical 9:16 UGC smartphone frame, medium shot, subject and staircase context visible, hands visible. Camera height 1.4m, 28mm smartphone lens feel, camera about 1.9m from subject.",
-        lighting="Soft natural daylight from the high landing window above, gentle even fill across the hallway, calm low-contrast indoor shadows.",
-        forbidden_changes="Do not change wall color, staircase material, stairlift rail position, folded chair position, handrail side, runner pattern, fixed everyday-object counts or positions, window position, or hallway layout. Keep the full stairlift path clear.",
-        scene_moment="Mid-motion while gesturing toward the folded stairlift chair at the bottom landing, with a natural turn through the scene.",
-        wardrobe_lock="cream crewneck sweater, neutral trousers, no logos, no jewelry",
-    ),
     "entryway_ramp_a": SceneBible(
         scene_id="entryway_ramp_a",
-        version=2,
+        version=3,
         name="Home entryway threshold ramp A",
         scene_identity="Home entryway threshold ramp scene A. Keep this exact place identity across all generated angles: a lived-in residential front entrance seen from just inside the hall, a white-painted front door with a long upper pane of frosted glass standing ajar at the rear, a low light-grey aluminium threshold ramp bridging the raised doorstep for wheelchair access, a small charcoal coir mat with slightly irregular fibres on the pale oak floor in front of the ramp, three brushed-steel coat hooks on the warm off-white left wall with one tan coat and one closed navy umbrella hanging, and a slim light-oak console table against the right wall holding one shallow cream key bowl and one folded unbranded canvas shopping tote. One pair of neutral shoes is tucked fully beneath the console, clear of the ramp. Soft imperfect daylight spills through the open glazed door from rear-centre. No readable text, logos, stairs, street traffic, shoe rack, plants, wall art, or objects obstructing the accessible route.",
         generation_anchor="the same lived-in home entryway behind the actor: white front door with frosted upper pane standing ajar at rear-centre, low light-grey aluminium threshold ramp over the doorstep, slightly irregular charcoal coir mat on pale oak floor, brushed-steel coat hooks with one tan coat and one closed navy umbrella on the warm off-white left wall, slim light-oak console at right with one cream key bowl and one folded blank canvas tote, one pair of neutral shoes tucked beneath the console clear of the ramp, soft daylight from the open glazed door",
@@ -336,7 +315,7 @@ SCENE_BIBLES = {
     ),
     "bedroom_accessibility_a": SceneBible(
         scene_id="bedroom_accessibility_a",
-        version=2,
+        version=3,
         name="Accessible bedroom A",
         scene_identity="Accessible bedroom scene A. Keep this exact room identity across all generated angles: a calm lived-in neutral adult bedroom, warm off-white walls with faint ordinary surface variation, pale oak floor with mild wear, a single adjustable care bed centered with a slightly rumpled plain light-grey duvet, one matching pillow, and one folded oatmeal cardigan at the far foot corner, a completely clear transfer space on the actor's left side of the bed, a small light-oak bedside table at rear right holding one matte ceramic lamp, one clear glass of water, one blank-cover paperback, and one plain cream tissue box. One pair of soft grey slippers is tucked beneath the bedside table, away from the transfer area. A rear-left window with naturally folded sheer light-linen curtains lets in soft imperfect daylight. No readable text, labels, headboard decor, wall art, rug, plants, wardrobe, dense clutter, or objects in the transfer space.",
         generation_anchor="the same calm lived-in accessible bedroom behind the actor: warm off-white walls, mildly worn pale oak floor, single adjustable care bed with slightly rumpled light-grey duvet, matching pillow and one folded oatmeal cardigan at the far foot corner, clear transfer space beside the bed, small light-oak bedside table at rear right with one ceramic lamp, one glass of water, one blank-cover paperback and one cream tissue box, one pair of grey slippers tucked beneath the table away from the transfer space, naturally folded sheer curtains over a rear-left window, soft daylight",
@@ -377,7 +356,7 @@ SCENE_BIBLES = {
     ),
     "garden_patio_a": SceneBible(
         scene_id="garden_patio_a",
-        version=2,
+        version=3,
         name="Garden patio A",
         scene_identity="Residential garden patio scene A. Keep this exact place identity across all generated angles: a naturally used quiet suburban backyard terrace, pale grey rectangular paving slabs with subtle rain marks and a little moss in two joints, one simple light-oak slatted outdoor bench at rear right with one slightly faded sage seat cushion, three mismatched terracotta pots holding low green leafy plants clustered at the left edge of the paving, one small galvanized watering can and one pair of plain gardening gloves placed beside those pots clear of the wheelchair route, low trimmed garden greenery and a weathered light-brown wooden slat fence across the rear, and three or four dry leaves near the fence. Soft overcast daylight comes from above in calm still air. No readable text, brand marks, garden table, parasol, barbecue, loose tools, pets, people, or decorative staging.",
         generation_anchor="the same naturally used residential garden patio behind the actor: pale grey paving with subtle rain marks and moss in two joints, light-oak slatted bench at rear right with one faded sage cushion, three mismatched terracotta pots with low green plants at the left edge, one small galvanized watering can and one pair of plain gardening gloves beside the pots clear of the wheelchair route, low greenery, weathered wooden slat fence, three or four dry leaves near the fence, soft overcast daylight",
@@ -418,7 +397,7 @@ SCENE_BIBLES = {
     ),
     "home_kitchen_advice_a": SceneBible(
         scene_id="home_kitchen_advice_a",
-        version=2,
+        version=3,
         name="Home kitchen advice A",
         scene_identity="Home kitchen advice scene A. Keep this exact room identity across all generated angles: a lived-in, middle-class German accessible kitchen photographed as an ordinary home rather than a showroom. Pale light-oak flat-front cabinetry and a matte cream wall frame one lowered light-grey quartz counter section with clear knee space on the actor's right. A single completely unbranded matte white kettle with a plain uninterrupted surface and one plain white mug sit on the lowered counter. At rear, a small square window sits above a stainless undermount sink. At the rear-left edge, part of a compact silver refrigerator is visible with five mismatched colored geometric magnets and two small childlike crayon drawings containing no readable writing. A compact completely unbranded black bean-to-cup coffee machine with no badge, logo, letters, symbols, or writing sits on the left worktop. A white wire drying rack beside the sink holds two clear drinking glasses and one neutral plate. A low cream ceramic bowl holds several mixed apples and oranges, and one slightly rumpled sage cotton dish towel rests near the sink. Soft imperfect daylight enters from upper right. The fixed objects have varied heights, mild wear, natural asymmetry, and orderly everyday placement; the room feels actively used without becoming crowded. Every appliance surface is blank. No brand marks, labels, readable text, people, pets, open cupboard doors, or decorative staging.",
         generation_anchor="the same lived-in accessible German kitchen behind the actor: pale light-oak cabinetry, matte cream wall, lowered light-grey quartz counter with open knee space on actor right holding one blank unbranded white kettle and one white mug, square window over a stainless sink at rear, partial silver refrigerator at rear-left with five colored magnets and two non-legible childlike drawings, compact blank unbranded black coffee machine with no badge or writing on the left worktop, white drying rack beside the sink with two glasses and one plate, low cream bowl with mixed apples and oranges, one sage dish towel, soft imperfect daylight from upper right",
@@ -464,7 +443,7 @@ SCENE_BIBLES = {
     ),
     "home_dining_nook_advice_a": SceneBible(
         scene_id="home_dining_nook_advice_a",
-        version=2,
+        version=3,
         name="Home dining nook advice A",
         scene_identity="Home dining nook advice scene A. Keep this exact room identity across all generated angles: a lived-in small German dining nook, warm pale-greige wall with one tiny blank ceramic wall hook, compact light-oak rectangular dining table set against the wall with mild edge wear, two simple light-oak chairs (one tucked at the near end, one along the back edge), two slightly mismatched natural-fibre placemats, a single low matte cream ceramic bowl holding two or three lemons centered on the table, one clear half-filled water carafe and one folded rust-colored linen napkin grouped loosely toward the wall side. A tall narrow window with a naturally uneven off-white linen sheer stands to the actor's left above a plain pale oak floor. Soft imperfect daylight makes the room feel ordinarily used without crowding the table or wheelchair approach. No readable text, logos, pendant light, rug, wall art, sideboard, plants, extra chairs, tablecloth, or decorative staging.",
         generation_anchor="the same lived-in small German dining nook behind the actor: warm pale-greige wall with one tiny blank ceramic hook, mildly edge-worn compact light-oak table against the wall, two simple oak chairs, two slightly mismatched natural-fibre placemats, one low cream bowl with two or three lemons centered, one clear half-filled water carafe and one folded rust linen napkin toward the wall side, tall narrow window with naturally uneven linen sheer to actor left, clear wheelchair approach, soft daylight",
@@ -505,7 +484,7 @@ SCENE_BIBLES = {
     ),
     "home_office_advice_a": SceneBible(
         scene_id="home_office_advice_a",
-        version=2,
+        version=3,
         name="Home office advice A",
         scene_identity="Home office advice scene A. Keep this exact room identity across all generated angles: a lived-in tidy small German home study, warm off-white wall behind, a simple light-oak desk against that wall with mild hand wear at the front edge, one completely blank closed silver-grey laptop centered on the desk, a small slightly uneven stack of plain white papers at the desk's right edge, one closed blank-cover sage notebook and one pair of reading glasses beside it, and one cream ceramic pencil cup holding three ordinary pens. A narrow oak wall shelf above carries three or four upright books with muted completely blank spines plus one small plain storage box. A plain window with a thin pale roller blind at far left lets in soft imperfect daylight over a pale oak floor. The room feels actively used, calm, and orderly. No readable text, logos, people, monitor, desk lamp, visible cables, plants, wall art, pinboard, coffee cup, or decorative staging.",
         generation_anchor="the same lived-in tidy German home study behind the actor: warm off-white wall, mildly edge-worn light-oak desk with one blank closed silver-grey laptop centered, slightly uneven stack of plain white papers at desk right, one closed blank-cover sage notebook, one pair of reading glasses and one cream pencil cup with three pens, narrow oak shelf above with three or four blank-spine muted books and one plain storage box, pale roller-blind window at far left, soft daylight",
@@ -547,6 +526,8 @@ SCENE_BIBLES = {
 }
 
 SCENE_ALIASES = {
+    # Historical staircase selections now resolve to the one living-room contract.
+    "hallway_stairlift_a": "home_living_room_advice_a",
     "bathroom_adaptation": "bathroom_accessibility_a",
     "car_transfer": "car_transfer_residential_a",
     "neutral_home": "home_living_room_advice_a",
@@ -644,14 +625,14 @@ def get_scene_reference_angle(angle_key: str) -> SceneReferenceAngle:
 # Specialized scenes are selected when the script/topic explicitly names them. Order is
 # priority: the first scene whose pattern matches the lowercased "{script} {topic}" text
 # wins. entryway is checked before stairlift so "Treppenrampe vor der Haustür" routes to
-# the ramp scene rather than the staircase. Tokens are regex fragments hardened against
+# the ramp scene rather than the living-room product backdrop. Tokens are regex fragments hardened against
 # German compound false friends (verified against a red-team corpus): word-start boundaries
 # (_WORD_START) and negative look-arounds keep e.g. "Pflegestufen", "Bad Kissingen",
 # "Mobilitätshilfe", "Autonomie", "Kindergarten" and "Wintergarten" out of these scenes.
 _WORD_START = r"(?<![a-zà-ÿ])"  # token sits at the start of a (possibly compound) word
 SPECIALIZED_SCENE_ROUTES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("entryway_ramp_a", "entryway_terms", ("hauseingang", "eingang", "haustür", "haustuer", "türschwelle", "tuerschwelle", "türverbreiterung", "tuerverbreiterung", "rampe", "auffahrrampe", "rollstuhlrampe", "threshold", "doorstep")),
-    ("hallway_stairlift_a", "stairlift_terms", ("treppenlift", _WORD_START + "treppe", "treppenstufe", "stiege", "handlauf", "geländer", "gelaender", "stairlift", "stairs", "stuhllift", "sitzlift", "plattformlift", "hublift", "senkrechtlift", "etagenlift", _WORD_START + "lift", "etage")),
+    ("home_living_room_advice_a", "stairlift_terms", ("treppenlift", _WORD_START + "treppe", "treppenstufe", "stiege", "handlauf", "geländer", "gelaender", "stairlift", "stairs", "stuhllift", "sitzlift", "plattformlift", "hublift", "senkrechtlift", "etagenlift", _WORD_START + "lift", "etage")),
     ("bathroom_accessibility_a", "bathroom_terms", ("badezimmer", "badewanne", "badumbau", "barrierefreies bad", "dusch", "toilette", "bathroom", "haltegriff", "wc", "sanitär", "sanitaer", "nasszelle", "waschtisch", "waschbecken")),
     ("bedroom_accessibility_a", "bedroom_terms", ("schlafzimmer", "schlafraum", "pflegebett", "krankenbett", "bettkante", "bettgalgen", "matratze", "nachttisch", "aufstehhilfe", "aufrichthilfe", "dekubitus", "wundliegen", "lagerung", "bedroom", "nightstand")),
     ("car_transfer_residential_a", "mobility_terms", (_WORD_START + r"auto(?![a-zà-ÿ])", "autotransfer", "autositz", "ins auto", "im auto", "aus dem auto", "pkw", "fahrzeug", r"car(?!e)", "beifahrersitz", "schwenksitz", "einstiegshilfe", "umsetzhilfe", "rutschbrett")),

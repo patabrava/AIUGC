@@ -18,6 +18,7 @@ from PIL import Image, ImageChops, ImageStat, UnidentifiedImageError
 from app.adapters.llm_client import get_llm_client
 from app.core.errors import ThirdPartyError, ValidationError
 from app.core.image_generation_prompt import write_raw_camera_image_prompt
+from app.features.characters.scene_reference import LIFT_FREE_SCENE_CONTRACT
 from app.features.shot_frames.service import (
     PHOTOGRAPHIC_INTEGRATION_CONTRACT,
     ShotFrameReference,
@@ -380,6 +381,7 @@ def build_canonical_scene_plate_prompt(
             "is supporting identity evidence only. Image 3 is the ACTOR-FREE LOCATION reference. Reconstruct one "
             "unified photograph with exactly the same adult person from Images 1 and 2 physically present inside "
             "Image 3. "
+            f"{LIFT_FREE_SCENE_CONTRACT} "
             f"{PHOTOGRAPHIC_INTEGRATION_CONTRACT} "
             f"{IDENTITY_SOURCE_CONTRACT} "
             "Preserve that person's exact facial geometry, hairline, "
@@ -408,6 +410,7 @@ def build_canonical_scene_plate_prompt(
         "is supporting identity evidence only. Image 3 is the ACTOR-FREE LOCATION reference. Reconstruct one "
         "unified photograph with exactly the same adult person from Images 1 and 2 physically present inside "
         "Image 3. "
+        f"{LIFT_FREE_SCENE_CONTRACT} "
         f"{PHOTOGRAPHIC_INTEGRATION_CONTRACT} "
         f"{IDENTITY_SOURCE_CONTRACT} "
         "Preserve that person's exact facial geometry, "
@@ -445,6 +448,7 @@ def build_derived_scene_plate_prompt(
             "scale, and upright posture. Image 2 is the unchanged front identity reference and exists only to prevent "
             "facial drift. Image 3 is the ACTOR-FREE LOCATION reference. Preserve the exact person from Images 1 and 2, "
             "their standing pose, camera height, camera distance, and face size from Image 1. "
+            f"{LIFT_FREE_SCENE_CONTRACT} "
             f"{PHOTOGRAPHIC_INTEGRATION_CONTRACT} "
             f"{IDENTITY_SOURCE_CONTRACT} {EYEWEAR_SOURCE_CONTRACT} Image 1's "
             "clothing is not authoritative: replace every visible upper-body garment with the requested outfit. "
@@ -470,6 +474,7 @@ def build_derived_scene_plate_prompt(
         "facial drift. Image 3 is the ACTOR-FREE LOCATION reference. Preserve the exact person from Images 1 "
         "and 2 and preserve the exact manual wheelchair, seated pose, camera height, camera distance, and "
         "face size from Image 1. "
+        f"{LIFT_FREE_SCENE_CONTRACT} "
         f"{PHOTOGRAPHIC_INTEGRATION_CONTRACT} "
         f"{IDENTITY_SOURCE_CONTRACT} {EYEWEAR_SOURCE_CONTRACT} "
         "Image 1's clothing is not authoritative: replace every visible upper-body "
@@ -654,7 +659,7 @@ def generate_scene_plate(
     references: Sequence[ShotFrameReference],
     prompt: str,
     llm_client: Optional[Any] = None,
-    image_model: str = "gemini-3.1-flash-image",
+    image_model: str = "gemini-nano-banana-2.1",
     image_size: str = "2K",
     traffic_key: Optional[str] = None,
     provider_timeout_seconds: Optional[float] = None,
@@ -873,7 +878,7 @@ def generate_scene_plate_candidates(
     presentation_mode: str = DEFAULT_PRESENTATION_MODE,
     candidate_count: int = 3,
     llm_client: Optional[Any] = None,
-    image_model: str = "gemini-3.1-flash-image",
+    image_model: str = "gemini-nano-banana-2.1",
     image_size: str = "2K",
     traffic_key: Optional[str] = None,
     initial_candidates: Sequence[ScenePlateCandidate] = (),

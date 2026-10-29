@@ -1005,9 +1005,9 @@ def test_candidate_release_atomically_persists_retryable_failure_and_partials():
 def test_production_deploy_pins_resumable_flash_scene_plate_traffic_contract():
     workflow = PRODUCTION_DEPLOY_WORKFLOW.read_text()
 
-    assert '"SEMANTIC_SCENE_PLATE_MODEL": "gemini-3.1-flash-image"' in workflow
+    assert '"SEMANTIC_SCENE_PLATE_MODEL": "gemini-nano-banana-2.1"' in workflow
     assert '"SEMANTIC_SCENE_PLATE_BUNDLE_ENABLED": "false"' in workflow
-    assert '"SEMANTIC_SCENE_PLATE_CONTRACT_VERSION": "flash-level-camera-v14"' in workflow
+    assert '"SEMANTIC_SCENE_PLATE_CONTRACT_VERSION": "flash-photographic-integration-v15"' in workflow
     assert '"SEMANTIC_SCENE_IDENTITY_GATE_LOCATION": "global"' in workflow
     assert '"VERTEX_GEMINI_IMAGE_LOCATION": "global"' in workflow
     assert '"SEMANTIC_SCENE_IMAGE_WORKER_CONCURRENCY": "2"' in workflow

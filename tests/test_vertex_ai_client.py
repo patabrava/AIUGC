@@ -1430,3 +1430,61 @@ def test_vertex_image_error_preserves_server_cooldown_for_outer_retry(monkeypatc
 def test_vertex_server_cooldown_rejects_invalid_values(retry_after):
     from app.adapters.vertex_gemini_client import _vertex_retry_after_seconds
     assert _vertex_retry_after_seconds(_gemini_response(429, retry_after=retry_after)) is None
+
+
+@pytest.mark.parametrize("method_name", ["generate_image", "generate_images"])
+@pytest.mark.parametrize(
+    ("model", "expected_location", "expected_temperature"),
+    [
+        ("gemini-nano-banana-2.1", "global", None),
+        ("gemini-3.1-flash-image", "europe-west4", 0.7),
+    ],
+)
+def test_vertex_image_model_capabilities_preserve_reference_and_retry_contract(
+    monkeypatch, method_name, model, expected_location, expected_temperature
+):
+    import base64
+
+    from app.adapters.vertex_gemini_client import VertexGeminiClient
+
+    client = object.__new__(VertexGeminiClient)
+    client._settings = SimpleNamespace(
+        vertex_gemini_image_model="gemini-2.5-flash-image",
+        vertex_gemini_image_location="europe-west4",
+        vertex_ai_location="us-central1",
+    )
+    captured = {}
+
+    def fake_post(**kwargs):
+        captured.update(kwargs)
+        return {"candidates": [{"content": {"parts": [{"inlineData": {
+            "mimeType": "image/png", "data": base64.b64encode(b"output").decode("ascii")
+        }}]}}]}
+
+    monkeypatch.setattr(client, "_post_generate_content", fake_post)
+    getattr(client, method_name)(
+        prompt="Preserve the supplied frame.",
+        model=model,
+        temperature=0.7,
+        aspect_ratio="9:16",
+        image_size="2K",
+        provider_max_attempts=1,
+        input_images=[
+            {"mime_type": "image/png", "image_bytes": b"front"},
+            {"mime_type": "image/jpeg", "image_bytes": b"support"},
+        ],
+    )
+
+    assert captured["model"] == model
+    assert captured["location"] == expected_location
+    assert captured["max_attempts"] == 1
+    config = captured["payload"]["generationConfig"]
+    if expected_temperature is None:
+        assert "temperature" not in config
+    else:
+        assert config["temperature"] == expected_temperature
+    assert config["imageConfig"] == {"aspectRatio": "9:16", "imageSize": "2K"}
+    assert [part["inlineData"]["data"] for part in captured["payload"]["contents"][0]["parts"][1:]] == [
+        base64.b64encode(b"front").decode("ascii"),
+        base64.b64encode(b"support").decode("ascii"),
+    ]

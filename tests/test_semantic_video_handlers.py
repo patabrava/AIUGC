@@ -224,7 +224,7 @@ def _scene_plate_result(*, marker: str = "candidate") -> SimpleNamespace:
                 index=index,
                 image_bytes=_png_bytes(accent=50 + index),
                 mime_type="image/png",
-                provider_model="gemini-3.1-flash-image",
+                provider_model="gemini-nano-banana-2.1",
                 prompt=prompts[index - 1],
             )
             for index in range(1, 4)
@@ -2929,7 +2929,7 @@ def test_candidate_endpoint_generates_three_wheelchair_scene_plates_from_ordered
     assert len({candidate["storage_uri"] for candidate in candidates}) == 3
     assert len({candidate["sha256"] for candidate in candidates}) == 3
     assert {candidate["provider_model"] for candidate in candidates} == {
-        "gemini-3.1-flash-image"
+        "gemini-nano-banana-2.1"
     }
     assert {candidate["visual_contract_hash"] for candidate in candidates} == {
         state["run"]["reference_snapshot"]["visual_contract"]["contract_hash"]
@@ -3367,7 +3367,7 @@ def test_failed_scene_plate_generation_releases_reservation_for_safe_retry(monke
         index=1,
         image_bytes=_png_bytes(accent=91),
         mime_type="image/png",
-        provider_model="gemini-3.1-flash-image",
+        provider_model="gemini-nano-banana-2.1",
         prompt="resumable candidate one",
     )
 
@@ -3414,7 +3414,7 @@ def test_failed_scene_plate_generation_releases_reservation_for_safe_retry(monke
                 index=index,
                 image_bytes=_png_bytes(accent=90 + index),
                 mime_type="image/png",
-                provider_model="gemini-3.1-flash-image",
+                provider_model="gemini-nano-banana-2.1",
                 prompt=f"resumable candidate {index}",
             )
             for index in (2, 3)
@@ -3629,7 +3629,7 @@ def test_candidate_endpoint_rejects_every_unintended_existing_stage_before_exter
                     index=index,
                     image_bytes=f"candidate-{index}".encode(),
                     mime_type="image/png",
-                    provider_model="gemini-3.1-flash-image",
+                    provider_model="gemini-nano-banana-2.1",
                 )
                 for index in range(1, 4)
             ],
@@ -3679,7 +3679,7 @@ def test_candidate_endpoint_rejects_missing_or_stale_existing_revision_before_ex
                     index=index,
                     image_bytes=f"candidate-{index}".encode(),
                     mime_type="image/png",
-                    provider_model="gemini-3.1-flash-image",
+                    provider_model="gemini-nano-banana-2.1",
                 )
                 for index in range(1, 4)
             ],

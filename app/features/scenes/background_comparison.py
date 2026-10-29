@@ -57,7 +57,7 @@ def generate_raw_camera_background(
     *,
     scene_key: str,
     llm_client: Optional[Any] = None,
-    image_model: str = "gemini-3.1-flash-image",
+    image_model: str = "gemini-nano-banana-2.1",
     image_size: str = "2K",
 ) -> RawCameraBackgroundResult:
     client = llm_client or get_llm_client()

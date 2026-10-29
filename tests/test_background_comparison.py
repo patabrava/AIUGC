@@ -25,7 +25,7 @@ class FakeBackgroundLLMClient:
         return {
             "image_bytes": b"raw-camera-background",
             "mime_type": "image/png",
-            "model": "gemini-3.1-flash-image",
+            "model": "gemini-nano-banana-2.1",
         }
 
 
@@ -50,7 +50,7 @@ def test_lived_in_kitchen_brief_preserves_fixed_domestic_realism_without_identit
     bible = get_scene_bible("home_kitchen_advice_a")
     brief = build_raw_camera_background_brief(bible.scene_id)
 
-    assert bible.version == 2
+    assert bible.version == 3
     assert "ordinary home rather than a showroom" in brief
     assert "compact completely unbranded black bean-to-cup coffee machine" in brief
     assert "Every appliance surface is blank" in brief
@@ -74,7 +74,6 @@ def test_every_canonical_scene_has_versioned_fixed_lived_in_detail_without_acces
         "bathroom_accessibility_a": ("blank amber soap dispenser", "wheelchair turning area"),
         "car_transfer_residential_a": ("folded charcoal travel blanket", "transfer path"),
         "home_living_room_advice_a": ("closed blank-cover paperback", "small muted abstract print"),
-        "hallway_stairlift_a": ("blank-faced wall thermostat", "clear of the stairlift"),
         "entryway_ramp_a": ("shallow cream key bowl", "clear of the ramp"),
         "bedroom_accessibility_a": ("folded oatmeal cardigan", "clear transfer space"),
         "garden_patio_a": ("small galvanized watering can", "clear of the wheelchair route"),
@@ -87,7 +86,7 @@ def test_every_canonical_scene_has_versioned_fixed_lived_in_detail_without_acces
     for scene_id, required_phrases in expected_details.items():
         bible = SCENE_BIBLES[scene_id]
         brief = build_raw_camera_background_brief(scene_id)
-        assert bible.version == 2, scene_id
+        assert bible.version == (4 if scene_id == "home_living_room_advice_a" else 3), scene_id
         for phrase in required_phrases:
             assert phrase in brief, f"{scene_id}: missing {phrase!r}"
         assert "No people, faces, bodies, body parts, hands, or wheelchairs" in brief, scene_id
@@ -111,14 +110,14 @@ def test_generate_raw_camera_background_uses_long_prompt_then_generates_one_imag
     assert len(client.image_calls) == 1
     assert client.image_calls[0] == {
         "prompt": result.prompt_writer_output,
-        "model": "gemini-3.1-flash-image",
+        "model": "gemini-nano-banana-2.1",
         "temperature": 0.7,
         "aspect_ratio": "9:16",
         "image_size": "2K",
     }
     assert result.image_bytes == b"raw-camera-background"
     assert result.mime_type == "image/png"
-    assert result.provider_model == "gemini-3.1-flash-image"
+    assert result.provider_model == "gemini-nano-banana-2.1"
 
 
 def test_generate_raw_camera_background_allows_production_one_k_contract():

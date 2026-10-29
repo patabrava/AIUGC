@@ -177,7 +177,7 @@ def test_scene_plate_bootstrap_candidates_are_independent_from_original_actor_in
         == [b"front", b"support", b"location"]
         for call in client.calls
     )
-    assert all(call["model"] == "gemini-3.1-flash-image" for call in client.calls)
+    assert all(call["model"] == "gemini-nano-banana-2.1" for call in client.calls)
     assert all(call["provider_max_attempts"] == 1 for call in client.calls)
     assert all("system_prompt" not in call for call in client.calls)
     assert all(call["image_size"] == "2K" for call in client.calls)
@@ -1280,7 +1280,7 @@ def test_scene_plate_generation_contract_binds_model_gate_and_actor_fingerprint(
         settings=settings,
     )
 
-    assert contract["model"] == "gemini-3.1-flash-image"
+    assert contract["model"] == "gemini-nano-banana-2.1"
     assert contract["image_size"] == "2K"
     assert contract["reference_roles"] == [
         "actor_front",
@@ -1963,3 +1963,36 @@ def test_reference_driven_prompt_copy_across_features_names_no_gender():
     shot_frame_composition = reference_driven_copy["shot_frame_composition"].lower()
     assert "cream knit sweater" not in shot_frame_composition
     assert "beige blazer" not in shot_frame_composition
+
+
+def test_scene_model_change_invalidates_previous_generation_contract():
+    from app.core.config import Settings
+    from app.features.semantic_videos.visual_contract import (
+        build_scene_plate_generation_contract,
+        validate_scene_plate_generation_contract,
+    )
+
+    old_settings = Settings(
+        _env_file=None,
+        supabase_url="https://example.supabase.co",
+        supabase_key="x",
+        supabase_service_key="y",
+        cloudflare_r2_public_base_url="https://r2.example.com",
+        semantic_scene_plate_model="gemini-3.1-flash-image",
+    )
+    new_settings = old_settings.model_copy(
+        update={"semantic_scene_plate_model": "gemini-nano-banana-2.1"}
+    )
+    old_contract = build_scene_plate_generation_contract(
+        actor_reference_fingerprint="a" * 64, settings=old_settings
+    )
+    new_contract = build_scene_plate_generation_contract(
+        actor_reference_fingerprint="a" * 64, settings=new_settings
+    )
+
+    assert old_contract["contract_hash"] != new_contract["contract_hash"]
+    assert old_contract["version"] == new_contract["version"]
+    with pytest.raises(ValidationError, match="contract is stale"):
+        validate_scene_plate_generation_contract(
+            old_contract, actor_reference_fingerprint="a" * 64, settings=new_settings
+        )

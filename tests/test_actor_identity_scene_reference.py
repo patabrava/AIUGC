@@ -760,7 +760,7 @@ def test_all_canonical_scenes_build_valid_person_free_prompts():
     )
     from app.features.scenes.background_comparison import build_raw_camera_background_brief
 
-    assert len(SCENE_BIBLES) >= 10
+    assert len(SCENE_BIBLES) >= 9
     for scene_id, bible in SCENE_BIBLES.items():
         prompt = build_raw_camera_background_brief(scene_id)
         assert "environment-only" in prompt, scene_id
@@ -777,7 +777,7 @@ def test_all_canonical_scenes_build_valid_person_free_prompts():
 def test_script_intent_routes_specialized_and_neutral_scenes():
     specialized = [
         ("Im Badezimmer gibt ein Haltegriff mehr Sicherheit.", "value", "bathroom_accessibility_a"),
-        ("Ein Treppenlift macht das Treppensteigen wieder sicher.", "value", "hallway_stairlift_a"),
+        ("Ein Treppenlift macht das Treppensteigen wieder sicher.", "value", "home_living_room_advice_a"),
         ("Beim Transfer ins Auto hilft eine klare Routine.", "value", "car_transfer_residential_a"),
         ("Im Schlafzimmer erleichtert ein Pflegebett das Aufstehen.", "value", "bedroom_accessibility_a"),
         ("Eine Rampe am Hauseingang beseitigt die Türschwelle.", "value", "entryway_ramp_a"),
@@ -833,7 +833,7 @@ def test_script_intent_dodges_german_false_friends():
     # Real product / Hilfsmittel vocabulary that must route to its specialized scene even
     # when only the topic names it (empty script).
     specialized_vocab = [
-        ("Plattformlift fuer den Rollstuhl", "hallway_stairlift_a"),
+        ("Plattformlift fuer den Rollstuhl", "home_living_room_advice_a"),
         ("Duschhocker und Duschsitz im Test", "bathroom_accessibility_a"),
         ("Krankenbett fuer zu Hause mieten", "bedroom_accessibility_a"),
         ("Tuerverbreiterung fuer den Rollstuhl", "entryway_ramp_a"),
@@ -957,7 +957,7 @@ def test_scene_reference_metadata_includes_scene_bible_contract():
 
     assert build_scene_bible_provider_metadata("car_transfer_residential_a") == {
         "scene_bible_id": "car_transfer_residential_a",
-        "scene_bible_version": 2,
+        "scene_bible_version": 3,
         "scene_bible_name": "Residential car transfer A",
         "scene_bible_identity": get_scene_bible("car_transfer_residential_a").scene_identity,
         "scene_generation_anchor": get_scene_bible("car_transfer_residential_a").generation_anchor,
@@ -1176,7 +1176,7 @@ def test_generate_scene_reference_uses_lora_safe_mystic_options_and_metadata(mon
     for candidate in captured_candidates:
         metadata = candidate["provider_metadata"]
         assert metadata["scene_bible_id"] == "bathroom_accessibility_a"
-        assert metadata["scene_bible_version"] == 2
+        assert metadata["scene_bible_version"] == 3
         assert metadata["scene_bible_name"] == "Accessible bathroom A"
         assert metadata["scene_bible_identity"].startswith("Accessible bathroom scene A")
         assert metadata["scene_generation_anchor"].startswith("the same lived-in compact accessible bathroom")
@@ -1530,7 +1530,7 @@ def test_regenerate_scene_reference_keeps_identity_lock_contract(monkeypatch):
     assert response.status_code == 303
     metadata = created[0]["provider_metadata"]
     assert metadata["scene_bible_id"] == "bathroom_accessibility_a"
-    assert metadata["scene_bible_version"] == 2
+    assert metadata["scene_bible_version"] == 3
     assert metadata["scene_bible_name"] == "Accessible bathroom A"
     assert metadata["scene_consistency_contract"]["scene_bible_id"] == "bathroom_accessibility_a"
     assert metadata["scene_consistency_contract"]["layout_lock"].startswith("same compact accessible bathroom")
