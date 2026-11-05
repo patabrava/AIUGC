@@ -1830,7 +1830,7 @@ def test_scene_image_progress_requests_are_fenced_and_recovery_reload_is_one_sho
     assert "candidateStartPending = 'true'" in bind
     assert "root.dataset.candidateStartPending = 'false';" in lifecycle
     assert "(wasWaiting || !root.querySelector('[data-identity-passed]'))" in lifecycle
-    assert poll.index("progress.stage === 'retry_approval_required'") < poll.index(
+    assert poll.index("['retry_approval_required', 'completed', 'failed'].includes(progress.stage)") < poll.index(
         "['ready', 'stalled'].includes(candidateStatus)"
     )
     assert poll.count("if (!root.isConnected)") == 2

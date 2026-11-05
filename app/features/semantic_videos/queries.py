@@ -1730,3 +1730,12 @@ __all__ = [
     "require_worker_retry_approval",
     "reserve_paid_submission",
 ]
+
+
+def resume_runtime_failure(*, run_id, expected_revision, plan_hash, requested_by):
+    return _worker_rpc(
+        "resume_semantic_video_runtime_v1",
+        {"p_run_id": run_id, "p_expected_revision": expected_revision,
+         "p_plan_hash": plan_hash, "p_requested_by": requested_by},
+        operation="runtime recovery",
+    )

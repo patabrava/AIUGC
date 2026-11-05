@@ -131,6 +131,7 @@ class ProgressResponse(BaseModel):
     elapsed_seconds: int = Field(ge=0)
     estimated_remaining_seconds: Optional[int] = Field(default=None, ge=0)
     status_message: str
+    generation_error: Optional[dict[str, Any]] = None
     failed_take_indexes: list[int]
     takes: list[ProgressTakeResponse]
 

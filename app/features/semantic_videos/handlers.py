@@ -68,6 +68,8 @@ from app.features.semantic_videos.queries import (
     enqueue_scene_image_generation,
     update_candidate_generation_progress,
 )
+from app.features.semantic_videos.recovery import generation_error
+from app.features.semantic_videos.queries import resume_runtime_failure
 from app.features.semantic_videos.schemas import (
     ApprovalResponse,
     BatchApprovalResponse,
@@ -2865,7 +2867,12 @@ def get_progress(post_id: str, request: Request, response: Response):
                 "Retry generation."
             )
         )
+    error = generation_error(run, ordered)
+    if error:
+        estimated_remaining_seconds = None
+        status_message = error["message"]
     progress = ProgressResponse(
+        generation_error=error,
         run_id=str(run["id"]),
         revision=int(run.get("revision") or 0),
         stage=str(run.get("stage") or ""),
@@ -3644,3 +3651,17 @@ def cancel_run(post_id: str, payload: CancellationRequest, request: Request):
 
 
 __all__ = ["router"]
+
+
+@router.post("/{post_id}/generation-retry", response_model=SuccessResponse)
+def retry_generation_error(post_id: str, payload: QAReviewResumeRequest, request: Request):
+    run = _run_or_404(post_id)
+    error = generation_error(run, list_attempts(str(run["id"])))
+    if not error or not error["retry_allowed"]:
+        raise StateTransitionError("Generation cannot be retried safely. Refresh the status or contact support.")
+    updated = resume_runtime_failure(
+        run_id=str(run["id"]), expected_revision=payload.expected_revision,
+        plan_hash=payload.plan_hash,
+        requested_by=str(getattr(request.state, "user_email", "unknown")),
+    )
+    return SuccessResponse(data={"run_id": updated["id"], "stage": updated["stage"], "revision": updated["revision"]})

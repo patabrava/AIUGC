@@ -209,20 +209,27 @@
     }
 
     async function requestJson(url, options = {}) {
-        const response = await fetch(url, {
-            credentials: 'same-origin',
-            cache: 'no-store',
-            headers: {'Content-Type': 'application/json', ...(options.headers || {})},
-            ...options,
-        });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok) {
-            const message = payload?.error?.message || payload?.message || payload?.detail || 'Semantic video request failed.';
-            const error = new Error(typeof message === 'string' ? message : 'Semantic video request failed.');
-            error.status = response.status;
-            throw error;
+        const controller = url.endsWith('/progress') ? new AbortController() : null;
+        const timeout = controller ? window.setTimeout(() => controller.abort(), 15000) : null;
+        try {
+            const response = await fetch(url, {
+                signal: controller?.signal,
+                credentials: 'same-origin',
+                cache: 'no-store',
+                headers: {'Content-Type': 'application/json', ...(options.headers || {})},
+                ...options,
+            });
+            const payload = await response.json();
+            if (!response.ok) {
+                const message = payload?.error?.message || payload?.message || payload?.detail || 'Semantic video request failed.';
+                const error = new Error(typeof message === 'string' ? message : 'Semantic video request failed.');
+                error.status = response.status;
+                throw error;
+            }
+            return payload.data || payload;
+        } finally {
+            if (timeout !== null) window.clearTimeout(timeout);
         }
-        return payload.data || payload;
     }
 
     async function requestSceneImageStart(url, options) {
@@ -450,7 +457,7 @@
                 ? (candidatePhase === 'preparing_references' ? 'image queued' : 'generating image')
                 : String(progress.stage || '').replaceAll('_', ' ')
             );
-        if (stage) stage.textContent = displayStage;
+        if (stage) stage.textContent = progress.generation_error ? 'Generation stopped' : displayStage;
         const generated = field(root, 'generated-takes');
         const verified = field(root, 'verified-takes');
         const total = field(root, 'total-takes');
@@ -465,8 +472,8 @@
         const remaining = field(root, 'remaining');
         const progressMessage = field(root, 'progress-message');
         const progressSpinner = field(root, 'progress-spinner');
-        const isBusy = progress.candidate_generation_status === 'generating'
-            || RUN_PROGRESS_STAGES.includes(progress.stage);
+        const isBusy = !progress.generation_error && (progress.candidate_generation_status === 'generating'
+            || RUN_PROGRESS_STAGES.includes(progress.stage));
         updateCandidateStatus(root, progress);
         updateStatStatus(root, progress);
         if (progressBar) {
@@ -492,6 +499,47 @@
         if (progress.plan_hash) root.dataset.planHash = progress.plan_hash;
         root.dataset.candidateGenerationStatus = candidateStatus;
         root.dataset.candidateGenerationPhase = candidatePhase;
+        root.dataset.progressFailures = '0';
+        showGenerationError(root, progress.generation_error || null);
+    }
+
+    function showGenerationError(root, error) {
+        const panel = field(root, 'generation-error');
+        root.dataset.generationBlocked = String(Boolean(error));
+        if (panel) panel.classList.toggle('hidden', !error);
+        const message = field(root, 'generation-error-message');
+        if (message) message.textContent = error?.message || '';
+        const retry = action(root, 'retry-generation');
+        if (retry) retry.classList.toggle('hidden', !error?.retry_allowed);
+        field(root, 'automatic-progress-help')?.classList.toggle('hidden', Boolean(error));
+        if (error) {
+            const stage = field(root, 'stage');
+            if (stage) stage.textContent = 'Generation stopped';
+            const progressMessage = field(root, 'progress-message');
+            if (progressMessage) progressMessage.textContent = error.message;
+            ['generated', 'verified'].forEach((kind) => setStatStatus(
+                field(root, `${kind}-status`), field(root, `${kind}-spinner`),
+                {text: 'Needs attention', tone: 'attention', loading: false},
+            ));
+            stopPolling(root);
+            root.setAttribute('aria-busy', 'false');
+            ['progress-spinner', 'generated-spinner', 'verified-spinner'].forEach((name) => field(root, name)?.classList.add('hidden'));
+            const remaining = field(root, 'remaining');
+            if (remaining) remaining.textContent = 'Action required';
+            setStatus(root, error.message, true);
+        }
+    }
+
+    function recordProgressFailure(root) {
+        const failures = Number(root.dataset.progressFailures || 0) + 1;
+        root.dataset.progressFailures = String(failures);
+        setStatus(root, 'Could not check video progress. Retrying the connection…', true);
+        if (failures >= 3) {
+            showGenerationError(root, {
+                message: 'The connection failed while checking this video. Automatic status checks have stopped. Check status again before retrying generation; saved work is preserved.',
+                retry_allowed: false,
+            });
+        }
     }
 
     function updateCandidateStatus(root, progress) {
@@ -541,7 +589,7 @@
         const generatedCount = Number(progress.generated_takes || 0);
         const verifiedCount = Number(progress.verified_takes || 0);
         const stage = String(progress.stage || '');
-        const blocked = ['failed', 'retry_approval_required'].includes(stage);
+        const blocked = Boolean(progress.generation_error) || ['failed', 'retry_approval_required'].includes(stage);
         const generationBusy = stage === 'generating';
         const verificationBusy = RUN_PROGRESS_STAGES.includes(stage) && stage !== 'generating';
 
@@ -787,6 +835,7 @@
             }
             if (!progress) return null;
             updateProgress(root, progress);
+            if (progress.generation_error) return progress;
             const managesSceneImage = hasSceneImageSurface(root);
             const candidateStatus = managesSceneImage
                 ? applyCandidateProgress(root, progress, {
@@ -794,7 +843,8 @@
                     reloadReady: true,
                 })
                 : String(progress.candidate_generation_status || 'idle');
-            if (progress.stage === 'retry_approval_required' || progress.stage === 'completed') {
+            if (progress.generation_error) return progress;
+            if (['retry_approval_required', 'completed', 'failed'].includes(progress.stage)) {
                 stopPolling(root);
                 reloadWhenProductionSettled(root);
                 return progress;
@@ -804,7 +854,7 @@
             }
             return progress;
         } catch (error) {
-            if (root.dataset.stage !== 'not_started') setStatus(root, error.message, true);
+            if (root.dataset.stage !== 'not_started') recordProgressFailure(root);
             return null;
         }
     }
@@ -834,6 +884,7 @@
     }
 
     function startPolling(root, force = false, immediate = true) {
+        if (root.dataset.generationBlocked === 'true') return;
         if (activePolls.has(root)) {
             if (!force) return;
             stopPolling(root);
@@ -848,7 +899,7 @@
         const workflow = root.closest('[data-semantic-video-workflow]') || document;
         const roots = Array.from(workflow.querySelectorAll('[data-semantic-video-controller]'));
         const hasActiveProduction = roots.some((candidateRoot) => (
-            RUN_PROGRESS_STAGES.includes(candidateRoot.dataset.stage)
+            RUN_PROGRESS_STAGES.includes(candidateRoot.dataset.stage) && candidateRoot.dataset.generationBlocked !== 'true'
         ));
         if (hasActiveProduction || scheduledWorkflowReloads.has(workflow)) return false;
         scheduledWorkflowReloads.add(workflow);
@@ -863,7 +914,7 @@
             if (!root.isConnected || !progress) return;
             updateProgress(root, progress);
         } catch (error) {
-            if (root.dataset.stage !== 'not_started') setStatus(root, error.message, true);
+            if (root.dataset.stage !== 'not_started') recordProgressFailure(root);
         }
     }
 
@@ -1150,6 +1201,36 @@
             if (!exactCostConfirmation(button, 'only the failed takes')) return;
             const failed = (button.dataset.failedIndexes || '').split(',').filter(Boolean).map(Number);
             runAction(root, button, 'retry-approve', {plan_hash: root.dataset.planHash, expected_revision: revision(), failed_take_indexes: failed, reason: null}, 'Persisting failed-take retry approval…');
+        });
+        action(root, 'retry-generation-status')?.addEventListener('click', async (event) => {
+            const button = event.currentTarget;
+            button.disabled = true;
+            try {
+                const progress = await fetchCurrentProgress(root);
+                if (!progress) return;
+                updateProgress(root, progress);
+                if (!progress.generation_error) {
+                    setStatus(root, 'Status refreshed.');
+                    startPolling(root);
+                }
+            } catch (_error) {
+                showGenerationError(root, {message: 'The video status is still unavailable. Check your connection and try again.', retry_allowed: false});
+            } finally { button.disabled = false; }
+        });
+        action(root, 'retry-generation')?.addEventListener('click', async (event) => {
+            const button = event.currentTarget;
+            button.disabled = true;
+            try {
+                const progress = await fetchCurrentProgress(root);
+                updateProgress(root, progress);
+                if (!progress?.generation_error?.retry_allowed) return;
+                await requestJson(`/semantic-videos/posts/${encodeURIComponent(root.dataset.postId)}/generation-retry`, {
+                    method: 'POST', body: JSON.stringify({expected_revision: progress.revision, plan_hash: progress.plan_hash}),
+                });
+                reloadAtWorkflow(root);
+            } catch (_error) {
+                showGenerationError(root, {message: 'Could not confirm the retry. Check status again before retrying; another request has not been sent automatically.', retry_allowed: false});
+            } finally { button.disabled = false; }
         });
         action(root, 'resume-qa')?.addEventListener('click', (event) => {
             runAction(root, event.currentTarget, 'qa-resume', {

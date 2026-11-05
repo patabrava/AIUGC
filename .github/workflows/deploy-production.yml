@@ -95,6 +95,7 @@ jobs:
           with urllib.request.urlopen(openapi_request, timeout=20) as response:
               paths = json.loads(response.read().decode()).get("paths", {})
           required_rpcs = {
+              "/rpc/resume_semantic_video_runtime_v1",
               "/rpc/apply_post_qa_decision",
               "/rpc/probe_manual_video_duration_contract",
               "/rpc/claim_semantic_scene_image_v3",
@@ -143,6 +144,14 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Require video recovery regression checks before deployment
+        run: |
+          docker run --rm --network none -e APP_ENV_FILE=/dev/null -v "$PWD/tests:/app/tests:ro" \
+            "${{ steps.image.outputs.ref }}" python -m pytest \
+            tests/test_semantic_video_worker.py tests/test_semantic_video_queries.py \
+            tests/test_semantic_video_paid_safety.py tests/test_semantic_video_handlers.py \
+            tests/test_semantic_video_runtime_recovery.py tests/test_semantic_video_ui.py -q
 
       - name: Render Hostinger compose payload
         run: |

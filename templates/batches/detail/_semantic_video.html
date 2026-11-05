@@ -119,7 +119,7 @@
                     </p>
                 </div>
                 <span class="rounded-full bg-[#EAF3FB] px-3 py-1 text-xs font-bold uppercase tracking-wide text-[#006AAB]" data-field="stage" aria-live="polite">
-                    {{ item.stage | replace('_', ' ') }}
+                    {{ 'Generation stopped' if item.generation_error else item.stage | replace('_', ' ') }}
                 </span>
             </div>
 
@@ -155,11 +155,21 @@
                 </div>
             </div>
 
+            <section class="mt-3 rounded-xl border border-red-300 bg-red-50 p-4{% if not item.generation_error %} hidden{% endif %}" data-field="generation-error" role="alert" aria-live="assertive">
+                <h3 class="font-bold text-red-900">Video generation needs attention</h3>
+                <p class="mt-2 text-sm text-red-900" data-field="generation-error-message">{{ item.generation_error.message if item.generation_error else '' }}</p>
+                <p class="mt-2 break-all text-xs text-red-900">Video ID: {{ item.post_id }}</p>
+                <div class="mt-3 flex flex-wrap gap-3">
+                    <button type="button" data-action="retry-generation" class="rounded-lg bg-[#006AAB] px-4 py-2 text-sm font-bold text-white disabled:opacity-50{% if not item.generation_error or not item.generation_error.retry_allowed %} hidden{% endif %}">Retry video generation</button>
+                    <button type="button" data-action="retry-generation-status" class="rounded-lg border border-red-300 px-4 py-2 text-sm font-bold text-red-900">Check status again</button>
+                </div>
+            </section>
+
             <section class="mt-3 rounded-xl border border-[#006AAB]/20 bg-[#F6FAFF] p-3" aria-label="Live generation status">
                 <div class="flex items-center justify-between gap-3 text-sm font-bold text-[#1C2740]">
                     <span class="flex items-center gap-2">
                         <span class="hidden h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-[#006AAB]/25 border-t-[#006AAB]" data-field="progress-spinner" aria-hidden="true"></span>
-                        <span data-field="progress-message" aria-live="polite">{% if item.stage == 'completed' %}Video ready. No additional generation is pending.{% elif item.stage in generation_blocked_stages %}Generation stopped. Review the available result and status.{% else %}Waiting for live generation status…{% endif %}</span>
+                        <span data-field="progress-message" aria-live="polite">{% if item.generation_error %}{{ item.generation_error.message }}{% elif item.stage == 'completed' %}Video ready. No additional generation is pending.{% elif item.stage in generation_blocked_stages %}Generation stopped. Review the available result and status.{% else %}Waiting for live generation status…{% endif %}</span>
                     </span>
                     <span data-field="progress-percent">{{ 100 if progress_terminal else 0 }}%</span>
                 </div>
@@ -474,7 +484,7 @@
             {% endif %}
 
             {% if semantic_step == 'production' and item.stage in ['generating', 'transcript_qa', 'identity_qa', 'voice_qa', 'acoustic_qa', 'composing', 'captioning'] %}
-            <p class="mt-3 rounded-xl border border-[#006AAB]/20 bg-[#F6FAFF] p-3 text-sm font-semibold text-[#006AAB]" role="status">
+            <p class="mt-3 rounded-xl border border-[#006AAB]/20 bg-[#F6FAFF] p-3 text-sm font-semibold text-[#006AAB]{% if item.generation_error %} hidden{% endif %}" data-field="automatic-progress-help" role="status">
                 {% if item.stage == 'generating' %}
                 Veo is generating the approved video. An 8-second take can take several minutes; this page updates automatically.
                 {% else %}

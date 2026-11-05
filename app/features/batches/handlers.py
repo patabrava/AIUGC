@@ -16,6 +16,8 @@ from fastapi.responses import PlainTextResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError as PydanticValidationError
 
+from app.features.semantic_videos.recovery import generation_error
+
 from app.features.batches.schemas import (
     CreateBatchRequest,
     BatchResponse,
@@ -1010,6 +1012,7 @@ def _build_semantic_video_post_projection(
         "run_id": run_id,
         "revision": int(run.get("revision") or 0),
         "stage": str(run.get("stage") or "not_started"),
+        "generation_error": generation_error(run, latest),
         "plan_hash": plan_hash,
         "master_state": master_state,
         "approved_candidate_index": master.get("approved_candidate_index"),
