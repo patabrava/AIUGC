@@ -209,3 +209,22 @@ def test_source_terminal_reset_qa_prefers_earliest_distributed_motion():
     assert first_reset == {"seconds": 7.875, "scene_score": 0.04}
     assert mode == "multi_frame"
     assert cumulative_score == pytest.approx(0.11)
+
+
+@pytest.mark.parametrize("tool", ["ffprobe", "ffmpeg"])
+@pytest.mark.parametrize("failure", ["timeout", "os_error"])
+def test_terminal_analyzer_normalizes_operational_failure(tmp_path, monkeypatch, tool, failure):
+    from types import SimpleNamespace
+    video = tmp_path / "raw.mp4"
+    video.write_bytes(b"existing-raw-media")
+
+    def run(command, **_kwargs):
+        if command[0] == tool:
+            if failure == "timeout":
+                raise subprocess.TimeoutExpired(command, 30)
+            raise OSError("analyzer unavailable")
+        return SimpleNamespace(returncode=0, stdout="8.0", stderr="")
+
+    monkeypatch.setattr("app.features.shot_production.visual_seams.subprocess.run", run)
+    with pytest.raises(ValueError, match="unavailable"):
+        evaluate_source_terminal_reset(video)

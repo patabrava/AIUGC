@@ -2514,6 +2514,8 @@ def compose_and_caption(
     payload = _load_manifest(manifest_path)
     duration_contract = _validate_duration_planning_contract(payload)
     requested_duration = float(duration_contract["requested"])
+    multi_take_terminal_protection = len(payload.get("takes") or []) > 1
+    terminal_protection_version = "multi-take-speech-tail-v1"
     single_take_terminal_protection = bool(
         len(payload.get("takes") or []) == 1
         and requested_duration == float(MINIMUM_SEMANTIC_UGC_DURATION_SECONDS)
@@ -2571,9 +2573,18 @@ def compose_and_caption(
         )
         delivery_terminal_report = payload.get("delivery_terminal_qa") or {}
         delivery_terminal_ready = (
-            not single_take_terminal_protection
+            not (single_take_terminal_protection or multi_take_terminal_protection)
             or (
                 delivery_terminal_report.get("passed") is True
+                and (
+                    operator_review_delivery
+                    or delivery_terminal_report.get("provider_passed") is not False
+                )
+                and (
+                    not multi_take_terminal_protection
+                    or delivery_terminal_report.get("protection_version")
+                    == terminal_protection_version
+                )
                 and delivery_terminal_report.get("video_sha256")
                 == (payload.get("stitch") or {}).get("sha256")
             )
@@ -2626,6 +2637,23 @@ def compose_and_caption(
         _atomic_write_json(manifest_path, payload)
     segment_videos = [path.read_bytes() for path in segment_paths]
     trim_windows = [take["trim_window"] for take in ordered]
+    final_take_speech_end = None
+    if multi_take_terminal_protection:
+        try:
+            final_take_speech_end = min(
+                float(ordered[-1]["duration_seconds"]),
+                semantic_terminal_speech_cut_floor(
+                    ordered[-1]["transcript_qa"].get("final_word_end_seconds")
+                ),
+            )
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+        # The last take has no incoming picture to hide a provider end reset.
+        # Keep the final phoneme plus one AAC frame, never the padded word window.
+        trim_windows = [dict(window) for window in trim_windows]
+        trim_windows[-1]["end_seconds"] = min(
+            float(trim_windows[-1]["end_seconds"]), final_take_speech_end
+        )
     if duration_contract.get("duration_mode") and len(ordered) == 1:
         # Manual output ends on speech at native cadence, including sub-8s clips.
         final_word_end = (ordered[0].get("transcript_qa") or {}).get("final_word_end_seconds")
@@ -2747,7 +2775,7 @@ def compose_and_caption(
     operator_review_native_cadence = False
     if acoustic_seams:
         source_visual_tail_records = []
-        for position, take in enumerate(ordered[:-1]):
+        for position, take in enumerate(ordered):
             try:
                 tail_report = source_visual_tail_evaluator(
                     segment_paths[position]
@@ -2789,22 +2817,17 @@ def compose_and_caption(
                 ),
                 frames=tuple(analyze_audio_fn(segment_paths[position])),
                 latest_safe_video_end_seconds=(
-                    float(
-                        source_visual_tail_records[position][
-                            "safe_video_end_seconds"
-                        ]
-                    )
-                    if (
-                        position < len(source_visual_tail_records)
-                        and source_visual_tail_records[position].get(
-                            "reset_detected"
+                    final_take_speech_end + timing_offsets[position]
+                    if position == len(ordered) - 1
+                    else (
+                        float(source_visual_tail_records[position]["safe_video_end_seconds"])
+                        if (
+                            source_visual_tail_records[position].get("reset_detected")
+                            and source_visual_tail_records[position].get("safe_video_end_seconds")
+                            is not None
                         )
-                        and source_visual_tail_records[position].get(
-                            "safe_video_end_seconds"
-                        )
-                        is not None
+                        else None
                     )
-                    else None
                 ),
             )
             for position, take in enumerate(ordered)
@@ -2920,6 +2943,10 @@ def compose_and_caption(
                     window["end_seconds"] = min(
                         float(window["end_seconds"]),
                         conservative_end,
+                    )
+                else:
+                    window["end_seconds"] = min(
+                        float(window["end_seconds"]), final_take_speech_end
                     )
                 window["source"] = "transcript_safe_operator_review"
                 if float(window["end_seconds"]) <= float(window["start_seconds"]):
@@ -3047,14 +3074,10 @@ def compose_and_caption(
             {
                 "terminal_tail_exclusion_seconds": (
                     single_take_tail_exclusion_seconds
+                    if single_take_terminal_protection else 0.0
                 )
             }
-            if single_take_terminal_protection
-            or (
-                acoustic_plan is not None
-                and exact_delivery_target
-                == float(EXACT_SHORT_FORM_DURATION_SECONDS)
-            )
+            if single_take_terminal_protection or multi_take_terminal_protection
             else {}
         ),
     )
@@ -3111,6 +3134,37 @@ def compose_and_caption(
         )
         payload["delivery_terminal_qa"] = delivery_terminal_qa
         _atomic_write_json(manifest_path, payload)
+
+    if multi_take_terminal_protection:
+        try:
+            terminal_report = dict(source_visual_tail_evaluator(stitched_path))
+            terminal_report["passed"] = not bool(terminal_report.get("reset_detected"))
+            terminal_report["failure_reasons"] = (
+                ["terminal_visual_reset"] if not terminal_report["passed"] else []
+            )
+        except (ValueError, ValidationError) as exc:
+            terminal_report = {
+                "passed": False, "status": "unavailable", "error": str(exc),
+                "failure_reasons": ["terminal_visual_qa_unavailable"],
+            }
+        terminal_report.update({
+            "protection_version": terminal_protection_version,
+            "video_sha256": sha256(stitched_bytes).hexdigest(),
+            "final_take_source_end_seconds": final_take_speech_end,
+            "requires_paid_regeneration": False,
+        })
+        if operator_review_delivery:
+            _accept_operator_review_delivery_finding(
+                payload, terminal_report, report_kind="delivery_terminal_qa",
+                message="Final delivery terminal motion requires manual review.",
+            )
+        payload["delivery_terminal_qa"] = terminal_report
+        _atomic_write_json(manifest_path, payload)
+        if not terminal_report.get("passed"):
+            raise ValidationError(
+                "Final delivery terminal visual QA failed.",
+                {"failure_type": "delivery_terminal_reset", "requires_paid_regeneration": False},
+            )
 
     transcript_safe_operator_review = bool(
         acoustic_plan is None

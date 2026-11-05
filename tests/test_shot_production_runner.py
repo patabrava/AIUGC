@@ -1474,10 +1474,12 @@ def test_compose_orders_takes_uses_trim_windows_and_captions_once(tmp_path):
         stitch_fn=stitch_fn,
         caption_fn=caption_fn,
         probe_fn=lambda _path: _valid_final_probe(),
+        source_visual_tail_evaluator=lambda _path: {"reset_detected": False},
     )
 
     assert stitch_calls[0]["segment_videos"] == [b"clip-0", b"clip-1"]
-    assert stitch_calls[0]["trim_windows"] == [take["trim_window"] for take in payload["takes"]]
+    assert stitch_calls[0]["trim_windows"][0] == payload["takes"][0]["trim_window"]
+    assert stitch_calls[0]["trim_windows"][-1]["end_seconds"] == pytest.approx(1.0 + 1024 / 48000)
     assert stitch_calls[0]["target_duration_seconds"] == 16.0
     assert len(caption_calls) == 1
     expected_caption_text = " ".join(word.strip(".,:;!?") for word in SCRIPT.split())
@@ -1487,6 +1489,15 @@ def test_compose_orders_takes_uses_trim_windows_and_captions_once(tmp_path):
     assert saved["stitch"]["metadata"]["stitch_segment_count"] == 2
     assert saved["caption"]["sha256"]
 
+    saved.pop("delivery_terminal_qa")
+    manifest_path.write_text(json.dumps(saved), encoding="utf-8")
+    compose_and_caption(
+        manifest_path, _DeepgramByCall([SCRIPT]), stitch_fn=stitch_fn,
+        caption_fn=caption_fn, probe_fn=lambda _path: _valid_final_probe(),
+        source_visual_tail_evaluator=lambda _path: {"reset_detected": False},
+    )
+    assert len(stitch_calls) == 2  # Old cached media must acquire the new protection.
+    saved = _read(manifest_path)
     Path(saved["caption"]["captioned_path"]).write_bytes(b"corrupt caption")
     repaired = compose_and_caption(
         manifest_path,
@@ -1494,9 +1505,10 @@ def test_compose_orders_takes_uses_trim_windows_and_captions_once(tmp_path):
         stitch_fn=stitch_fn,
         caption_fn=caption_fn,
         probe_fn=lambda _path: _valid_final_probe(),
+        source_visual_tail_evaluator=lambda _path: {"reset_detected": False},
     )
-    assert len(stitch_calls) == 2
-    assert len(caption_calls) == 2
+    assert len(stitch_calls) == 3
+    assert len(caption_calls) == 3
     assert Path(repaired["captioned_path"]).read_bytes() == b"captioned-video"
     repair_history = _read(manifest_path)["composition_history"]
     assert repair_history[-1]["reason"] == "automatic rebuild of invalid cached caption delivery"
@@ -1708,6 +1720,7 @@ def test_compose_requires_exact_final_dialogue_without_substitution_insertion_or
             manifest_path,
             _DeepgramByCall([final_text]),
             stitch_fn=lambda **_kwargs: (b"stitched-video", {"stitch_segment_count": 4}),
+            source_visual_tail_evaluator=lambda _path: {"reset_detected": False},
         )
 
     saved = _read(manifest_path)
@@ -1866,6 +1879,7 @@ def test_compose_acoustic_mode_plans_crossfades_and_requires_acoustic_gate(tmp_p
         probe_fn=lambda _path: _valid_final_probe("16.0"),
         visual_seam_evaluator=_passing_delivery_visual_qa,
         visual_seam_sheet_fn=_fake_delivery_visual_sheet,
+        source_visual_tail_evaluator=lambda _path: {"reset_detected": False},
     )
 
     assert stitch_calls[0]["acoustic_plan"]["analyzer_version"] == "test-v1"
@@ -2539,6 +2553,7 @@ def test_composition_persists_failed_seam_verdict_and_adjacent_retry_indexes(tmp
             ),
             visual_seam_evaluator=_passing_delivery_visual_qa,
             visual_seam_sheet_fn=_fake_delivery_visual_sheet,
+            source_visual_tail_evaluator=lambda _path: {"reset_detected": False},
         )
 
     saved = _read(manifest_path)
@@ -2653,10 +2668,13 @@ def test_acoustic_duration_failure_prefers_targeted_final_take_retry(tmp_path):
         ),
     ],
 )
+@pytest.mark.parametrize("terminal_state", ["clean", "reset", "timeout"])
 def test_operator_review_delivery_preserves_transcript_safe_windows(
     tmp_path,
     failure_message,
     failure_details,
+    terminal_state,
+    monkeypatch,
 ):
     from app.features.shot_production.runner import compose_and_caption
 
@@ -2700,6 +2718,16 @@ def test_operator_review_delivery_preserves_transcript_safe_windows(
         visual_seam_calls.append(kwargs)
         return {"passed": True, "seams": [], "failed_seam_indexes": []}
 
+    def terminal_evaluator(path):
+        if terminal_state == "timeout":
+            from app.features.shot_production.visual_seams import evaluate_source_terminal_reset
+            with monkeypatch.context() as patch:
+                def timeout(*_args, **_kwargs):
+                    raise subprocess.TimeoutExpired("ffprobe", 30)
+                patch.setattr("app.features.shot_production.visual_seams.subprocess.run", timeout)
+                return evaluate_source_terminal_reset(path)
+        return {"reset_detected": terminal_state == "reset"}
+
     compose_and_caption(
         manifest_path,
         _DeepgramByCall([SCRIPT]),
@@ -2712,6 +2740,7 @@ def test_operator_review_delivery_preserves_transcript_safe_windows(
         visual_seam_evaluator=visual_seam_evaluator,
         visual_seam_sheet_fn=lambda *_args, **_kwargs: {"frames": []},
         operator_review_delivery=True,
+        source_visual_tail_evaluator=terminal_evaluator,
     )
 
     saved = _read(manifest_path)
@@ -2729,20 +2758,40 @@ def test_operator_review_delivery_preserves_transcript_safe_windows(
         },
         {
             "start_seconds": 0.0,
-            "end_seconds": 7.6,
+            "end_seconds": pytest.approx(7.35 + 1024 / 48000),
             "source": "transcript_safe_operator_review",
         },
     ]
     assert stitch_calls[0]["target_duration_seconds"] == pytest.approx(16.0)
-    assert stitch_calls[0]["delivery_retime_ratio"] == pytest.approx(16.0 / 15.25)
+    assert stitch_calls[0]["delivery_retime_ratio"] == pytest.approx(16.0 / (7.65 + 7.35 + 1024 / 48000))
     assert visual_seam_calls[0]["cut_times_seconds"] == [
-        pytest.approx(7.65 * (16.0 / 15.25))
+        pytest.approx(7.65 * (16.0 / (7.65 + 7.35 + 1024 / 48000)))
     ]
     assert visual_seam_calls[0]["reframe_profiles"] == [
         "full",
         "punch_in_center",
     ]
     assert saved["delivery_visual_qa"]["passed"] is True
+
+    if terminal_state == "clean":
+        assert saved["delivery_terminal_qa"]["reset_detected"] is False
+    else:
+        assert saved["delivery_terminal_qa"]["provider_passed"] is False
+        assert any(item["stage"] == "delivery_terminal_qa" for item in saved["delivery_review_advisories"])
+
+        if terminal_state == "timeout":
+            assert saved["delivery_terminal_qa"]["status"] == "unavailable"
+            assert all(take["status"] == "unavailable" for take in saved["source_visual_tail_qa"]["takes"])
+        # A review policy cannot authorize the same failed report for a strict caller.
+        with pytest.raises(ValidationError, match="terminal visual QA failed"):
+            compose_and_caption(
+                manifest_path, _DeepgramByCall([]), stitch_fn=stitch_fn,
+                caption_fn=caption_fn, probe_fn=lambda _path: _valid_final_probe("16.0"),
+                source_visual_tail_evaluator=terminal_evaluator,
+                operator_review_delivery=False,
+            )
+        assert len(stitch_calls) == 2
+        assert _read(manifest_path)["delivery_terminal_qa"]["requires_paid_regeneration"] is False
 
 
 def test_sixteen_second_operator_review_preserves_native_cadence_above_retime_bound(
@@ -2805,6 +2854,7 @@ def test_sixteen_second_operator_review_preserves_native_cadence_above_retime_bo
         },
         visual_seam_sheet_fn=lambda *_args, **_kwargs: {"frames": []},
         operator_review_delivery=True,
+        source_visual_tail_evaluator=lambda _path: {"reset_detected": False},
     )
 
     saved = _read(manifest_path)
@@ -2821,9 +2871,9 @@ def test_sixteen_second_operator_review_preserves_native_cadence_above_retime_bo
         if item["stage"] == "media_duration_qa"
     )
     assert duration_advisory["details"] == {
-        "content_duration_seconds": 14.09,
+        "content_duration_seconds": pytest.approx(14.09 - 0.25 + 1024 / 48000, abs=1e-6),
         "target_duration_seconds": 16.0,
-        "required_retime_ratio": pytest.approx(16.0 / 14.09),
+        "required_retime_ratio": pytest.approx(16.0 / (14.09 - 0.25 + 1024 / 48000)),
         "maximum_retime_ratio": 1.1,
     }
 
@@ -2935,11 +2985,15 @@ def test_long_form_operator_review_always_delivers_complete_captioned_stitch(
         },
         visual_seam_sheet_fn=lambda *_args, **_kwargs: {"frames": []},
         operator_review_delivery=True,
+        source_visual_tail_evaluator=lambda _path: {"reset_detected": False},
     )
 
     saved = _read(manifest_path)
     assert saved["status"] == "captioned"
     assert saved["composition_mode"] == "transcript_safe_operator_review"
+    assert stitch_calls[0]["trim_windows"][-1]["end_seconds"] == pytest.approx(5.30 + 1024 / 48000)
+    assert stitch_calls[0]["terminal_tail_exclusion_seconds"] == 0.0
+    assert saved["delivery_terminal_qa"]["protection_version"] == "multi-take-speech-tail-v1"
     if adaptive_manual:
         assert "delivery_resolution" not in saved
         assert "target_duration_seconds" not in stitch_calls[0]
@@ -2950,7 +3004,7 @@ def test_long_form_operator_review_always_delivers_complete_captioned_stitch(
     if expected_target is not None:
         assert stitch_calls[0]["target_duration_seconds"] == expected_target
         assert stitch_calls[0]["delivery_retime_ratio"] == pytest.approx(
-            28.8 / (6.75 + 7.63 + 7.65 + 5.55 - final_window_start)
+            28.8 / (6.75 + 7.63 + 7.65 + 5.30 + 1024 / 48000 - final_window_start)
         )
         assert stitch_calls[0]["delivery_retime_ratio"] <= 1.1
     else:
@@ -3033,6 +3087,7 @@ def test_long_form_operator_review_delivers_when_final_transcript_token_count_di
         },
         visual_seam_sheet_fn=lambda *_args, **_kwargs: {"frames": []},
         operator_review_delivery=True,
+        source_visual_tail_evaluator=lambda _path: {"reset_detected": False},
     )
 
     saved = _read(manifest_path)

@@ -376,6 +376,7 @@ def stitch_segments(
             operator-review delivery when no acoustic crossfade plan is available.
         terminal_tail_exclusion_seconds: Optional source-tail margin to remove before
             pitch-preservingly retiming the retained content to the exact delivery target.
+            Explicit zero disables legacy end-pan trimming for source-protected windows.
 
     Returns:
         (final_video_bytes, stitch_metadata).
@@ -466,11 +467,11 @@ def stitch_segments(
                 terminal_tail_exclusion_seconds,
                 field="terminal tail exclusion",
             )
-            if terminal_tail_exclusion <= 0:
+            if terminal_tail_exclusion < 0:
                 raise ValueError(
-                    "Terminal tail exclusion must be a finite positive number"
+                    "Terminal tail exclusion must be a finite non-negative number"
                 )
-            if target_duration_seconds is None:
+            if terminal_tail_exclusion > 0 and target_duration_seconds is None:
                 raise ValueError(
                     "Terminal tail exclusion requires an exact delivery target"
                 )

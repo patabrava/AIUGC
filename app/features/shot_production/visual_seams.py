@@ -36,21 +36,24 @@ _SCENE_SCORE = re.compile(
 
 
 def _probe_duration(video_path: Path) -> float:
-    probe = subprocess.run(
-        [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            str(video_path),
-        ],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
+    try:
+        probe = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(video_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        raise ValueError("FFprobe source terminal-reset duration unavailable") from exc
     try:
         duration = float(probe.stdout.strip())
     except (TypeError, ValueError):
@@ -132,12 +135,15 @@ def evaluate_source_terminal_reset(video_path: Path) -> Dict[str, Any]:
         "null",
         "-",
     ]
-    result = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        raise ValueError("FFmpeg source terminal-reset QA unavailable") from exc
     if result.returncode != 0:
         raise ValueError(
             f"FFmpeg source terminal-reset QA failed: {result.stderr[-300:]}"

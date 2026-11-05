@@ -738,6 +738,12 @@ def _derive_video_windows(
             else seams[index].previous_audio_end_seconds
         )
         audio_end = min(take.provider_duration_seconds, audio_end)
+        if index == len(takes) - 1 and take.latest_safe_video_end_seconds is not None:
+            # A final-take boundary constrains both picture and sound; there is
+            # no incoming take available for an L-cut at the end of delivery.
+            if take.latest_safe_video_end_seconds < take.final_word_end_seconds:
+                raise ValidationError("Final take protection would cut verified speech.")
+            audio_end = min(audio_end, take.latest_safe_video_end_seconds)
         video_start = audio_start
         if index > 0:
             video_start += seams[index - 1].visual_cut_position_seconds
@@ -880,7 +886,11 @@ def _extend_delivery_windows(
         max(
             0.0,
             (
-                take.provider_duration_seconds
+                (
+                    min(take.provider_duration_seconds, take.latest_safe_video_end_seconds)
+                    if index == len(evidence) - 1 and take.latest_safe_video_end_seconds is not None
+                    else take.provider_duration_seconds
+                )
                 - (
                     SEMANTIC_INTERNAL_VISUAL_TAIL_EXCLUSION_SECONDS
                     if (

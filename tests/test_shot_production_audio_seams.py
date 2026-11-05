@@ -962,3 +962,35 @@ def test_planner_rejects_isolated_breath_open_at_tail_analysis_window_end():
 
     with pytest.raises(ValidationError, match="No transcript-safe acoustic seam candidate"):
         plan_acoustic_seams(takes, min_duration_seconds=0.0, max_duration_seconds=10.0)
+
+
+def test_final_source_bound_survives_acoustic_planning():
+    """Duration planning must not restore the provider's unstable final frames."""
+    end = 7.18 + 1024 / 48000
+    plan = plan_acoustic_seams(
+        (_evidence(0, duration=8, final_word=7.0),
+         _evidence(1, duration=8, final_word=7.18, latest_safe_video_end=end)),
+        min_duration_seconds=13.0,
+        max_duration_seconds=17.0,
+    )
+    assert plan.takes[-1].audio_end_seconds == pytest.approx(end)
+    assert plan.takes[-1].video_end_seconds == pytest.approx(end)
+
+
+def test_duration_extension_cannot_reintroduce_protected_final_tail():
+    end = 3.0 + 1024 / 48000
+    take = _evidence(0, duration=4, final_word=3.0, latest_safe_video_end=end)
+    window = PlannedTakeWindow(0, 0.0, end, 0.0, end, 0.0)
+    with pytest.raises(ValidationError, match="cannot satisfy the duration envelope"):
+        _extend_delivery_windows(
+            (window,), (take,), (), min_duration_seconds=3.5,
+            max_duration_seconds=4.0, max_seam_word_gap_seconds=0.4,
+        )
+
+
+def test_final_source_bound_must_preserve_verified_speech():
+    with pytest.raises(ValidationError, match="cut verified speech"):
+        plan_acoustic_seams(
+            (_evidence(0), _evidence(1, latest_safe_video_end=2.9)),
+            min_duration_seconds=5.0, max_duration_seconds=8.0,
+        )

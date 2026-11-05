@@ -356,7 +356,8 @@ def test_stitch_acoustic_plan_allows_only_one_frame_of_exact_16_rounding(tmp_pat
     assert abs(meta["stitch_audio_video_duration_delta_s"]) <= 1 / 24
 
 
-def test_stitch_uses_bounded_av_retime_for_live_exact_16_shortfall(tmp_path):
+@pytest.mark.parametrize("source_protected", [False, True])
+def test_stitch_uses_bounded_av_retime_for_live_exact_16_shortfall(tmp_path, source_protected):
     segment_videos = []
     for index, color in enumerate(("red", "blue")):
         path = str(tmp_path / f"retime-take-{index}.mp4")
@@ -371,6 +372,7 @@ def test_stitch_uses_bounded_av_retime_for_live_exact_16_shortfall(tmp_path):
         post_id="post_retime_16",
         correlation_id="corr_retime_16",
         target_duration_seconds=16.0,
+        terminal_tail_exclusion_seconds=0.0 if source_protected else None,
         acoustic_plan={
             "takes": [
                 {
@@ -408,9 +410,9 @@ def test_stitch_uses_bounded_av_retime_for_live_exact_16_shortfall(tmp_path):
     assert meta["stitch_delivery_audio_tempo"] == pytest.approx(1.0 / retime_ratio)
     assert meta["stitch_delivery_native_shortfall_s"] == pytest.approx(0.78)
     assert meta["stitch_delivery_padding_s"] == 0.0
-    assert meta["stitch_end_pan_tail_exclusion_s"] == 0.5
-    assert meta["stitch_end_pan_retime_ratio"] == pytest.approx(16.0 / 15.5)
-    assert meta["stitch_end_pan_protection_applied"] is True
+    assert meta["stitch_end_pan_tail_exclusion_s"] == (0.0 if source_protected else 0.5)
+    assert meta["stitch_end_pan_retime_ratio"] == pytest.approx(1.0 if source_protected else 16.0 / 15.5)
+    assert meta["stitch_end_pan_protection_applied"] is (not source_protected)
     assert abs(meta["stitch_audio_video_duration_delta_s"]) <= 1 / 24
 
 
