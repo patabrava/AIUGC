@@ -1307,15 +1307,23 @@ def _worker_rpc(
     client=None,
     timeout_seconds: Optional[float] = None,
 ) -> dict[str, Any]:
-    return _transition_result(
-        _transition_rpc_query(
-            function_name=function_name,
-            payload=dict(payload),
-            client=client,
-            timeout_seconds=timeout_seconds,
-        ),
-        operation=operation,
-    )
+    active_client = _client(client) if timeout_seconds is None else client
+    try:
+        return _transition_result(
+            _transition_rpc_query(
+                function_name=function_name,
+                payload=dict(payload),
+                client=active_client,
+                timeout_seconds=timeout_seconds,
+            ),
+            operation=operation,
+        )
+    except httpx.RequestError:
+        # Mutations can commit before their response is lost. Replace the
+        # broken shared transport for reconciliation, never replay the RPC.
+        if client is None and active_client is not None:
+            get_supabase().reconnect(failed_client=active_client)
+        raise
 
 
 def _worker_fence_payload(

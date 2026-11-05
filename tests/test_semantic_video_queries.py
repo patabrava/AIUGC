@@ -320,3 +320,33 @@ def test_master_approval_uses_fresh_bounded_rpc_and_exposes_recoverable_failure(
     assert len(calls) == 1  # No blind replay after an ambiguous write.
     assert calls[0]['timeout_seconds'] == 10.0
     assert calls[0]['payload']['p_expected_revision'] == 0
+
+
+@pytest.mark.parametrize("injected", [True, False])
+def test_worker_mutation_transport_failure_refreshes_without_replaying(monkeypatch, injected):
+    import httpx
+    from app.features.semantic_videos import queries
+    calls = []
+    class Client:
+        def rpc(self, name, payload):
+            calls.append(name)
+            return self
+        def execute(self):
+            raise httpx.RemoteProtocolError("Server disconnected")
+    failed = Client()
+    fresh = object()
+    class Adapter:
+        client = failed
+        def reconnect(self, *, failed_client):
+            assert failed_client is failed
+            self.client = fresh
+    adapter = Adapter()
+    monkeypatch.setattr(queries, "get_supabase", lambda: adapter)
+    with pytest.raises(httpx.RemoteProtocolError):
+        queries.persist_worker_submission_intent(
+            run_id="run", take_id="take", worker_id="worker",
+            lease_token="lease", request_hash="hash",
+            client=failed if injected else None,
+        )
+    assert calls == ["persist_semantic_video_submission_intent"]
+    assert adapter.client is (failed if injected else fresh)

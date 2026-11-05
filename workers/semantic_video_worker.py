@@ -1850,13 +1850,56 @@ class SemanticVideoWorker:
                 else take
             )
             request_hash = str(reserved.get("request_hash") or "")
-            self.repo.persist_submission_intent(
-                run_id=run_id,
-                take_id=str(take["id"]),
-                worker_id=self.worker_id,
-                lease_token=lease_token,
-                request_hash=request_hash,
-            )
+            try:
+                self.repo.persist_submission_intent(
+                    run_id=run_id,
+                    take_id=str(take["id"]),
+                    worker_id=self.worker_id,
+                    lease_token=lease_token,
+                    request_hash=request_hash,
+                )
+            except httpx.RequestError:
+                # This process has not entered the provider call. A fresh read
+                # may prove the intent committed despite a lost DB response.
+                # Only this live stack may continue; an orphaned intent remains
+                # blocked because another process cannot prove non-submission.
+                try:
+                    self.repo.renew_run(
+                        run_id=run_id,
+                        worker_id=self.worker_id,
+                        lease_token=lease_token,
+                        lease_seconds=self.lease_seconds,
+                    )
+                    current = next(
+                        (row for row in self.repo.list_attempts(run_id)
+                         if str(row.get("id")) == str(take["id"])),
+                        None,
+                    )
+                    if (
+                        current is None
+                        or current.get("request_hash") != request_hash
+                        or current.get("submission_state") != "intent_persisted"
+                        or current.get("operation_id")
+                        or current.get("quota_state") != "reserved"
+                    ):
+                        raise StateTransitionError(
+                            "Submission intent acknowledgement could not be reconciled."
+                        )
+                except Exception:
+                    self.repo.persist_worker_exception(
+                        run_id=run_id,
+                        worker_id=self.worker_id,
+                        lease_token=lease_token,
+                        stage="generating",
+                        error={
+                            "code": "submission_intent_acknowledgement_lost",
+                            "take_id": str(take["id"]),
+                            "request_hash": request_hash,
+                            "provider_call_entered": False,
+                            "message": "Database intent response lost before provider submission; reconciliation failed.",
+                        },
+                    )
+                    return WorkerTickResult(run_id, "generating", "intent_reconciliation_required", submitted_count)
             correlation_id = (
                 f"semantic_ugc_{run_id}_take_{int(take['take_index'])}"
                 f"_attempt_{int(take.get('attempt') or 1)}"

@@ -2297,3 +2297,59 @@ def test_exhausted_stitched_seam_repair_requires_localized_paid_take_retry(tmp_p
     failure = result["artifacts"]["qa_failure"]
     assert failure["failure_type"] == "seam_repair_exhausted"
     assert failure["retry_mode"] == "localized_paid_take"
+
+
+@pytest.mark.parametrize("committed", [True, False])
+def test_intent_ack_loss_only_submits_when_commit_is_reconciled(committed):
+    import httpx
+    repo = FakeRepo(take_count=1)
+    vertex = FakeVertex()
+    original = repo.persist_submission_intent
+    def lose_ack(**kwargs):
+        repo._take(kwargs["take_id"])["quota_state"] = "reserved"
+        if committed:
+            original(**kwargs)
+        raise httpx.RemoteProtocolError("Server disconnected")
+    repo.persist_submission_intent = lose_ack
+    result = _worker(repo, vertex).tick("run-1")
+    assert len(vertex.submit_calls) == int(committed)
+    assert sum(event[0] == "intent" for event in repo.events) == int(committed)
+    if committed:
+        assert result.action == "submitted"
+        assert repo.takes[0]["submission_state"] == "submitted"
+    else:
+        assert result.action == "intent_reconciliation_required"
+        diagnostic = next(e for e in repo.events if e[0] == "worker_exception")
+        assert diagnostic[2]["provider_call_entered"] is False
+        assert diagnostic[2]["take_id"] == "take-0"
+
+
+@pytest.mark.parametrize("invalid", ["request_hash", "operation_id", "quota_state", "lease", "read"])
+def test_intent_ack_recovery_fails_closed_when_evidence_or_lease_is_invalid(invalid):
+    import httpx
+    repo = FakeRepo(take_count=1)
+    vertex = FakeVertex()
+    original = repo.persist_submission_intent
+    def lose_ack(**kwargs):
+        original(**kwargs)
+        take = repo._take(kwargs["take_id"])
+        take["quota_state"] = "reserved"
+        if invalid in {"request_hash", "operation_id", "quota_state"}:
+            take[invalid] = "unexpected"
+        if invalid == "lease":
+            repo.renew_error = StateTransitionError("lease lost")
+        if invalid == "read":
+            repo.list_attempts = lambda *_: (_ for _ in ()).throw(httpx.ReadError("unavailable"))
+        raise httpx.RemoteProtocolError("Server disconnected")
+    repo.persist_submission_intent = lose_ack
+    result = _worker(repo, vertex).tick("run-1")
+    assert result.action == "intent_reconciliation_required"
+    assert not vertex.submit_calls
+
+
+def test_existing_orphaned_intent_is_never_recovered_by_another_tick():
+    repo = FakeRepo(take_count=1)
+    repo.takes[0]["submission_state"] = "intent_persisted"
+    vertex = FakeVertex()
+    assert _worker(repo, vertex).tick("run-1").action == "blocked_unknown_submission"
+    assert not vertex.submit_calls
