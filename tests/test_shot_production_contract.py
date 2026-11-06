@@ -377,3 +377,29 @@ def test_compile_veo_take_requests_rejects_missing_negative_prompt_locks(negativ
             base_seed=12,
             negative_prompt=negative_prompt,
         )
+
+
+@pytest.mark.parametrize("standing", [False, True])
+def test_compiled_take_keeps_dialogue_audio_only_and_frames_text_free(standing):
+    from app.features.shot_production.prompts import compile_veo_take_requests
+    from app.features.shot_production.shot_deck import derive_shot_deck
+
+    source = _png_bytes()
+    deck = derive_shot_deck(
+        approved_master_bytes=source, expected_sha256=sha256(source).hexdigest(),
+        mime_type="image/png", shot_count=4,
+    )
+    contract = None if not standing else {
+        "presentation_mode": "standing_presenter", "scene_description": "Room",
+        "wardrobe_description": "Source clothing", "body_presentation_description": "Standing",
+        "framing_description": "Source framing",
+    }
+    for request in compile_veo_take_requests(
+        beats=_beats(), shot_deck=deck, base_seed=10, visual_contract=contract,
+    ):
+        submitted = request.as_vertex_submit_kwargs()
+        assert "keep every frame completely free of on-screen text" in submitted["prompt"]
+        assert "dialogue is spoken audio only" in submitted["prompt"]
+        assert submitted["prompt"].count(request.beat.text) == 1
+        for exclusion in ("burned-in subtitles", "auto-generated subtitles", "lower-third captions", "speech transcription overlays"):
+            assert exclusion in submitted["negative_prompt"]

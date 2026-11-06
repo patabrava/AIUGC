@@ -1,5 +1,11 @@
 # Architecture
 
+## Subtitle prevention and results review (verified 2026-11-06)
+
+- `app/features/shot_production/prompts.py` restores text-free raw-frame instructions and audio-only dialogue for both standing/seated requests, with explicit burned-in/auto-generated subtitle and transcription-overlay negative terms. Yellow word captions remain the separate downstream renderer flow. History:729b2a4 added the positive protection;aa051b8 removed it. Prevention instructions cannot guarantee zero stochastic artifacts.
+- User clarification preserves viewing generated results despite QA findings and prioritizes latency. The earlier local a7ad6b4 hard-artifact-blocking patch was never deployed and is withdrawn: do not ship its worker/composition/upload blocking behavior. The replacement `codex/subtitle-prevention-without-qa-blocks` branch on61c52f2 changes only prompts and prompt tests, preserving existing advisory evaluation and result-review behavior. Original checkout's owned QA guards/helper/blocking tests have been removed; unrelated work remains intact.
+- Current61c52f2 flow still runs transcript→visual/identity→voice→acoustic/composition→upload serially. Advisory outcomes avoid rejection but do not remove evaluation time. Choosing after-delivery optional QA versus skipping it remains a user decision in `agentic/analysis.md`; neither has been implemented or deployed. Preserve required transcript timing, terminal-tail/media integrity, intentional captions and paid submission fences. Regression:334 passed on current release source and320 in original checkout,21 existing warnings each; fresh native first review PASS (qa-review-latency-20261106 independent policy correction). No measured live speedup or existing-media repair is claimed.
+
 ## Product image model and living-room release (2026-10-29)
 
 - Product scene defaults (`Settings.semantic_scene_plate_model`, scene/background and shot-frame defaults, examples and production deployment pin) select `gemini-nano-banana-2.1`. Both `VertexGeminiClient` image methods use `global` and omit unsupported temperature only for this model. Generic/blog image2.5 and immutable actor3q3-pro remain unchanged. Model selection already participates in the generation-contract/anchor hash; no evaluator/SQL migration is needed.

@@ -47,6 +47,10 @@ _REQUIRED_NEGATIVE_LOCKS = (
     "posture reset",
     "generated text",
     "subtitles",
+    "burned-in subtitles",
+    "auto-generated subtitles",
+    "lower-third captions",
+    "speech transcription overlays",
     "music",
     "background voices",
     "extra speech",
@@ -78,7 +82,8 @@ EFFECTIVE_NEGATIVE_PROMPT = (
     "high-angle view, low-angle view, steep downward camera angle, camera "
     "zoom, push-in, dolly, orbit, reframe, cut, jump cut, scene transition, wipe transition, end card, "
     "freeze frame, repeated dialogue, extra speech, English speech, music, background voices, subtitles, "
-    "captions, generated text, logos, watermarks, gibberish text, plastic skin, waxy skin, over-smoothed "
+    "captions, burned-in subtitles, auto-generated subtitles, lower-third captions, speech transcription overlays, "
+    "generated text, logos, watermarks, gibberish text, plastic skin, waxy skin, over-smoothed "
     "skin, beauty filter, CGI look, 3D render"
 )
 STANDING_EFFECTIVE_NEGATIVE_PROMPT = (
@@ -93,7 +98,8 @@ STANDING_EFFECTIVE_NEGATIVE_PROMPT = (
     "motorized camera move, large camera shake, wobbly footage, camera pan, camera tilt, Dutch angle, camera "
     "roll, rolled horizon, high-angle view, low-angle view, steep downward camera angle, camera zoom, push-in, "
     "dolly, orbit, reframe, cut, jump cut, scene transition, wipe transition, end card, freeze frame, repeated "
-    "dialogue, extra speech, English speech, music, background voices, subtitles, captions, generated text, logos, "
+    "dialogue, extra speech, English speech, music, background voices, subtitles, captions, burned-in subtitles, "
+    "auto-generated subtitles, lower-third captions, speech transcription overlays, generated text, logos, "
     "watermarks, gibberish text, plastic skin, waxy skin, over-smoothed skin, beauty filter, CGI look, 3D render"
 )
 _STANDING_REQUIRED_NEGATIVE_LOCKS = tuple(
@@ -196,6 +202,9 @@ def build_veo_take_prompt(
             "room verticals stay level; that motion is translational only, stays under two percent of frame width, and always drifts "
             "back toward the source framing.",
             f"Visual continuity: {_visual_contract_text(visual_contract)}",
+            "Visual output: keep every frame completely free of on-screen text, including captions, subtitles, "
+            "transcription overlays, logos, watermarks, letters, and gibberish glyphs. The dialogue is spoken "
+            "audio only; it is never written or displayed in the image.",
             f"Subject motion: the {posture} actor speaks directly to the lens with accurate native-German lip and "
             "jaw movement, a restrained conversational expression, irregular natural blinking, quiet breathing, "
             f"and minimal speech-coupled head movement. The shoulders, torso, {posture} posture, and visible body "
