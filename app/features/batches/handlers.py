@@ -16,6 +16,7 @@ from fastapi.responses import PlainTextResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError as PydanticValidationError
 
+from app.features.semantic_videos.optional_qa import optional_qa_projection
 from app.features.semantic_videos.recovery import generation_error
 
 from app.features.batches.schemas import (
@@ -891,6 +892,7 @@ def _build_semantic_video_post_projection(
         "visual_contract": None,
         "provider_prompts": [],
         "qa_advisory": None,
+        "optional_qa": None,
         "qa_pass": bool(post.get("qa_pass")),
         "scene_image_job_id": str(scene_image_job.get("id") or ""),
         "scene_image_job_status": scene_image_job_status,
@@ -1074,6 +1076,7 @@ def _build_semantic_video_post_projection(
         "visual_contract": _semantic_visual_contract(run, master),
         "provider_prompts": _semantic_provider_prompts(latest),
         "qa_advisory": qa_advisory,
+        "optional_qa": optional_qa_projection(run),
     }
 
 

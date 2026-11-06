@@ -32,6 +32,7 @@ from app.adapters.caption_renderer import burn_captions
 from app.adapters.deepgram_client import Word, WordLevelTranscript
 from app.adapters.storage_client import get_storage_client
 from app.adapters.video_stitcher import stitch_segments
+from app.features.semantic_videos.optional_qa import delivery_gate_satisfied
 from app.core.errors import ValidationError
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -2542,9 +2543,9 @@ def compose_and_caption(
         maximum_duration = float(
             existing_resolution.get("effective_maximum_seconds", maximum_duration)
         )
-    if not (payload.get("visual_qa") or {}).get("passed"):
+    if not delivery_gate_satisfied(payload, "visual_qa"):
         raise ValidationError("Composition requires a passed visual QA gate.")
-    if not (payload.get("voice_qa") or {}).get("passed"):
+    if not delivery_gate_satisfied(payload, "voice_qa"):
         raise ValidationError("Composition requires a passed voice QA gate.")
     existing_caption = payload.get("caption") or {}
     cached_delivery_invalid = bool(existing_caption)
@@ -3550,7 +3551,7 @@ def upload_final(manifest_path: Path, storage_client: Optional[Any] = None) -> D
         raise ValidationError("Captioned pilot has not passed seam-gap QA before upload.")
     if not (payload.get("media_qa") or {}).get("passed"):
         raise ValidationError("Captioned pilot has not passed final media QA before upload.")
-    if not (payload.get("voice_qa") or {}).get("passed"):
+    if not delivery_gate_satisfied(payload, "voice_qa"):
         raise ValidationError("Captioned pilot has not passed voice QA before upload.")
     if payload.get("acoustic_seam_plan") and not (payload.get("acoustic_seam_qa") or {}).get("passed"):
         raise ValidationError("Captioned pilot has not passed acoustic seam QA before upload.")
@@ -3726,7 +3727,7 @@ def invalidate_composition(manifest_path: Path, *, reason: str) -> Dict[str, Any
     payload = _load_manifest(manifest_path)
     if not str(reason or "").strip():
         raise ValidationError("Composition invalidation requires an operator reason.")
-    if not (payload.get("visual_qa") or {}).get("passed"):
+    if not delivery_gate_satisfied(payload, "visual_qa"):
         raise ValidationError("Composition invalidation requires passed visual QA.")
     if any(not (take.get("transcript_qa") or {}).get("passed") for take in payload["takes"]):
         raise ValidationError("Composition invalidation requires transcript-passed takes.")

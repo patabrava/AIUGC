@@ -96,6 +96,8 @@ jobs:
               paths = json.loads(response.read().decode()).get("paths", {})
           required_rpcs = {
               "/rpc/resume_semantic_video_runtime_v1",
+              "/rpc/claim_semantic_video_optional_qa",
+              "/rpc/finish_semantic_video_optional_qa",
               "/rpc/apply_post_qa_decision",
               "/rpc/probe_manual_video_duration_contract",
               "/rpc/claim_semantic_scene_image_v3",
@@ -151,7 +153,7 @@ jobs:
             "${{ steps.image.outputs.ref }}" python -m pytest \
             tests/test_semantic_video_worker.py tests/test_semantic_video_queries.py \
             tests/test_semantic_video_paid_safety.py tests/test_semantic_video_handlers.py \
-            tests/test_semantic_video_runtime_recovery.py tests/test_semantic_video_ui.py -q
+            tests/test_semantic_video_runtime_recovery.py tests/test_semantic_video_optional_qa.py tests/test_semantic_video_ui.py -q
 
       - name: Render Hostinger compose payload
         run: |

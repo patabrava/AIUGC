@@ -147,7 +147,7 @@
                     </span>
                 </div>
                 <div class="rounded-xl border border-[#006AAB]/15 p-3 text-sm">
-                    <span class="text-[#1C2740]/60">Verified</span><strong class="ml-2 text-[#1C2740]"><span data-field="verified-takes">{{ item.verified_takes }}</span>/<span data-field="verified-total">{{ item.take_count }}</span></strong>
+                    <span class="text-[#1C2740]/60">Speech checked</span><strong class="ml-2 text-[#1C2740]"><span data-field="verified-takes">{{ item.verified_takes }}</span>/<span data-field="verified-total">{{ item.take_count }}</span></strong>
                     <span class="mt-2 flex items-center gap-2 text-xs font-bold {% if item.stage in generation_blocked_stages %}text-amber-800{% elif item.verified_takes >= item.take_count and item.take_count %}text-emerald-800{% elif item.stage in ['transcript_qa', 'identity_qa', 'voice_qa', 'acoustic_qa', 'composing', 'captioning', 'uploading'] %}text-[#006AAB]{% else %}text-[#1C2740]/55{% endif %}" data-field="verified-status">
                         <span class="{% if item.stage not in ['transcript_qa', 'identity_qa', 'voice_qa', 'acoustic_qa', 'composing', 'captioning', 'uploading'] or item.verified_takes >= item.take_count %}hidden {% endif %}h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-[#006AAB]/25 border-t-[#006AAB]" data-field="verified-spinner" aria-hidden="true"></span>
                         {% if item.stage in generation_blocked_stages %}Needs review{% elif item.verified_takes >= item.take_count and item.take_count %}Complete{% elif item.stage in ['transcript_qa', 'identity_qa', 'voice_qa', 'acoustic_qa', 'composing', 'captioning', 'uploading'] %}Verifying{% elif item.stage == 'generating' %}Waiting for takes{% else %}Queued{% endif %}
@@ -192,24 +192,23 @@
             </section>
             {% endif %}
 
-            {% if item.stage == 'completed' and (item.final_video_url or item.final_caption_url) %}
             {% set playback_url = item.final_caption_url or item.final_video_url %}
-            <section class="mt-5 rounded-xl border border-emerald-300 bg-emerald-50 p-4" aria-label="Final delivery">
+            <section data-field="final-delivery" class="{% if item.stage != 'completed' or not playback_url %}hidden {% endif %}mt-5 rounded-xl border border-emerald-300 bg-emerald-50 p-4" aria-label="Final delivery">
                 <h4 class="text-sm font-bold text-emerald-950">{% if item.qa_advisory %}Full video ready for review{% else %}Final delivery{% endif %}</h4>
                 <p class="mt-1 text-xs text-emerald-900">The player uses the complete stitched captioned video when available. Review the full result before choosing whether any regeneration is worthwhile.</p>
-                <video class="mt-3 aspect-[9/16] max-h-[34rem] w-full rounded-xl bg-black object-contain" controls preload="metadata" src="{{ playback_url }}">
+                <video class="mt-3 aspect-[9/16] max-h-[34rem] w-full rounded-xl bg-black object-contain" data-field="final-player" controls preload="metadata" {% if playback_url %}src="{{ playback_url }}"{% endif %}>
                     Your browser does not support video playback.
                 </video>
                 <div class="mt-3 flex flex-wrap gap-2 text-sm font-bold">
-                    {% if item.final_caption_url %}
-                    <a class="rounded-lg bg-emerald-800 px-3 py-2 text-white" href="{{ item.final_caption_url }}" target="_blank" rel="noopener noreferrer">Open captioned video</a>
-                    {% endif %}
-                    {% if item.final_video_url %}
-                    <a class="rounded-lg border border-emerald-800 px-3 py-2 text-emerald-900" href="{{ item.final_video_url }}" target="_blank" rel="noopener noreferrer">Open raw video</a>
-                    {% endif %}
+                    <a data-field="final-caption-link" class="{% if not item.final_caption_url %}hidden {% endif %}rounded-lg bg-emerald-800 px-3 py-2 text-white" href="{{ item.final_caption_url or '#' }}" target="_blank" rel="noopener noreferrer">Open captioned video</a>
+                    <a data-field="final-raw-link" class="{% if not item.final_video_url %}hidden {% endif %}rounded-lg border border-emerald-800 px-3 py-2 text-emerald-900" href="{{ item.final_video_url or '#' }}" target="_blank" rel="noopener noreferrer">Open raw video</a>
                 </div>
             </section>
-            {% endif %}
+            <section data-field="optional-qa" data-optional-qa-status="{{ item.optional_qa.status if item.optional_qa else '' }}" class="{% if not item.optional_qa %}hidden {% endif %}mt-4 rounded-xl border border-[#006AAB]/20 bg-[#F6FAFF] p-4" aria-label="Optional quality checks" aria-live="polite">
+                <h4 class="text-sm font-bold text-[#1C2740]">Optional quality checks</h4>
+                <p data-field="optional-qa-message" class="mt-1 text-sm text-[#1C2740]">{% if item.optional_qa and item.optional_qa.status == 'failed' %}Optional checks could not finish. The video remains available for review.{% elif item.optional_qa and item.optional_qa.status == 'completed' %}Optional checks completed. Review any findings below.{% else %}The video is ready to review. Optional visual and voice checks will report here afterward.{% endif %}</p>
+                <ul data-field="optional-qa-findings" class="mt-2 list-disc space-y-1 pl-5 text-sm text-[#1C2740]">{% if item.optional_qa %}{% for finding in item.optional_qa.findings %}<li>{{ finding }}</li>{% endfor %}{% endif %}</ul>
+            </section>
 
             {% if item.stage == 'completed' and item.qa_advisory %}
             <section class="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4" aria-label="Manual quality review">

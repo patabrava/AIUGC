@@ -1,5 +1,6 @@
 (() => {
     const activePolls = new WeakMap();
+    const optionalPolls = new WeakMap();
     const candidateProgressRequests = new WeakMap();
     const sceneImageButtonDomainDisabled = new WeakMap();
     const scheduledWorkflowReloads = new WeakSet();
@@ -438,7 +439,76 @@
         );
     }
 
+    function renderOptionalQA(root, review) {
+        const card = field(root, 'optional-qa');
+        if (!card || !review) return;
+        card.classList.remove('hidden');
+        card.dataset.optionalQaStatus = review.status;
+        const messages = {
+            pending: 'The video is ready to review. Optional visual and voice checks are queued.',
+            running: 'The video is ready to review. Optional visual and voice checks are running.',
+            completed: (review.findings || []).length ? 'Optional checks completed. Review the findings below.' : 'Optional checks completed. No issues were flagged.',
+            failed: 'Optional checks could not finish. The video remains available for review.',
+        };
+        field(root, 'optional-qa-message').textContent = messages[review.status] || messages.pending;
+        const findings = field(root, 'optional-qa-findings');
+        findings.replaceChildren(...(review.findings || []).map((value) => {
+            const item = document.createElement('li');
+            item.textContent = value;
+            return item;
+        }));
+        if (['completed', 'failed'].includes(review.status)) stopOptionalQA(root);
+    }
+
+    function stopOptionalQA(root) {
+        const state = optionalPolls.get(root);
+        if (state) window.clearTimeout(state.timer);
+        optionalPolls.delete(root);
+    }
+
+    function startOptionalQA(root) {
+        const card = field(root, 'optional-qa');
+        if (root.dataset.stage !== 'completed' || !card || !['pending', 'running'].includes(card.dataset.optionalQaStatus) || optionalPolls.has(root)) return;
+        const state = {failures: 0, timer: null};
+        optionalPolls.set(root, state);
+        const poll = async () => {
+            if (!root.isConnected) { stopOptionalQA(root); return; }
+            try {
+                const progress = await requestJson(`/semantic-videos/posts/${encodeURIComponent(root.dataset.postId)}/progress`, {method: 'GET'});
+                if (!root.isConnected || optionalPolls.get(root) !== state) return;
+                state.failures = 0;
+                renderOptionalQA(root, progress.optional_qa);
+            } catch (_error) {
+                state.failures += 1;
+                if (state.failures >= 3) {
+                    stopOptionalQA(root);
+                    field(root, 'optional-qa-message').textContent = 'Optional check status could not be refreshed. The video remains available; reload to check again.';
+                }
+            }
+            if (optionalPolls.get(root) === state) state.timer = window.setTimeout(poll, 10000);
+        };
+        state.timer = window.setTimeout(poll, 10000);
+    }
+
+    function renderCompletedDelivery(root, progress) {
+        if (progress.stage !== 'completed') return;
+        const url = progress.final_caption_url || progress.final_video_url;
+        const player = field(root, 'final-player');
+        if (url && player) {
+            if (player.getAttribute('src') !== url) player.setAttribute('src', url);
+            field(root, 'final-delivery').classList.remove('hidden');
+            for (const [name, href] of [['final-caption-link', progress.final_caption_url], ['final-raw-link', progress.final_video_url]]) {
+                const link = field(root, name);
+                link.classList.toggle('hidden', !href);
+                if (href) link.setAttribute('href', href);
+            }
+        }
+        renderOptionalQA(root, progress.optional_qa);
+        startOptionalQA(root);
+    }
+
     function updateProgress(root, progress) {
+        renderCompletedDelivery(root, progress);
         if (progress.stage === 'completed' && Number(progress.total_takes || 0) > 0) {
             progress = {...progress, verified_takes: progress.total_takes};
         }
@@ -494,6 +564,7 @@
         root.setAttribute('aria-busy', String(isBusy));
         root.dataset.revision = String(progress.revision ?? '');
         root.dataset.stage = String(progress.stage || '');
+        startOptionalQA(root);
         root.dataset.runId = String(progress.run_id || '');
         root.dataset.sceneImageJobId = String(progress.scene_image_job_id || '');
         if (progress.plan_hash) root.dataset.planHash = progress.plan_hash;
@@ -826,7 +897,7 @@
             stopPolling(root);
             return null;
         }
-        if (terminalWithoutImageRecovery) return null;
+        if (terminalWithoutImageRecovery) { stopPolling(root); startOptionalQA(root); return null; }
         try {
             const progress = await fetchCurrentProgress(root);
             if (!root.isConnected) {
@@ -846,6 +917,7 @@
             if (progress.generation_error) return progress;
             if (['retry_approval_required', 'completed', 'failed'].includes(progress.stage)) {
                 stopPolling(root);
+                startOptionalQA(root);
                 reloadWhenProductionSettled(root);
                 return progress;
             }
@@ -1241,6 +1313,7 @@
         recoverCandidateProgress(root);
         hydrateRunProgress(root);
         startPolling(root);
+        startOptionalQA(root);
     }
 
     function init(scope = document) {

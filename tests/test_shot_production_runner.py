@@ -1429,7 +1429,8 @@ def test_batch_voice_retry_archives_one_report_and_plans_only_selected_outliers(
     assert voice_history[0]["selected_take_indexes"] == [0, 1]
 
 
-def test_compose_orders_takes_uses_trim_windows_and_captions_once(tmp_path):
+@pytest.mark.parametrize("deferred", [False, True])
+def test_compose_orders_takes_uses_trim_windows_and_captions_once(tmp_path, deferred):
     from app.features.shot_production.runner import compose_and_caption
 
     manifest_path = _manifest_with_raw_takes(tmp_path)
@@ -1452,6 +1453,9 @@ def test_compose_orders_takes_uses_trim_windows_and_captions_once(tmp_path):
         }
     payload["visual_qa"] = {"passed": True}
     payload["voice_qa"] = {"passed": True}
+    if deferred:
+        payload["optional_qa_deferred"] = True
+        payload["visual_qa"] = payload["voice_qa"] = {"passed": False, "status": "deferred"}
     manifest_path.write_text(json.dumps(payload), encoding="utf-8")
 
     stitch_calls = []

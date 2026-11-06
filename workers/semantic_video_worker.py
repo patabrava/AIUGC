@@ -206,6 +206,7 @@ class ProductionStageRunner:
     """Bridge persisted runs into the existing audited shot-production pipeline."""
 
     _MANIFEST_GLOBAL_KEYS = (
+        "optional_qa_deferred",
         "presentation_mode",
         "contact_sheet",
         "actor_identity_qa",
@@ -274,6 +275,14 @@ class ProductionStageRunner:
         run: Mapping[str, Any],
         takes: Sequence[Mapping[str, Any]],
     ) -> dict[str, Any]:
+        if stage in {"identity_qa", "voice_qa"}:
+            # Optional evaluators must never sit on the path to playable delivery.
+            prior = dict((run.get("artifact_manifest") or {}).get("pipeline_manifest") or {})
+            prior["optional_qa_deferred"] = True
+            key = "visual_qa" if stage == "identity_qa" else "voice_qa"
+            report = {"passed": False, "status": "deferred"}
+            prior[key] = report
+            return {"passed": True, "artifacts": {"pipeline_manifest": prior, stage: report}}
         if stage == "uploading":
             return self._project_delivery(run)
         if stage == "composing":
@@ -296,72 +305,13 @@ class ProductionStageRunner:
             if stage == "transcript_qa":
                 pipeline = self._runner()
                 pipeline.transcribe_and_validate_takes(manifest_path, self._deepgram())
-            elif stage == "identity_qa":
-                pipeline = self._runner()
-                pipeline.build_contact_sheet(manifest_path)
-                pipeline.run_visual_qa(manifest_path)
-                identity_payload = self._read_manifest(manifest_path)
-                contact = identity_payload.get("contact_sheet")
-                if not isinstance(contact, Mapping):
-                    raise ValidationError(
-                        "Semantic video identity QA did not persist a contact sheet."
-                    )
-                contact_path = Path(str(contact.get("path") or ""))
-                contact_bytes = contact_path.read_bytes()
-                contact_hash = sha256(contact_bytes).hexdigest()
-                if (
-                    contact_hash != str(contact.get("sha256") or "")
-                    or len(contact_bytes) != int(contact.get("bytes") or -1)
-                ):
-                    raise StateTransitionError(
-                        "Semantic video identity contact sheet changed before publication."
-                    )
-                contact_upload = self.storage.upload_image(
-                    image_bytes=contact_bytes,
-                    file_name=f"semantic-video-{run['id']}-identity-{contact_hash}.jpg",
-                    correlation_id=f"semantic_ugc_{run['id']}_identity_contact",
-                    content_type="image/jpeg",
-                )
-                identity_payload["contact_sheet"] = {
-                    **dict(contact),
-                    "storage_uri": str(contact_upload.get("url") or ""),
-                    "storage_key": str(contact_upload.get("storage_key") or ""),
-                }
-                pipeline._atomic_write_json(manifest_path, identity_payload)  # noqa: SLF001
-                logger.info(
-                    "semantic_video_identity_qa_completed",
-                    run_id=str(run["id"]),
-                    contact_sha256=contact_hash[:12],
-                    actor_identity_passed=bool(
-                        (identity_payload.get("actor_identity_qa") or {}).get("passed")
-                    ),
-                    actor_identity_confidence=(
-                        identity_payload.get("actor_identity_qa") or {}
-                    ).get("confidence"),
-                    scene_continuity_passed=bool(
-                        (identity_payload.get("scene_continuity_qa") or {}).get("passed")
-                    ),
-                    scene_continuity_confidence=(
-                        identity_payload.get("scene_continuity_qa") or {}
-                    ).get("confidence"),
-                )
-            elif stage == "voice_qa":
-                self._runner().run_voice_qa(manifest_path)
             else:
                 return self._compose_upload_delivery(run, takes, manifest_path)
         except ValidationError as exc:
             return self._qa_failure(stage, manifest_path, takes, exc)
 
         payload = self._read_manifest(manifest_path)
-        report_key = {
-            "transcript_qa": "transcript_qa",
-            "identity_qa": "visual_qa",
-            "voice_qa": "voice_qa",
-        }[stage]
-        if report_key == "transcript_qa":
-            report: Any = [take.get("transcript_qa") for take in payload["takes"]]
-        else:
-            report = payload.get(report_key)
+        report = [take.get("transcript_qa") for take in payload["takes"]]
         return {
             "passed": True,
             "artifacts": {
@@ -369,6 +319,46 @@ class ProductionStageRunner:
                 stage: report,
             },
         }
+
+    def run_optional_qa(self, *, run, takes):
+        if run.get("stage") != "completed" or not run.get("final_caption_sha256"):
+            raise StateTransitionError("Optional QA requires completed delivery.")
+        takes = _latest_attempts(takes)
+        pipeline = self._runner()
+        manifest_path = self._materialize_manifest(run, takes)
+        payload = self._read_manifest(manifest_path)
+        for key in ("visual_qa", "actor_identity_qa", "scene_continuity_qa", "voice_qa"):
+            payload.pop(key, None)
+        pipeline._atomic_write_json(manifest_path, payload)
+        findings, checks = [], {}
+        unavailable = False
+        for key in ("visual", "voice"):
+            try:
+                if key == "visual":
+                    pipeline.build_contact_sheet(manifest_path)
+                    pipeline.run_visual_qa(manifest_path)
+                else:
+                    pipeline.run_voice_qa(manifest_path)
+            except ValidationError:
+                report = self._read_manifest(manifest_path).get("visual_qa" if key == "visual" else "voice_qa")
+                if not isinstance(report, dict) or report.get("status") == "deferred":
+                    unavailable = True
+                    checks[key] = {"status": "unavailable"}
+                    findings.append(f"Optional {key} checks could not finish. Review the available video.")
+                    continue
+            except Exception:  # Evaluation outages never revoke completed media.
+                logger.exception("semantic_video_optional_evaluator_unavailable", run_id=run["id"], check=key)
+                unavailable = True
+                checks[key] = {"status": "unavailable"}
+                findings.append(f"Optional {key} checks could not finish. Review the available video.")
+                continue
+            report = self._read_manifest(manifest_path).get("visual_qa" if key == "visual" else "voice_qa") or {}
+            passed = report.get("passed") is True
+            checks[key] = {"status": "passed" if passed else "needs_review", "report": report}
+            if not passed:
+                reasons = report.get("blocking_reasons") or [f"Optional {key} check recommends manual review."]
+                findings.extend(str(reason)[:1000] for reason in reasons)
+        return {"status": "failed" if unavailable else "completed", "checks": checks, "findings": findings[:20]}
 
     def accept_transcript_advisory(
         self,
@@ -1243,6 +1233,7 @@ class ProductionStageRunner:
         pipeline = self._runner()
         manifest_path = self._materialize_manifest(run, takes)
         payload = self._read_manifest(manifest_path)
+        payload["optional_qa_deferred"] = True
         take = payload["takes"][0]
         transcript_payload = take.get("transcript")
         if not isinstance(transcript_payload, Mapping):
@@ -2604,6 +2595,16 @@ def main() -> None:
             )
         )
 
+    from workers.semantic_video_review_worker import OptionalVideoQAWorker
+    review_worker = OptionalVideoQAWorker(
+        stage_runner=ProductionStageRunner(work_root=work_root / "optional-review"),
+        heartbeat_factory=_LeaseHeartbeat,
+    )
+    threads.append(threading.Thread(
+        target=_run_worker_loop,
+        kwargs={"worker": review_worker, "poll_seconds": poll_seconds, "stop_event": stop_event},
+        name="semantic-video-optional-review",
+    ))
     logger.info(
         "semantic_video_worker_started",
         concurrency=concurrency,

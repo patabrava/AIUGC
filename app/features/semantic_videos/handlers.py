@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from app.features.semantic_videos.optional_qa import optional_qa_projection
+
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
@@ -2872,6 +2874,9 @@ def get_progress(post_id: str, request: Request, response: Response):
         estimated_remaining_seconds = None
         status_message = error["message"]
     progress = ProgressResponse(
+        optional_qa=optional_qa_projection(run),
+        final_video_url=str(run.get("final_video_uri") or "") if run.get("stage") == "completed" else "",
+        final_caption_url=str(run.get("final_caption_uri") or "") if run.get("stage") == "completed" else "",
         generation_error=error,
         run_id=str(run["id"]),
         revision=int(run.get("revision") or 0),

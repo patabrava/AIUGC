@@ -1739,3 +1739,26 @@ def resume_runtime_failure(*, run_id, expected_revision, plan_hash, requested_by
          "p_plan_hash": plan_hash, "p_requested_by": requested_by},
         operation="runtime recovery",
     )
+
+
+def claim_optional_qa(*, worker_id: str, lease_seconds: int, client=None):
+    active_client = _client(client)
+    try:
+        response = active_client.rpc('claim_semantic_video_optional_qa', {
+            'p_worker_id': worker_id, 'p_lease_seconds': lease_seconds,
+        }).execute()
+    except httpx.RequestError:
+        if client is None:
+            get_supabase().reconnect(failed_client=active_client)
+        raise
+    rows = _rows(response)
+    if len(rows) > 1:
+        raise StateTransitionError('Optional QA claim returned more than one run.')
+    return rows[0] if rows else None
+
+
+def finish_optional_qa(*, run_id, worker_id, lease_token, delivery_sha256, report, client=None):
+    return _worker_rpc('finish_semantic_video_optional_qa', {
+        'p_run_id': run_id, 'p_worker_id': worker_id, 'p_lease_token': lease_token,
+        'p_delivery_sha256': delivery_sha256, 'p_report': dict(report),
+    }, operation='optional QA completion', client=client)

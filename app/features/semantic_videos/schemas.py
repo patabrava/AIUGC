@@ -132,6 +132,9 @@ class ProgressResponse(BaseModel):
     estimated_remaining_seconds: Optional[int] = Field(default=None, ge=0)
     status_message: str
     generation_error: Optional[dict[str, Any]] = None
+    optional_qa: Optional[dict[str, Any]] = None
+    final_video_url: str = ""
+    final_caption_url: str = ""
     failed_take_indexes: list[int]
     takes: list[ProgressTakeResponse]
 
