@@ -1762,16 +1762,23 @@ async def get_batch_endpoint(request: Request, batch_id: str):
             has_manual_drafts = any(bool((p.seed_data or {}).get("manual_draft")) for p in posts_list)
             derived_creation_mode = "manual" if has_manual_drafts else "automated"
 
+        wants_html = _wants_html(request)
+        # Only the Publish panel renders creator readiness. The Accounts hub
+        # fetches its own status independently of the page.
+        tiktok_connection = {}
+        if not wants_html or batch["state"] == BatchState.S7_PUBLISH_PLAN.value:
+            tiktok_connection = await get_tiktok_publish_state()
+
         batch_detail = {
             **batch,
             "creation_mode": derived_creation_mode,
             **posts_summary,
             "meta_connection": meta_connection,
-            "tiktok_connection": await get_tiktok_publish_state(),
+            "tiktok_connection": tiktok_connection,
             "posts": posts_list,
         }
 
-        if _wants_html(request):
+        if wants_html:
             batch_model = BatchDetailResponse(**batch_detail)
             batch_payload = batch_model.model_dump(mode="json")
             if is_semantic_ugc_mode(batch_payload.get("creation_mode")):
@@ -1779,7 +1786,7 @@ async def get_batch_endpoint(request: Request, batch_id: str):
             context = {
                 "request": request,
                 "batch": batch_payload,
-                "batch_view": _build_batch_detail_view(batch_payload),
+                "batch_view": await asyncio.to_thread(_build_batch_detail_view, batch_payload),
                 "static_version": DETAIL_JS_VERSION,
             }
             template_name = "batches/detail.html"

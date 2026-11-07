@@ -298,8 +298,7 @@
             .filter((root) => {
                 const approveButton = action(root, 'approve-plan');
                 return root.dataset.stage === 'awaiting_paid_approval'
-                    && Boolean(root.dataset.planHash)
-                    && approveButton
+                    && Boolean(approveButton?.dataset.planHash)
                     && !approveButton.disabled;
             });
         const feedbackState = window.beginActionFeedback(button, `Starting ${expectedCount} videos…`);
@@ -316,6 +315,7 @@
 
             const approvals = [];
             for (const root of roots) {
+                const confirmedHash = action(root, 'approve-plan').dataset.planHash;
                 const progress = await requestJson(
                     `/semantic-videos/posts/${encodeURIComponent(root.dataset.postId)}/progress`,
                     {method: 'GET'},
@@ -324,7 +324,7 @@
                 if (progress.stage !== 'awaiting_paid_approval') {
                     throw new Error('A production plan changed before batch approval. Reload the current plans.');
                 }
-                if (String(progress.plan_hash || '') !== String(root.dataset.planHash || '')) {
+                if (String(progress.plan_hash || '') !== confirmedHash) {
                     throw new Error('A production plan hash changed before batch approval. Reload the current plans.');
                 }
                 approvals.push({
@@ -570,6 +570,9 @@
         if (progress.plan_hash) root.dataset.planHash = progress.plan_hash;
         root.dataset.candidateGenerationStatus = candidateStatus;
         root.dataset.candidateGenerationPhase = candidatePhase;
+        if (Number(root.dataset.progressFailures) > 0 && !progress.generation_error) {
+            setStatus(root, '');
+        }
         root.dataset.progressFailures = '0';
         showGenerationError(root, progress.generation_error || null);
     }
@@ -584,13 +587,17 @@
         if (retry) retry.classList.toggle('hidden', !error?.retry_allowed);
         field(root, 'automatic-progress-help')?.classList.toggle('hidden', Boolean(error));
         if (error) {
+            const heading = field(root, 'generation-error-heading');
+            if (heading) heading.textContent = error.status_unavailable
+                ? 'Video status unavailable'
+                : 'Video generation needs attention';
             const stage = field(root, 'stage');
-            if (stage) stage.textContent = 'Generation stopped';
+            if (stage) stage.textContent = error.status_unavailable ? 'Status unavailable' : 'Generation stopped';
             const progressMessage = field(root, 'progress-message');
             if (progressMessage) progressMessage.textContent = error.message;
             ['generated', 'verified'].forEach((kind) => setStatStatus(
                 field(root, `${kind}-status`), field(root, `${kind}-spinner`),
-                {text: 'Needs attention', tone: 'attention', loading: false},
+                {text: error.status_unavailable ? 'Status unavailable' : 'Needs attention', tone: 'attention', loading: false},
             ));
             stopPolling(root);
             root.setAttribute('aria-busy', 'false');
@@ -608,6 +615,7 @@
         if (failures >= 3) {
             showGenerationError(root, {
                 message: 'The connection failed while checking this video. Automatic status checks have stopped. Check status again before retrying generation; saved work is preserved.',
+                status_unavailable: true,
                 retry_allowed: false,
             });
         }
@@ -888,7 +896,7 @@
         return status;
     }
 
-    async function pollProgress(root, {settleCandidateTerminals = true} = {}) {
+    async function pollProgress(root, {settleCandidateTerminals = true, pollState = null} = {}) {
         const terminalWithoutImageRecovery = (
             ['completed', 'failed'].includes(root.dataset.stage)
             && root.dataset.waitingForCandidates !== 'true'
@@ -904,7 +912,7 @@
                 stopPolling(root);
                 return null;
             }
-            if (!progress) return null;
+            if (!progress || (pollState && activePolls.get(root) !== pollState)) return null;
             updateProgress(root, progress);
             if (progress.generation_error) return progress;
             const managesSceneImage = hasSceneImageSurface(root);
@@ -926,7 +934,10 @@
             }
             return progress;
         } catch (error) {
-            if (root.dataset.stage !== 'not_started') recordProgressFailure(root);
+            // Action reconciliation can await the same GET. Only the poller
+            // owns the automatic failure budget for that request.
+            if (root.isConnected && pollState && activePolls.get(root) === pollState
+                && root.dataset.stage !== 'not_started') recordProgressFailure(root);
             return null;
         }
     }
@@ -949,22 +960,28 @@
     }
 
     function stopPolling(root) {
-        const timer = activePolls.get(root);
-        if (!timer) return;
-        window.clearInterval(timer);
+        const state = activePolls.get(root);
+        if (state) window.clearTimeout(state.timer);
         activePolls.delete(root);
     }
 
     function startPolling(root, force = false, immediate = true) {
-        if (root.dataset.generationBlocked === 'true') return;
+        if (root.dataset.generationBlocked === 'true') return false;
         if (activePolls.has(root)) {
-            if (!force) return;
+            if (!force) return true;
             stopPolling(root);
         }
-        if (!force && ['not_started', 'awaiting_reference_approval', 'awaiting_paid_approval', 'retry_approval_required', 'completed', 'failed'].includes(root.dataset.stage)) return;
-        const timer = window.setInterval(() => pollProgress(root), force ? 2000 : 8000);
-        activePolls.set(root, timer);
-        if (immediate) pollProgress(root);
+        if (!force && ['not_started', 'awaiting_reference_approval', 'awaiting_paid_approval', 'retry_approval_required', 'completed', 'failed'].includes(root.dataset.stage)) return false;
+        const delay = force ? 2000 : 8000;
+        const state = {timer: null};
+        const check = async () => {
+            await pollProgress(root, {pollState: state});
+            if (activePolls.get(root) === state) state.timer = window.setTimeout(check, delay);
+        };
+        activePolls.set(root, state);
+        if (immediate) void check();
+        else state.timer = window.setTimeout(check, delay);
+        return true;
     }
 
     function reloadWhenProductionSettled(root) {
@@ -1266,43 +1283,52 @@
         action(root, 'approve-plan')?.addEventListener('click', (event) => {
             const button = event.currentTarget;
             if (!exactCostConfirmation(button, 'the initial plan')) return;
-            runAction(root, button, 'approve', {plan_hash: root.dataset.planHash, expected_revision: revision(), reason: null}, 'Persisting paid-plan approval…');
+            runAction(root, button, 'approve', {plan_hash: button.dataset.planHash, expected_revision: revision(), reason: null}, 'Persisting paid-plan approval…');
         });
         action(root, 'approve-retry')?.addEventListener('click', (event) => {
             const button = event.currentTarget;
             if (!exactCostConfirmation(button, 'only the failed takes')) return;
             const failed = (button.dataset.failedIndexes || '').split(',').filter(Boolean).map(Number);
-            runAction(root, button, 'retry-approve', {plan_hash: root.dataset.planHash, expected_revision: revision(), failed_take_indexes: failed, reason: null}, 'Persisting failed-take retry approval…');
+            runAction(root, button, 'retry-approve', {plan_hash: button.dataset.planHash, expected_revision: revision(), failed_take_indexes: failed, reason: null}, 'Persisting failed-take retry approval…');
         });
         action(root, 'retry-generation-status')?.addEventListener('click', async (event) => {
             const button = event.currentTarget;
-            button.disabled = true;
+            const feedback = window.beginActionFeedback(button, 'Checking status…');
             try {
                 const progress = await fetchCurrentProgress(root);
                 if (!progress) return;
                 updateProgress(root, progress);
                 if (!progress.generation_error) {
                     setStatus(root, 'Status refreshed.');
-                    startPolling(root);
+                    if (['retry_approval_required', 'completed', 'failed'].includes(progress.stage)) {
+                        reloadWhenProductionSettled(root);
+                    } else {
+                        startPolling(root, false, false);
+                    }
                 }
             } catch (_error) {
-                showGenerationError(root, {message: 'The video status is still unavailable. Check your connection and try again.', retry_allowed: false});
-            } finally { button.disabled = false; }
+                showGenerationError(root, {message: 'The video status is still unavailable. Check your connection and try again.', status_unavailable: true, retry_allowed: false});
+            } finally {
+                window.endActionFeedback(button, feedback);
+            }
         });
         action(root, 'retry-generation')?.addEventListener('click', async (event) => {
             const button = event.currentTarget;
-            button.disabled = true;
+            const feedback = window.beginActionFeedback(button, 'Retrying video generation…');
             try {
                 const progress = await fetchCurrentProgress(root);
+                if (!progress) return;
                 updateProgress(root, progress);
-                if (!progress?.generation_error?.retry_allowed) return;
+                if (!progress.generation_error?.retry_allowed) return;
                 await requestJson(`/semantic-videos/posts/${encodeURIComponent(root.dataset.postId)}/generation-retry`, {
                     method: 'POST', body: JSON.stringify({expected_revision: progress.revision, plan_hash: progress.plan_hash}),
                 });
                 reloadAtWorkflow(root);
             } catch (_error) {
-                showGenerationError(root, {message: 'Could not confirm the retry. Check status again before retrying; another request has not been sent automatically.', retry_allowed: false});
-            } finally { button.disabled = false; }
+                showGenerationError(root, {message: 'Could not confirm the retry. Check status again before retrying; another request has not been sent automatically.', status_unavailable: true, retry_allowed: false});
+            } finally {
+                window.endActionFeedback(button, feedback);
+            }
         });
         action(root, 'resume-qa')?.addEventListener('click', (event) => {
             runAction(root, event.currentTarget, 'qa-resume', {
@@ -1310,9 +1336,10 @@
                 expected_revision: revision(),
             }, 'Continuing with the existing generated videos at no additional Veo cost…');
         });
-        recoverCandidateProgress(root);
-        hydrateRunProgress(root);
-        startPolling(root);
+        if (!startPolling(root)) {
+            recoverCandidateProgress(root);
+            hydrateRunProgress(root);
+        }
         startOptionalQA(root);
     }
 

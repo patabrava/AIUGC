@@ -156,12 +156,12 @@
             </div>
 
             <section class="mt-3 rounded-xl border border-red-300 bg-red-50 p-4{% if not item.generation_error %} hidden{% endif %}" data-field="generation-error" role="alert" aria-live="assertive">
-                <h3 class="font-bold text-red-900">Video generation needs attention</h3>
+                <h3 class="font-bold text-red-900" data-field="generation-error-heading">Video generation needs attention</h3>
                 <p class="mt-2 text-sm text-red-900" data-field="generation-error-message">{{ item.generation_error.message if item.generation_error else '' }}</p>
                 <p class="mt-2 break-all text-xs text-red-900">Video ID: {{ item.post_id }}</p>
                 <div class="mt-3 flex flex-wrap gap-3">
                     <button type="button" data-action="retry-generation" class="rounded-lg bg-[#006AAB] px-4 py-2 text-sm font-bold text-white disabled:opacity-50{% if not item.generation_error or not item.generation_error.retry_allowed %} hidden{% endif %}">Retry video generation</button>
-                    <button type="button" data-action="retry-generation-status" class="rounded-lg border border-red-300 px-4 py-2 text-sm font-bold text-red-900">Check status again</button>
+                    <button type="button" data-action="retry-generation-status" class="rounded-lg border border-red-300 px-4 py-2 text-sm font-bold text-red-900 disabled:opacity-50">Check status again</button>
                 </div>
             </section>
 
@@ -387,7 +387,7 @@
             {% elif semantic_step == 'plan' %}
             <div class="mt-5 flex flex-wrap gap-2">
                 <button type="button" class="rounded-xl border border-[#006AAB] px-4 py-2 text-sm font-bold text-[#006AAB] disabled:cursor-not-allowed disabled:opacity-40" data-action="create-plan" {% if semantic_locked or item.stage != 'awaiting_paid_approval' or not item.master_hash_is_current or item.plan_hash %}disabled{% endif %}>Continue: Build free Veo plan</button>
-                <button type="button" class="rounded-xl bg-[#006AAB] px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-plan" data-cost-usd="{{ item.estimated_cost_usd }}" {% if semantic_locked or item.stage != 'awaiting_paid_approval' or not item.master_hash_is_current or not item.plan_hash %}disabled{% endif %}>Approve &amp; generate video · ${{ item.estimated_cost_usd }}</button>
+                <button type="button" class="rounded-xl bg-[#006AAB] px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-plan" data-plan-hash="{{ item.plan_hash }}" data-cost-usd="{{ item.estimated_cost_usd }}" {% if semantic_locked or item.stage != 'awaiting_paid_approval' or not item.master_hash_is_current or not item.plan_hash %}disabled{% endif %}>Approve &amp; generate video · ${{ item.estimated_cost_usd }}</button>
             </div>
             <section
                 class="mt-3 hidden rounded-xl border border-[#006AAB]/20 bg-[#F6FAFF] p-3"
@@ -467,14 +467,14 @@
                 {% endif %}
                 <button type="button" class="mt-3 rounded-xl bg-amber-700 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40" data-action="resume-qa" {% if not item.initial_plan_is_approved or not item.plan_hash %}disabled{% endif %}>{% if item.qa_resume_accept_as_is %}Accept generated video as-is{% else %}Continue with generated videos{% endif %} · $0.00</button>
                 {% if item.qa_resume_accept_as_is %}
-                <button type="button" class="mt-3 rounded-xl border border-amber-700 px-4 py-2 text-sm font-bold text-amber-900 disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-retry" data-cost-usd="{{ item.retry_estimated_cost_usd }}" data-failed-indexes="{{ item.failed_take_indexes | join(',') }}" {% if not item.initial_plan_is_approved or not item.plan_hash or not item.failed_take_indexes %}disabled{% endif %}>Regenerate failed take · ${{ item.retry_estimated_cost_usd }}</button>
+                <button type="button" class="mt-3 rounded-xl border border-amber-700 px-4 py-2 text-sm font-bold text-amber-900 disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-retry" data-cost-usd="{{ item.retry_estimated_cost_usd }}" data-plan-hash="{{ item.plan_hash }}" data-failed-indexes="{{ item.failed_take_indexes | join(',') }}" {% if not item.initial_plan_is_approved or not item.plan_hash or not item.failed_take_indexes %}disabled{% endif %}>Regenerate failed take · ${{ item.retry_estimated_cost_usd }}</button>
                 {% else %}
                 <button type="button" class="hidden" data-action="approve-retry" data-cost-usd="0.00" data-failed-indexes="" disabled aria-hidden="true">Approve failed-take retry</button>
                 {% endif %}
                 {% else %}
                 <p class="text-sm font-bold text-amber-950">Retry only failed takes: {% for take_index in item.failed_take_indexes %}{{ take_index + 1 }}{% if not loop.last %}, {% endif %}{% endfor %}</p>
                 <p class="mt-1 text-sm text-amber-900">{{ item.retry_provider_seconds }} provider seconds · incremental cost ${{ item.retry_estimated_cost_usd }}</p>
-                <button type="button" class="mt-3 rounded-xl bg-amber-700 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-retry" data-cost-usd="{{ item.retry_estimated_cost_usd }}" data-failed-indexes="{{ item.failed_take_indexes | join(',') }}" {% if not item.initial_plan_is_approved or not item.plan_hash or not item.failed_take_indexes %}disabled{% endif %}>Approve failed-take retry</button>
+                <button type="button" class="mt-3 rounded-xl bg-amber-700 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40" data-action="approve-retry" data-cost-usd="{{ item.retry_estimated_cost_usd }}" data-plan-hash="{{ item.plan_hash }}" data-failed-indexes="{{ item.failed_take_indexes | join(',') }}" {% if not item.initial_plan_is_approved or not item.plan_hash or not item.failed_take_indexes %}disabled{% endif %}>Approve failed-take retry</button>
                 {% endif %}
             </div>
             {% elif semantic_step in ['plan', 'production'] %}

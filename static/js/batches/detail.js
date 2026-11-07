@@ -200,7 +200,7 @@
         }, 3000);
     }
 
-    function scriptReviewErrorMessage(event) {
+    function scriptReviewErrorMessage(event, fallback = 'Approval failed') {
         try {
             const payload = JSON.parse(event.detail?.xhr?.responseText || '{}');
             if (payload?.message) return payload.message;
@@ -209,7 +209,7 @@
         } catch (_error) {
             // Fall through to the stable generic message.
         }
-        return 'Approval failed';
+        return fallback;
     }
 
     function syncSavedScript(card, data) {
@@ -224,7 +224,7 @@
     window.handleScriptSaveResponse = function (event, postId) {
         const card = scriptCard(postId);
         if (!event.detail?.successful) {
-            showScriptSaveStatus(card, scriptReviewErrorMessage(event), { error: true, persistent: true });
+            showScriptSaveStatus(card, scriptReviewErrorMessage(event, 'Save failed'), { error: true, persistent: true });
             return;
         }
         let data = {};
@@ -249,12 +249,7 @@
 
     window.handleScriptReviewResponse = function (event, postId) {
         const card = scriptCard(postId);
-        const approveButton = card?.querySelector('[data-script-approve]');
         if (!event.detail?.successful) {
-            if (approveButton) {
-                approveButton.disabled = false;
-                approveButton.textContent = 'Approve script';
-            }
             showScriptSaveStatus(card, scriptReviewErrorMessage(event), {
                 error: true,
                 persistent: true,
@@ -291,23 +286,16 @@
     };
 
     window.handleScriptReviewStart = function (postId) {
-        const card = scriptCard(postId);
-        const approveButton = card?.querySelector('[data-script-approve]');
-        if (!approveButton) return;
-        approveButton.disabled = true;
-        approveButton.textContent = 'Approving…';
-        showScriptSaveStatus(card, 'Saving approval…');
+        showScriptSaveStatus(scriptCard(postId), 'Saving approval…', {persistent: true});
     };
 
     window.handleScriptRemovalResponse = function (event, postId) {
         const card = scriptCard(postId);
-        const removeButton = card?.querySelector('[data-script-remove]');
         if (!event.detail?.successful) {
-            if (removeButton) {
-                removeButton.disabled = false;
-                removeButton.textContent = 'Remove script';
-            }
-            showScriptSaveStatus(card, 'Removal failed');
+            showScriptSaveStatus(card, scriptReviewErrorMessage(event, 'Removal failed'), {
+                error: true,
+                persistent: true,
+            });
             return;
         }
         let data = {};
@@ -328,12 +316,7 @@
     };
 
     window.handleScriptRemovalStart = function (postId) {
-        const card = scriptCard(postId);
-        const removeButton = card?.querySelector('[data-script-remove]');
-        if (!removeButton) return;
-        removeButton.disabled = true;
-        removeButton.textContent = 'Removing…';
-        showScriptSaveStatus(card, 'Removing script…');
+        showScriptSaveStatus(scriptCard(postId), 'Removing script…', {persistent: true});
     };
 
     document.body.addEventListener('htmx:responseError', async (event) => {
@@ -341,6 +324,11 @@
         const target = event.detail?.target;
         if (!root || !target || !root.contains(target)) {
             return;
+        }
+        const trigger = event.detail?.elt;
+        if (trigger?.matches('[data-script-approve], [data-script-remove], form[id^="script-form-"]')
+            && trigger.closest('[data-script-review-status]')?.querySelector('[data-script-save-status]')) {
+            return; // The card announces the error beside its controls.
         }
         const xhr = event.detail.xhr;
         if (!xhr || !xhr.responseURL?.includes('/posts/')) {
@@ -1429,11 +1417,10 @@
                     if (!response.ok) {
                         throw new Error(await window.extractApiError(response));
                     }
-                    this.successMessage = 'Social and blog schedules saved successfully.';
-                    setTimeout(() => window.location.reload(), 1500);
+                    this.successMessage = 'Schedules saved. Loading the updated calendar…';
+                    window.location.reload();
                 } catch (error) {
                     this.errorMessage = error.message || 'Failed to arm dispatch';
-                } finally {
                     this.saving = false;
                 }
             },

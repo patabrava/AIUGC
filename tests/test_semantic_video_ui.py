@@ -1561,7 +1561,7 @@ def test_semantic_script_review_card_counts_words_against_the_live_contract():
 def test_script_approval_keeps_the_server_correction_visible():
     source = open("static/js/batches/detail.js", encoding="utf-8").read()
 
-    assert "function scriptReviewErrorMessage(event)" in source
+    assert "function scriptReviewErrorMessage(event," in source
     assert "event.detail?.xhr?.responseText" in source
     assert "scriptReviewErrorMessage(event)" in source
     assert "persistent: true" in source

@@ -1,5 +1,13 @@
 # Architecture
 
+## Workflow load and action feedback (verified locally 2026-11-07)
+
+- `app/features/batches/handlers.py::get_batch_endpoint` keeps the synchronous batch view projection off the ASGI event loop. Before Publish, HTML skips live TikTok creator readiness on the render path. Publish HTML and JSON still receive it, and the Accounts hub requests its own status.
+- `_semantic_script_review_card.html` uses shared HTMX action feedback as the sole owner of the review buttons. `static/js/batches/detail.js` reports failures beside the controls and keeps review responses separate from the enclosing script save. Script save persistence still uses the existing handler. Offloading the full-row save without a same-post write fence can let a delayed save reset a final approval after the batch advances.
+- `static/js/batches/semantic_video.js` schedules the next automatic check after the current request settles. The current poller owns failure accounting when scene enqueue reconciliation shares a read. The three-failure stop describes status availability, and manual checks and safe retries show pending feedback. Paid approval reads compare against the plan hash rendered with the displayed price, including combined and failed-take approvals. The API retains its existing revision and transactional checks.
+- The publish calendar reloads immediately after the atomic schedule succeeds, keeping the button locked through navigation. Failure restores the action and preserves its alert.
+- Regression: 514 focused Python tests, six Node tests, and 12 Chromium scenarios passed across focused runs. `tests/test_workflow_responsiveness.py` checks route readiness and delayed projection concurrency. `tests/test_script_review_ui.cjs` checks schedule navigation and errors. `tests/test_semantic_video_optional_qa_browser.py` covers slow progress, shared scene status recovery, HTMX retry, exact-price approval fences, and optional QA playback. Browser tests use local API fixtures and opt in with `RUN_OPTIONAL_QA_BROWSER=1`. Bridgecode cycle `workflow-feedback-20261107` ended in terminal PASS after one correction. These results verify the local patch.
+
 ## Delivery before optional video QA (implemented locally 2026-11-06)
 
 - `workers/semantic_video_worker.py::ProductionStageRunner.run_stage` records visual/identity and voice gates as `passed=false,status=deferred` without invoking evaluators before delivery. `optional_qa.py::delivery_gate_satisfied` permits only explicitly marked deferred visual/voice gates in composition/upload/invalidation; transcript timing, acoustic/media checks and terminal-tail protection remain. Single-take advisory caption delivery also retains the deferral marker.

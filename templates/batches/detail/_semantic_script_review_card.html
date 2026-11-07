@@ -54,7 +54,7 @@
         class="mt-4 space-y-3"
         hx-put="/posts/{{ post.id }}/script"
         hx-swap="none"
-        hx-on::after-request="window.handleScriptSaveResponse(event, '{{ post.id }}')"
+        hx-on::after-request="if (event.detail.elt === this) { window.handleScriptSaveResponse(event, '{{ post.id }}'); }"
     >
         <label for="script-text-{{ post.id }}" class="block text-sm font-bold text-[#1C2740]">Spoken script</label>
         <div
@@ -166,6 +166,7 @@
             {% if review_status != 'approved' %}
             <button
                 data-script-approve
+                data-pending-label="Approving…"
                 type="button"
                 hx-put="/posts/{{ post.id }}/script-review"
                 hx-vals='{"action":"approved"}'
@@ -180,6 +181,7 @@
             {% endif %}
             <button
                 data-script-remove
+                data-pending-label="Removing…"
                 type="button"
                 hx-put="/posts/{{ post.id }}/script-review"
                 hx-vals='{"action":"removed"}'

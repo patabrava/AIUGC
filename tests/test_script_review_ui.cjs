@@ -53,3 +53,45 @@ test('failed saves display the server error', () => {
     assert.equal(e.status.textContent, 'Save failed: invalid presenter format.');
     assert.equal(e.input.value, 'My unsaved text');
 });
+
+test('confirmed schedules navigate immediately and keep the action locked', async () => {
+    const {component, navigate, resolve} = scheduleAction();
+    const request = component.armDispatch();
+    assert.equal(component.saving, true);
+    resolve({ok: true});
+    await request;
+    assert.equal(navigate.count, 1);
+    assert.equal(component.saving, true);
+    assert.match(component.successMessage, /Schedules saved/);
+});
+
+test('failed schedules announce the error and release the action', async () => {
+    const {component, navigate, resolve} = scheduleAction();
+    const request = component.armDispatch();
+    resolve({ok: false, json: async () => ({message: 'This slot is no longer available.'})});
+    await request;
+    assert.equal(navigate.count, 0);
+    assert.equal(component.saving, false);
+    assert.equal(component.errorMessage, 'This slot is no longer available.');
+});
+
+function scheduleAction() {
+    const navigate = {count: 0};
+    const window = {location: {reload() { navigate.count++; }}};
+    let resolve;
+    const response = new Promise((accept) => { resolve = accept; });
+    vm.runInNewContext(readFileSync('static/js/batches/detail.js', 'utf8'), {
+        window, document: {body: {addEventListener() {}}}, fetch() { return response; },
+    });
+    const component = {
+        armDispatch: window.batchPublishComponent().armDispatch,
+        canArm: true,
+        batchId: 'batch-1',
+        calendarWeekStartISO: () => '2026-11-09',
+        timezone: 'Europe/Berlin',
+        slots: [],
+        networks: ['instagram'],
+        posts: [],
+    };
+    return {component, navigate, resolve};
+}
